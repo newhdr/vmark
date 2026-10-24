@@ -5,6 +5,7 @@
 
 use super::test_support::*;
 use crate::agent_journal::ids::DocId;
+use crate::agent_journal::journal_file::{SyncPolicy, JOURNAL_FILE};
 use crate::agent_journal::projection::TxnStatus;
 use crate::agent_journal::review::{HunkKind, RestoreSource, ReviewEffects, ReviewOp};
 use crate::agent_journal::writer::{CommitRequest, Writer};
@@ -361,7 +362,7 @@ fn restart_projection_equals_live_projection() {
 }
 
 #[test]
-fn a_future_format_record_makes_the_journal_read_only() {
+fn a_future_format_record_refuses_the_open_and_appends_nothing() {
     let dir = tmp();
     let doc = DocId::new();
     {
@@ -381,13 +382,13 @@ fn a_future_format_record_makes_the_journal_read_only() {
         w.debug_append_raw(&serde_json::to_vec(&v).unwrap())
             .unwrap();
     }
-    let (w, report) = reopen(dir.path());
-    assert_eq!(report.future_records, 1);
-    let err = w
-        .prepare(prepare_req(doc, w.head(doc), "a", ReviewOp::Review))
-        .unwrap_err();
+    let path = dir.path().join(JOURNAL_FILE);
+    let before = std::fs::read(&path).unwrap();
+    let err = Writer::open(config(dir.path(), SyncPolicy::Full).0)
+        .err()
+        .expect("a newer record turns the journal off");
     assert_eq!(err.code(), "JOURNAL_FUTURE_FORMAT");
-    assert!(w.head(doc).is_some(), "what it can read is still projected");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "nothing appended");
 }
 
 #[test]

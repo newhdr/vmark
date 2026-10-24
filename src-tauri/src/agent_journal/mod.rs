@@ -98,6 +98,7 @@ pub mod review;
 pub mod review_matrix;
 pub mod review_rules;
 pub mod review_slots;
+mod schema_table;
 pub mod service;
 pub mod service_gc;
 pub mod service_identity;

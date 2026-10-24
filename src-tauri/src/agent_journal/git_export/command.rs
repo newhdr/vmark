@@ -20,7 +20,7 @@ use super::names::branch_name;
 use super::state::ExportState;
 use crate::agent_journal::commands::run;
 use crate::agent_journal::controller::decode;
-use crate::agent_journal::refusal::{refusal, unavailable};
+use crate::agent_journal::refusal::refusal;
 use crate::agent_journal::service::AgentJournalState;
 use crate::command_error::CommandError;
 
@@ -43,7 +43,7 @@ pub async fn agent_journal_git_export(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
 ) -> Result<ExportReport, CommandError> {
-    let dir = state.journal_dir().ok_or_else(unavailable)?;
+    let dir = state.journal_dir().ok_or_else(|| state.off_refusal())?;
     let exports = state.git_exports.clone();
     run(&state, move |c| {
         let req: ExportRequest = decode(&payload)?;

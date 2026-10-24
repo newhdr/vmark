@@ -1,0 +1,63 @@
+// WI-AL2.0s — the per-version table: a kind labelled below its version is corrupt, the writer labels each record with its minimum (never below v2), and a v3 label on a v2 kind decodes
+//! The per-version record table (R35).
+//!
+//! Edge cases: a v1 label on a v2 kind (refused by `check` directly, since
+//! `codec_v1` would refuse it earlier in a real decode); a label above the
+//! kind's minimum (accepted); a label one past the reader's maximum
+//! (`Future`, never `Corrupt`).
+
+use super::{check, label, min_schema};
+use crate::agent_journal::codec::{self, Decoded};
+use crate::agent_journal::ids::{DocId, TxnId};
+use crate::agent_journal::record::{Envelope, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V2};
+
+fn env(version: u32, record: Record) -> Envelope {
+    Envelope {
+        schema_version: version,
+        seq: 1,
+        txn: TxnId::new(),
+        at: 0,
+        record,
+    }
+}
+
+fn armed() -> Record {
+    Record::EpochArmed {
+        doc: DocId::new(),
+        epoch: 1,
+    }
+}
+
+#[test]
+fn a_v2_kind_labelled_v1_is_corrupt() {
+    let err = check(&env(SCHEMA_V1, armed())).unwrap_err();
+    assert_eq!(err.code(), "JOURNAL_CORRUPT", "{err}");
+}
+
+#[test]
+fn a_kind_at_or_above_its_minimum_passes() {
+    for v in [SCHEMA_V2, MAX_SUPPORTED_SCHEMA] {
+        check(&env(v, armed())).unwrap();
+        check(&env(v, Record::Uncommitted)).unwrap();
+    }
+    check(&env(SCHEMA_V1, Record::Uncommitted)).unwrap();
+}
+
+#[test]
+fn the_writer_labels_every_current_kind_v2() {
+    assert_eq!(min_schema(&Record::Uncommitted), SCHEMA_V1);
+    assert_eq!(label(&Record::Uncommitted), SCHEMA_V2);
+    assert_eq!(min_schema(&armed()), SCHEMA_V2);
+    assert_eq!(label(&armed()), SCHEMA_V2);
+}
+
+#[test]
+fn a_v3_label_on_a_v2_kind_decodes_and_one_past_the_maximum_is_future() {
+    let at_max = codec::encode(&env(MAX_SUPPORTED_SCHEMA, armed()));
+    assert!(matches!(codec::decode(&at_max).unwrap(), Decoded::Known(_)));
+    let past = codec::encode(&env(MAX_SUPPORTED_SCHEMA + 1, armed()));
+    assert!(matches!(
+        codec::decode(&past).unwrap(),
+        Decoded::Future { version, .. } if version == MAX_SUPPORTED_SCHEMA + 1
+    ));
+}

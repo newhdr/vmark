@@ -106,7 +106,6 @@ impl Writer {
     ) -> Result<ObserveOutcome, TxnError> {
         req.actor.validate().map_err(TxnError::InvalidRequest)?;
         req.initiator.validate().map_err(TxnError::InvalidRequest)?;
-        g.writable()?;
         let doc = req.doc;
         let (observed_parent, observed_preimage) = resolve_base(g, doc, req.observed_parent)?;
         if let Some(payload) = &req.provenance {

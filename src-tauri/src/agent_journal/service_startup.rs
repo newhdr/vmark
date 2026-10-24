@@ -29,7 +29,7 @@ fn spawn_startup_with<R: tauri::Runtime>(
     let job: StartupJob = Box::new(move || {
         let app = handle;
         let outcome = crate::app_paths::app_data_dir(&app)
-            .map_err(|e| format!("JOURNAL_IO: no app-data directory: {e}"))
+            .map_err(|e| format!("JOURNAL_IO: no app-data directory: {e}").into())
             .and_then(|dir| start(&dir));
         match &outcome {
             Ok(s) => {
@@ -54,7 +54,7 @@ fn spawn_startup_with<R: tauri::Runtime>(
         let error = format!("JOURNAL_IO: cannot start its thread: {e}");
         log::error!("agent journal: {error}");
         match app.try_state::<AgentJournalState>() {
-            Some(state) => state.finish(Err(error)),
+            Some(state) => state.finish(Err(error.into())),
             None => log::error!("agent journal: state is not managed; journal unavailable"),
         }
     }

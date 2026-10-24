@@ -24,8 +24,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{RevisionId, TxnId};
 use crate::agent_journal::projection::{Projection, RevisionKind, RevisionMeta, TxnStatus};
-use crate::agent_journal::record::{Envelope, Record, SCHEMA_VERSION};
+use crate::agent_journal::record::{Envelope, Record};
 use crate::agent_journal::review::{ReviewEffects, ReviewOp};
+use crate::agent_journal::schema_table;
 
 /// The revision a record creates, if it is a revision record.
 pub fn revision_of(p: &Projection, env: &Envelope) -> Option<RevisionId> {
@@ -41,14 +42,15 @@ pub fn revision_of(p: &Projection, env: &Envelope) -> Option<RevisionId> {
 /// The record that opens a rewritten journal: one generation past the
 /// live one.
 pub fn header(floor: u64) -> Envelope {
+    let record = Record::JournalHeader {
+        generation_floor: floor,
+    };
     Envelope {
-        schema_version: SCHEMA_VERSION,
+        schema_version: schema_table::label(&record),
         seq: floor,
         txn: TxnId(uuid::Uuid::nil()),
         at: 0,
-        record: Record::JournalHeader {
-            generation_floor: floor,
-        },
+        record,
     }
 }
 
@@ -141,23 +143,24 @@ fn tombstone(m: &RevisionMeta, env: &Envelope, effects: &ReviewEffects) -> Envel
         ReviewOp::HunkRevert { hunk_id, .. } => Some(hunk_id.clone()),
         _ => None,
     };
+    let record = Record::Tombstone {
+        doc: m.doc,
+        revision: m.id,
+        parent: m.parent,
+        actor: m.actor.clone(),
+        preimage: m.preimage.clone(),
+        postimage: m.postimage.clone(),
+        review_op: m.review_op.clone(),
+        hunks: effects.new_hunks.clone(),
+        transitions: effects.transitions.clone(),
+        attached_to,
+    };
     Envelope {
-        schema_version: SCHEMA_VERSION,
+        schema_version: schema_table::label(&record),
         seq: env.seq,
         txn: env.txn,
         at: env.at,
-        record: Record::Tombstone {
-            doc: m.doc,
-            revision: m.id,
-            parent: m.parent,
-            actor: m.actor.clone(),
-            preimage: m.preimage.clone(),
-            postimage: m.postimage.clone(),
-            review_op: m.review_op.clone(),
-            hunks: effects.new_hunks.clone(),
-            transitions: effects.transitions.clone(),
-            attached_to,
-        },
+        record,
     }
 }
 

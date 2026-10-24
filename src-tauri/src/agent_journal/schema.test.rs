@@ -367,10 +367,11 @@ fn golden_wire_shapes() {
 #[test]
 fn decoder_reports_future_versions_instead_of_dropping_them() {
     let mut v = serde_json::to_value(env(Record::Uncommitted)).unwrap();
-    v["schemaVersion"] = 3.into();
+    let next = crate::agent_journal::record::MAX_SUPPORTED_SCHEMA + 1;
+    v["schemaVersion"] = next.into();
     v["record"] = serde_json::json!({"kind": "somethingNew", "x": 1});
     match decode(serde_json::to_vec(&v).unwrap().as_slice()).unwrap() {
-        Decoded::Future { version, seq } => assert_eq!((version, seq), (3, 7)),
+        Decoded::Future { version, seq } => assert_eq!((version, seq), (next, 7)),
         other => panic!("{other:?}"),
     }
 }

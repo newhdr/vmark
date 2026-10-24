@@ -71,7 +71,7 @@ impl Writer {
     /// failure left owing. See the module docs.
     ///
     /// # Errors
-    /// The writer is read-only or degraded, the journal cannot be read or
+    /// The writer is corrupt or degraded, the journal cannot be read or
     /// rewritten, a reachable blob is missing (`Corrupt`), or the rewrite
     /// would not replay to the expected state.
     pub fn forget_legacy(&self, ids: &[String]) -> Result<ForgetReport, TxnError> {

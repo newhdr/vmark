@@ -5,7 +5,7 @@
 //! were tombstoned, every cap warning (at 80% of a cap, or over it with
 //! only pinned records left), why the pass deferred, and why it could not
 //! run. Each warning is logged, so a journal held over its cap by pins is
-//! visible without the webview. A pass that cannot run (a read-only or
+//! visible without the webview. A pass that cannot run (a corrupt or
 //! degraded journal, an unreadable file) is an error in the summary, never
 //! a startup failure: the journal still serves without collecting. A pass
 //! that finds the journal corrupt (a reachable text the pack lost) leaves

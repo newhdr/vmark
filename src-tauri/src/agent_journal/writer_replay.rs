@@ -9,6 +9,11 @@
 //! partial hardening, not a memory bound: there is no cap on a frame (a
 //! valid record's strings have none), decoding allocates without this
 //! check, and an overcommitting OS (macOS) can still end the process.
+//!
+//! A record newer than the reader stops replay as `FUTURE_FORMAT` at that
+//! frame: the scan then neither truncates a torn tail nor completes the
+//! projection, and the writer is never built, so nothing is repaired or
+//! appended on top of a history this build cannot read.
 
 use crate::agent_journal::codec::{self, Decoded};
 use crate::agent_journal::errors::TxnError;
@@ -16,12 +21,9 @@ use crate::agent_journal::faults::Faults;
 use crate::agent_journal::frame::FrameSink;
 use crate::agent_journal::projection::Projection;
 
-/// What replay built: the projection, plus the records too new to read.
+/// What replay built: the projection.
 pub(super) struct Replay {
     pub proj: Projection,
-    /// The highest unreadable schema version seen, if any.
-    pub future: Option<u32>,
-    pub future_records: usize,
     max: u32,
     /// Test-injected allocator refusal past this many buffered bytes.
     reserve_cap: Option<usize>,
@@ -35,8 +37,6 @@ impl Replay {
     pub fn new(max: u32, faults: &Faults) -> Self {
         Replay {
             proj: Projection::default(),
-            future: None,
-            future_records: 0,
             max,
             reserve_cap: faults.replay_reserve_cap(),
             cur: Vec::new(),
@@ -75,11 +75,7 @@ impl Replay {
     fn fold(&mut self, payload: &[u8]) -> Result<(), TxnError> {
         match codec::decode_with_max(payload, self.max)? {
             Decoded::Known(env) => self.proj.apply(&env),
-            Decoded::Future { version, .. } => {
-                self.future_records += 1;
-                self.future = Some(self.future.map_or(version, |v| v.max(version)));
-                Ok(())
-            }
+            Decoded::Future { version, .. } => Err(TxnError::FutureFormat { version }),
         }
     }
 }
@@ -113,3 +109,7 @@ impl FrameSink for Replay {
 #[cfg(test)]
 #[path = "writer_replay.test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "future_format.test.rs"]
+mod future_format;

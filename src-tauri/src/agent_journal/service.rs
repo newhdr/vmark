@@ -10,7 +10,8 @@
 //!     own journal; never beside a user's document.
 //!   - The outcome is set once. A failed open leaves no writer at all — the
 //!     journal is off for the session and the status says why — rather than
-//!     a writer over a history it could not read.
+//!     a writer over a history it could not read. A journal a newer build
+//!     wrote is off the same way, for every document (`service_off`).
 //!   - A failed legacy import does not stop the journal: the original log is
 //!     untouched, the next start retries, and the status carries the error.
 //!   - A verified import retires the log (`retire_legacy`): moved aside, never
@@ -35,7 +36,6 @@ use crate::agent_journal::capture::{docs_with_pending, linearize_all_pending};
 use crate::agent_journal::controller::Controller;
 use crate::agent_journal::degraded_drain::DrainScheduler;
 use crate::agent_journal::doc_registry::DocRegistry;
-use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::generation_events::{LiveUpdates, LiveUpdatesCell};
 use crate::agent_journal::journal_file::{create_dir_durable, SyncPolicy};
 use crate::agent_journal::legacy_import::{
@@ -64,32 +64,29 @@ pub struct Started {
     pub gc: GcSummary,
 }
 
-fn describe(e: &TxnError) -> String {
-    format!("{}: {e}", e.code())
-}
-
 /// Open (creating) the journal under `app_data`, then import the legacy
 /// checkpoint log beside it.
 ///
 /// # Errors
 /// `CODE: message` when the directory cannot be prepared or the journal
-/// cannot be recovered.
-pub fn start(app_data: &Path) -> Result<Started, String> {
+/// cannot be recovered; typed when a newer build wrote it (`service_off`).
+pub fn start(app_data: &Path) -> Result<Started, StartFailure> {
     let dir = app_data.join(JOURNAL_DIR);
-    private_dir(&dir).map_err(|e| describe(&e.into()))?;
+    private_dir(&dir).map_err(|e| StartFailure::open(&e.into()))?;
     let cfg = WriterConfig {
         dir: dir.clone(),
         sync: SyncPolicy::Full,
         faults: Arc::default(),
     };
-    let (writer, open) = Writer::open(cfg).map_err(|e| describe(&e))?;
+    let (writer, open) = Writer::open(cfg).map_err(|e| StartFailure::open(&e))?;
     // Saves captured before a crash, still pending, land in order now.
     let linearized = linearize_all_pending(&writer);
     if linearized > 0 {
         log::info!("agent journal: linearized {linearized} pending save(s) at startup");
     }
     let legacy_path = app_data.join(LEGACY_CHECKPOINT_FILE);
-    let legacy = import_legacy_file(&writer, &legacy_path).map_err(|e| describe(&e));
+    let legacy =
+        import_legacy_file(&writer, &legacy_path).map_err(|e| format!("{}: {e}", e.code()));
     // No frontend writes the log any more (checkpoints go to the journal),
     // so a verified import is the whole file.
     let retirement = retire_legacy(&legacy_path, &legacy);
@@ -133,7 +130,7 @@ pub struct AgentJournalStatus {
     /// Decimal string: generations cross into JavaScript as strings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generation: Option<String>,
-    /// Written by a newer build; nothing will be appended.
+    /// Written by a newer build: the journal is off (phase `failed`).
     pub read_only: bool,
     /// An ambiguous write failure stopped controlled mutations until
     /// restart, or a document's degraded queue holds a record not yet durable.
@@ -164,7 +161,7 @@ pub struct AgentJournalStatus {
 pub struct AgentJournalState {
     /// Taken by the first `finish`, before the outcome is published.
     finishing: OnceLock<()>,
-    outcome: OnceLock<Result<Started, String>>,
+    outcome: OnceLock<Result<Started, StartFailure>>,
     pub(super) docs: Arc<DocRegistry>,
     /// The identity index's attach: `Err` (why) when identity is disabled.
     pub(super) identity: OnceLock<Result<(), String>>,
@@ -182,7 +179,7 @@ impl AgentJournalState {
     /// moment the controller exists must get its durable document, never a
     /// session one the attach then discards. Documents whose pending saves
     /// startup could not linearize go to the background retry.
-    pub fn finish(&self, outcome: Result<Started, String>) {
+    pub fn finish(&self, outcome: Result<Started, StartFailure>) {
         if self.finishing.set(()).is_err() {
             return;
         }
@@ -250,16 +247,13 @@ impl AgentJournalState {
                 status.phase = Phase::Failed;
                 // No writer, so no forwarder: nothing will ever be live.
                 status.live_updates = LiveUpdates::Failed;
-                status.error = Some(e.clone());
+                status.error = Some(e.message().to_string());
+                status.read_only = e.is_future_format();
             }
             Some(Ok(s)) => {
                 status.phase = Phase::Ready;
                 status.generation = Some(s.writer.generation().to_string());
-                match s.writer.health() {
-                    Err(TxnError::FutureFormat { .. }) => status.read_only = true,
-                    Err(_) => status.degraded = true,
-                    Ok(()) => status.degraded = s.writer.any_degraded_queue(),
-                }
+                status.degraded = s.writer.health().is_err() || s.writer.any_degraded_queue();
                 status.truncated_tail_bytes = s.open.truncated_tail_bytes;
                 status.uncommitted_at_start = s.open.uncommitted.len();
                 status.retirement = Some(s.retirement.clone());
@@ -294,6 +288,9 @@ pub fn release_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>, label:
     }
 }
 
+#[path = "service_off.rs"]
+mod off;
+pub use off::StartFailure;
 #[path = "service_startup.rs"]
 mod startup;
 pub use startup::spawn_startup;

@@ -225,7 +225,7 @@ mod forwarder_start {
     #[test]
     fn a_journal_that_failed_to_start_has_no_live_updates() {
         let state = AgentJournalState::default();
-        state.finish(Err("JOURNAL_IO: denied".into()));
+        state.finish(Err("JOURNAL_IO: denied".to_string().into()));
         let v = serde_json::to_value(state.status()).unwrap();
         assert_eq!(v["liveUpdates"], "failed");
     }

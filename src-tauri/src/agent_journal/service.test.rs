@@ -79,7 +79,7 @@ fn a_journal_directory_that_cannot_be_created_fails_startup() {
     let app_data = tmp();
     std::fs::write(app_data.path().join(JOURNAL_DIR), "a file, not a directory").unwrap();
     let err = start(app_data.path()).err().expect("startup refused");
-    assert!(err.starts_with("JOURNAL_IO"), "{err}");
+    assert!(err.message().starts_with("JOURNAL_IO"), "{err}");
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn the_status_moves_from_starting_to_ready_with_the_generation_as_a_string() {
 #[test]
 fn a_failed_start_is_visible_in_the_status_and_finish_is_once_only() {
     let state = AgentJournalState::default();
-    state.finish(Err("JOURNAL_IO: denied".into()));
+    state.finish(Err("JOURNAL_IO: denied".to_string().into()));
     let status = state.status();
     assert_eq!(status.phase, Phase::Failed);
     assert_eq!(status.error.as_deref(), Some("JOURNAL_IO: denied"));

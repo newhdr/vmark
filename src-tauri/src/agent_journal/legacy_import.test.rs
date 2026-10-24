@@ -191,19 +191,19 @@ fn a_crash_mid_migration_is_repaired_by_the_next_run_without_duplicates() {
 }
 
 #[test]
-fn a_read_only_future_journal_refuses_the_import_and_keeps_the_file() {
+fn a_future_journal_stops_startup_before_the_import_and_keeps_the_file() {
+    use crate::agent_journal::service::{start, JOURNAL_DIR};
     let data = tmp();
-    let journal = tmp();
     {
-        let (w, _) = open(journal.path());
-        let v = serde_json::json!({"schemaVersion": 3, "seq": "99", "txn": crate::agent_journal::ids::TxnId::new(), "at": 0, "record": {"kind": "fromTheFuture"}});
+        let (w, _) = open(&data.path().join(JOURNAL_DIR));
+        let next = crate::agent_journal::record::MAX_SUPPORTED_SCHEMA + 1;
+        let v = serde_json::json!({"schemaVersion": next, "seq": "99", "txn": crate::agent_journal::ids::TxnId::new(), "at": 0, "record": {"kind": "fromTheFuture"}});
         w.debug_append_raw(&serde_json::to_vec(&v).unwrap())
             .unwrap();
     }
-    let (w, _) = open(journal.path());
     let file = write_fixture(data.path(), FIXTURE);
-    let err = import_legacy_file(&w, &file).unwrap_err();
-    assert_eq!(err.code(), "JOURNAL_FUTURE_FORMAT");
+    let err = start(data.path()).err().expect("the journal stays off");
+    assert!(err.is_future_format(), "{err}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), FIXTURE);
 }
 

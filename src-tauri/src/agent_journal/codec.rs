@@ -1,10 +1,11 @@
 //! Versioned envelope decoder and the one-time legacy checkpoint migration.
 //!
 //! The decoder reads `schemaVersion` before anything else. A version above
-//! what the reader supports is returned as `Future` (never dropped): the
-//! writer then refuses to write on top of a history it cannot fully read,
-//! while still projecting what it can. An unknown `kind` is corruption, not
-//! an extension point.
+//! what the reader supports is returned as `Future` (never dropped): replay
+//! stops there and the journal stays off, untouched, rather than build or
+//! repair a history it cannot fully read. An unknown `kind` is corruption,
+//! not an extension point. A known kind labelled below its version
+//! (`schema_table`) is corruption too.
 //!
 //! A v1 record is upgraded conservatively (`v1`): its snapshot-era span
 //! fields are dropped and it carries no provenance, so `apply` blocks every
@@ -89,6 +90,7 @@ fn refuse_fields_on_unit_kinds(value: &serde_json::Value) -> Result<(), TxnError
 
 /// v2 invariants serde cannot express: a v2 commit always carries its map.
 fn check_shape(env: &Envelope) -> Result<(), TxnError> {
+    crate::agent_journal::schema_table::check(env)?;
     match &env.record {
         Record::Committed {
             provenance: None, ..

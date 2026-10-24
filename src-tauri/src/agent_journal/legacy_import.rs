@@ -80,7 +80,7 @@ pub enum RetireError {
 /// verify all of them against the journal. A missing file is an empty report.
 ///
 /// # Errors
-/// The writer's refusal (read-only future format, degraded) or an I/O
+/// The writer's refusal (degraded, corrupt) or an I/O
 /// failure reading the file or appending; records appended before the
 /// failure stay, and the next run continues from them. A log over
 /// [`LEGACY_MAX_BYTES`] is an I/O refusal.

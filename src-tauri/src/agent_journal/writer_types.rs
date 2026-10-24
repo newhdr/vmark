@@ -27,8 +27,6 @@ pub struct OpenReport {
     /// Transactions turned `uncommitted` by this startup.
     pub uncommitted: Vec<TxnId>,
     pub pending_observations: usize,
-    /// Records written by a newer build; non-zero makes the journal read-only.
-    pub future_records: usize,
     /// Epochs left armed by the last run, now recorded `epochUnclosed`.
     pub unclosed_epochs: Vec<(DocId, u64)>,
 }

@@ -12,7 +12,8 @@
 //!     surrogate escaped by `JSON.stringify` reaches the well-formed-text
 //!     check and is refused as `INVALID_TEXT` instead of being replaced.
 //!   - No journal (still starting, or failed to open) is a `conflict` with
-//!     `journalCode: JOURNAL_UNAVAILABLE`; the caller does not write.
+//!     `journalCode: JOURNAL_UNAVAILABLE`; the caller does not write. A
+//!     journal a newer build wrote refuses as `JOURNAL_FUTURE_FORMAT`.
 //!
 //! @module agent_journal/commands
 
@@ -20,7 +21,6 @@ use crate::agent_journal::capture::CaptureReply;
 use crate::agent_journal::controlled::{ControlledCommitted, ControlledPrepared};
 use crate::agent_journal::controller::{AbortReply, Controller, EpochReply};
 use crate::agent_journal::ids::DocId;
-use crate::agent_journal::refusal::unavailable;
 use crate::agent_journal::service::{AgentJournalState, AgentJournalStatus};
 use crate::command_error::CommandError;
 
@@ -42,7 +42,7 @@ pub(super) async fn run<T: Send + 'static>(
     state: &AgentJournalState,
     f: impl FnOnce(Controller) -> Result<T, CommandError> + Send + 'static,
 ) -> Result<T, CommandError> {
-    let c = state.controller().ok_or_else(unavailable)?;
+    let c = state.controller().ok_or_else(|| state.off_refusal())?;
     tokio::task::spawn_blocking(move || f(c))
         .await
         .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
@@ -175,3 +175,7 @@ pub async fn agent_journal_find_document(
         .await
         .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
 }
+
+#[cfg(all(test, not(target_os = "windows")))]
+#[path = "future_format_dispatch.test.rs"]
+mod future_format_dispatch;

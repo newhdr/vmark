@@ -1,6 +1,7 @@
-// WI-AL1.6 — the startup retention pass (ADR-AL13): startup runs the collector under the default caps and the status reports it; a pass over a small cap collects and summarizes; a refused pass (a read-only journal) is reported as an error, never a panic or silence
+// WI-AL1.6 — the startup retention pass (ADR-AL13): startup runs the collector under the default caps and the status reports it; a pass over a small cap collects and summarizes; a refused pass (a degraded journal) is reported as an error, never a panic or silence
 use super::test_support::*;
 use crate::agent_journal::ids::DocId;
+use crate::agent_journal::review::ReviewOp;
 use crate::agent_journal::service::{start, AgentJournalState};
 use crate::agent_journal::service_gc::startup_gc;
 use crate::agent_journal::writer_gc::GcPolicy;
@@ -65,19 +66,18 @@ fn a_pass_near_the_cap_carries_the_warning() {
 #[test]
 fn a_refused_pass_is_reported_as_an_error() {
     let dir = tmp();
-    {
-        let (w, _) = open(dir.path());
-        let v = serde_json::json!({"schemaVersion": crate::agent_journal::record::SCHEMA_VERSION + 1, "seq": "99", "txn": crate::agent_journal::ids::TxnId::new(), "at": 0, "record": {"kind": "fromTheFuture"}});
-        w.debug_append_raw(&serde_json::to_vec(&v).unwrap())
-            .unwrap();
-    }
-    let (w, _) = open(dir.path());
+    let (w, faults) = open(dir.path());
+    let doc = DocId::new();
+    human_save(&w, doc, "a");
+    // An fsync failure is ambiguous: it poisons the writer.
+    faults.fail_next_fsyncs(1);
+    let _ = w.prepare(prepare_req(doc, w.head(doc), "a", ReviewOp::None));
     let gc = startup_gc(&w, &GcPolicy::default());
     assert!(
         gc.error
             .as_deref()
-            .is_some_and(|e| e.starts_with("JOURNAL_FUTURE_FORMAT")),
-        "a read-only journal cannot collect: {:?}",
+            .is_some_and(|e| e.starts_with("JOURNAL_DEGRADED")),
+        "a degraded journal cannot collect: {:?}",
         gc.error
     );
     assert_eq!(gc.collected, 0);

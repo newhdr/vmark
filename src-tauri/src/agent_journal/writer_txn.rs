@@ -129,7 +129,6 @@ impl Writer {
 
     pub fn abort(&self, txn: TxnId, reason: &str) -> Result<Durability, TxnError> {
         let mut g = self.lock();
-        g.writable()?;
         let t = open_txn(&g, txn)?;
         let durable = self.terminal(
             &mut g,
@@ -150,7 +149,6 @@ impl Writer {
     /// record. Nothing is invented: the head does not move.
     pub fn record_uncommitted(&self, txn: TxnId) -> Result<Durability, TxnError> {
         let mut g = self.lock();
-        g.writable()?;
         let t = open_txn(&g, txn)?;
         let durable = self.terminal(&mut g, t.doc, txn, Record::Uncommitted, vec![])?;
         Ok(Durability { durable })

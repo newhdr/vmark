@@ -4,7 +4,7 @@
 //!
 //! Edge cases: a frame split into one-byte chunks, a damaged frame's bytes
 //! discarded (never glued onto the next frame), a future-schema record
-//! counted with the highest version kept, a corrupt record surfacing as a
+//! stopping replay as a typed `FutureFormat` at that frame, a corrupt record surfacing as a
 //! typed `Corrupt` error that wins over the scan's string, an empty journal,
 //! a frame whose buffer cannot be reserved (a typed I/O failure that leaves
 //! the journal's bytes as they were, never a truncation).
@@ -71,7 +71,7 @@ fn streamed_frames_fold_into_the_same_projection_at_any_chunk_size() {
             assert!(replay.cur.is_empty(), "no payload is held after its frame");
         }
         assert_eq!(replay.proj, expected, "chunk size {chunk}");
-        assert_eq!((replay.future, replay.future_records), (None, 0));
+        assert!(replay.failed.is_none());
     }
 }
 
@@ -97,14 +97,16 @@ fn a_discarded_frame_leaves_nothing_for_the_next_one() {
 }
 
 #[test]
-fn future_records_are_counted_and_the_highest_version_is_kept() {
+fn the_first_future_record_stops_replay_as_future_format() {
     let mut replay = Replay::new(MAX_SUPPORTED_SCHEMA, &Faults::default());
     let v = MAX_SUPPORTED_SCHEMA;
-    for version in [v + 3, v + 1] {
-        let p = format!("{{\"schemaVersion\":{version},\"seq\":\"1\"}}");
-        feed(&mut replay, p.as_bytes(), 2).expect("a future record is not an error");
-    }
-    assert_eq!((replay.future, replay.future_records), (Some(v + 3), 2));
+    let p = format!("{{\"schemaVersion\":{},\"seq\":\"1\"}}", v + 3);
+    feed(&mut replay, p.as_bytes(), 2).expect_err("a future record stops the scan");
+    assert_eq!(
+        replay.finish(Ok(())),
+        Err(TxnError::FutureFormat { version: v + 3 }),
+        "the typed stop wins and the projection is never finished"
+    );
     assert_eq!(replay.proj, Projection::default());
 }
 

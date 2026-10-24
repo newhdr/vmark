@@ -1,4 +1,4 @@
-//! Journal schema v2 records (v1 histories decode through `codec`).
+//! Journal schema records: v2 and v3 (v1 histories decode through `codec`).
 //!
 //! One `Envelope` per framed record. `seq` is the writer's generation: it is
 //! strictly increasing across appends, restarts and compactions (compaction
@@ -15,14 +15,19 @@ use crate::agent_journal::review::{
     Hunk, HunkTransition, ReviewAction, ReviewEffects, ReviewItem, ReviewOp,
 };
 
-/// The schema version this build writes.
-pub const SCHEMA_VERSION: u32 = 2;
-/// The newest schema version this build can read. A record above it makes
-/// the journal read-only (`JOURNAL_FUTURE_FORMAT` on every write).
+/// The newest schema version this build writes. A record is labelled with
+/// the lowest version that has its kind and fields (`schema_table::label`),
+/// so a record that uses nothing newer than v2 is still written as v2.
+pub const SCHEMA_VERSION: u32 = 3;
+/// The newest schema version this build can read. A record above it turns
+/// the journal off for every document before anything is repaired
+/// (`JOURNAL_FUTURE_FORMAT`; see `writer_replay`).
 pub const MAX_SUPPORTED_SCHEMA: u32 = SCHEMA_VERSION;
 /// The first schema, decoded conservatively: no provenance, so every live
 /// hunk it touches is blocked.
 pub const SCHEMA_V1: u32 = 1;
+/// The provenance schema: every record kind this build writes today.
+pub const SCHEMA_V2: u32 = 2;
 
 /// The framed unit. Unknown fields are corruption at every level: a
 /// current-version record this build only half understands would otherwise

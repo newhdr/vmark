@@ -82,7 +82,7 @@ fn startup_over_a_journal_it_may_not_write_fails_loudly() {
     let state = AgentJournalState::default();
     let result = start(app_data.path());
     let err = result.as_ref().err().cloned().expect("startup refused");
-    assert!(err.starts_with("JOURNAL_IO"), "{err}");
+    assert!(err.message().starts_with("JOURNAL_IO"), "{err}");
     state.finish(result);
     assert_eq!(state.status().phase, Phase::Failed);
     assert!(state.writer().is_none());

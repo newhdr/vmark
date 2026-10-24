@@ -30,7 +30,7 @@ impl Writer {
     }
 
     /// `Ok` while the writer accepts controlled mutations; otherwise the
-    /// refusal every one of them would get (read-only or degraded).
+    /// refusal every one of them would get (corrupt or degraded).
     pub fn health(&self) -> Result<(), TxnError> {
         self.lock().healthy()
     }

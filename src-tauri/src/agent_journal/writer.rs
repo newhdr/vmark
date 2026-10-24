@@ -29,9 +29,8 @@ use crate::agent_journal::journal_file::{
     create_dir_durable, JournalFile, SyncPolicy, JOURNAL_FILE,
 };
 use crate::agent_journal::projection::{Projection, TxnStatus};
-use crate::agent_journal::record::{
-    Envelope, ObservedRef, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_VERSION,
-};
+use crate::agent_journal::record::{Envelope, ObservedRef, Record, MAX_SUPPORTED_SCHEMA};
+use crate::agent_journal::schema_table;
 use crate::agent_journal::writer_degraded::Queued;
 use replay::Replay;
 
@@ -59,7 +58,6 @@ pub(crate) struct Inner {
     pub(crate) degraded: HashMap<DocId, VecDeque<Queued>>,
     pub(crate) window_bases: BTreeMap<String, (DocId, ObservedRef)>,
     pub(crate) external: BTreeSet<RevisionId>,
-    pub(crate) future: Option<u32>,
     pub(crate) budget: RetentionBudget,
     /// Window names released, newest last, at most `budget.window_bases`.
     pub(crate) released: VecDeque<String>,
@@ -79,18 +77,10 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
-    pub(crate) fn writable(&self) -> Result<(), TxnError> {
-        match self.future {
-            Some(version) => Err(TxnError::FutureFormat { version }),
-            None => Ok(()),
-        }
-    }
-
     /// an ambiguous write failure (fsync, or truncate-back after a
     /// partial write) poisons a file; the whole writer is then degraded for
     /// every document until it is reopened.
     pub(crate) fn healthy(&self) -> Result<(), TxnError> {
-        self.writable()?;
         if let Some(why) = &self.corrupt {
             return Err(TxnError::Corrupt(why.clone()));
         }
@@ -147,8 +137,9 @@ impl Writer {
         Self::open_with_max_schema(cfg, MAX_SUPPORTED_SCHEMA)
     }
 
-    /// `open` as a build that reads schemas `1..=max` only. With `max = 1`
-    /// it is a v1-only writer: a v2 record makes it read-only.
+    /// `open` as a build that reads schemas `1..=max` only. A record newer
+    /// than `max` refuses the open as `FUTURE_FORMAT` before anything is
+    /// truncated, repaired or appended (both files stay byte-identical).
     #[doc(hidden)]
     pub fn open_with_max_schema(
         cfg: WriterConfig,
@@ -162,10 +153,9 @@ impl Writer {
         let blobs = BlobStore::open(&cfg.dir, cfg.sync, cfg.faults.clone())?;
         let mut report = OpenReport {
             truncated_tail_bytes,
-            future_records: replay.future_records,
             ..Default::default()
         };
-        let Replay { proj, future, .. } = replay;
+        let Replay { proj, .. } = replay;
         let open_txns: Vec<TxnId> = proj
             .txns
             .iter()
@@ -181,7 +171,6 @@ impl Writer {
                 degraded: HashMap::new(),
                 window_bases: BTreeMap::new(),
                 external: BTreeSet::new(),
-                future,
                 budget: RetentionBudget::default(),
                 released: VecDeque::new(),
                 unpinned: BTreeSet::new(),
@@ -194,26 +183,24 @@ impl Writer {
         };
         {
             let mut g = w.lock();
-            if g.future.is_none() {
-                for txn in open_txns {
-                    w.append(&mut g, txn, Record::Uncommitted, &[])?;
-                    report.uncommitted.push(txn);
-                }
-                let armed: Vec<(DocId, u64)> = g
-                    .proj
-                    .docs
-                    .iter()
-                    .filter_map(|(d, s)| s.epoch.open.map(|e| (*d, e)))
-                    .collect();
-                for (doc, epoch) in armed {
-                    w.append(
-                        &mut g,
-                        TxnId::new(),
-                        Record::EpochUnclosed { doc, epoch },
-                        &[],
-                    )?;
-                    report.unclosed_epochs.push((doc, epoch));
-                }
+            for txn in open_txns {
+                w.append(&mut g, txn, Record::Uncommitted, &[])?;
+                report.uncommitted.push(txn);
+            }
+            let armed: Vec<(DocId, u64)> = g
+                .proj
+                .docs
+                .iter()
+                .filter_map(|(d, s)| s.epoch.open.map(|e| (*d, e)))
+                .collect();
+            for (doc, epoch) in armed {
+                w.append(
+                    &mut g,
+                    TxnId::new(),
+                    Record::EpochUnclosed { doc, epoch },
+                    &[],
+                )?;
+                report.unclosed_epochs.push((doc, epoch));
             }
             report.pending_observations = g.proj.docs.values().map(|d| d.pending.len()).sum();
         }
@@ -254,7 +241,7 @@ impl Writer {
             inner.blobs.put(hash, text)?;
         }
         let env = Envelope {
-            schema_version: SCHEMA_VERSION,
+            schema_version: schema_table::label(&record),
             seq,
             txn,
             at: now_ms(),

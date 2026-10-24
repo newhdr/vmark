@@ -1,8 +1,8 @@
-// WI-AL1.2 — schema v2 migration: v1 histories decode conservatively, a newer schema refuses writes, blocks and payloads survive hydration and reopen
+// WI-AL1.2 — schema v2 migration: v1 histories decode conservatively, a newer schema turns the journal off untouched, blocks and payloads survive hydration and reopen
 //! WI-AL0.1 (R23) — schema v2 persistence of provenance. v1 histories
 //! decode conservatively (no map → every live hunk of a v1 revision is
 //! blocked `snapshotOnly`/`schemaV1`); a v1 record carrying a v2 field is
-//! corrupt; a v1-only writer opening a v2 journal refuses every write.
+//! corrupt; a v1-only build opening a v2 journal leaves it off and untouched.
 //! Blocks, `lastCertified`, epochs and payload bytes survive replay and
 //! hydration (compaction is tested with the collector).
 
@@ -13,7 +13,9 @@ use crate::agent_journal::hydration::HydratedView;
 use crate::agent_journal::ids::{BlobHash, DocId};
 use crate::agent_journal::journal_file::{SyncPolicy, JOURNAL_FILE};
 use crate::agent_journal::provenance::{Block, BreakReason};
-use crate::agent_journal::record::{Envelope, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_VERSION};
+use crate::agent_journal::record::{
+    Envelope, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V2, SCHEMA_VERSION,
+};
 use crate::agent_journal::review::{HunkState, ReviewAction, ReviewOp};
 use crate::agent_journal::writer::Writer;
 use serde_json::{json, Value};
@@ -94,7 +96,7 @@ fn a_v1_history_decodes_with_every_live_hunk_blocked_and_stays_writable() {
     };
     downgrade_journal(dir.path());
     let (w, report) = reopen(dir.path());
-    assert!(report.unclosed_epochs.is_empty() && report.future_records == 0);
+    assert!(report.unclosed_epochs.is_empty());
     assert!(
         w.debug_records().iter().all(|e| e.schema_version == 1),
         "a pure v1 journal"
@@ -152,7 +154,8 @@ fn a_v1_history_decodes_with_every_live_hunk_blocked_and_stays_writable() {
     assert_eq!(w.snapshot().state.docs[&doc].hunks[&b].span.block, v1);
     assert_eq!(
         w.debug_records().last().unwrap().schema_version,
-        SCHEMA_VERSION
+        SCHEMA_V2,
+        "a new record of a v2 kind is labelled v2"
     );
 }
 
@@ -194,69 +197,32 @@ fn a_v1_record_carrying_a_v2_field_or_kind_is_corrupt() {
 }
 
 #[test]
-fn a_v1_only_writer_refuses_every_write_on_a_v2_journal() {
-    assert_eq!((SCHEMA_VERSION, MAX_SUPPORTED_SCHEMA), (2, 2));
+fn a_v1_only_build_leaves_a_v2_journal_off_and_untouched() {
+    assert_eq!((SCHEMA_VERSION, MAX_SUPPORTED_SCHEMA), (3, 3));
     let dir = tmp();
     let doc = DocId::new();
     // A transaction left open by the newer build: its reservation died with
     // it, and an older reader must not end it either.
-    let (a, open_txn) = {
+    {
         let (w, _) = open(dir.path());
-        let (a, _) = two_hunks(&w, doc);
+        two_hunks(&w, doc);
         let other = DocId::new();
-        let p = w.prepare(prepare_req(other, None, "", ReviewOp::None));
-        (a, p.unwrap().txn)
-    };
-    let len = std::fs::metadata(dir.path().join(JOURNAL_FILE))
-        .unwrap()
-        .len();
-    let (old, report) =
-        Writer::open_with_max_schema(config(dir.path(), SyncPolicy::Full).0, 1).unwrap();
-    assert!(report.future_records > 0);
-    assert!(
-        report.unclosed_epochs.is_empty() && report.uncommitted.is_empty(),
-        "a read-only open appends nothing"
-    );
-    let refused = [
-        old.prepare(prepare_req(doc, None, "", ReviewOp::Review))
-            .map(|_| ()),
-        old.arm_epoch(doc).map(|_| ()),
-        old.decide(crate::agent_journal::writer::ReviewRequest {
-            doc,
-            expected_head: None,
-            action: ReviewAction::Keep,
-            items: vec![crate::agent_journal::review::ReviewItem {
-                hunk_id: a,
-                expected_review_gen: 0,
-            }],
-        })
-        .map(|_| ()),
-        old.observe(crate::agent_journal::writer::ObserveRequest {
-            doc,
-            actor: human(),
-            initiator: human(),
-            postimage: "z".into(),
-            observed_parent: crate::agent_journal::record::ObservedRef::Genesis,
-            provenance: None,
-        })
-        .map(|_| ()),
-        old.arm_epoch(doc).map(|_| ()),
-        old.abort(open_txn, "stale").map(|_| ()),
-        old.record_uncommitted(open_txn).map(|_| ()),
-    ];
-    for (i, r) in refused.into_iter().enumerate() {
-        assert_eq!(r.unwrap_err().code(), "JOURNAL_FUTURE_FORMAT", "write #{i}");
+        w.prepare(prepare_req(other, None, "", ReviewOp::None))
+            .unwrap();
     }
-    drop(old);
+    let path = dir.path().join(JOURNAL_FILE);
+    let before = std::fs::read(&path).unwrap();
+    let err = Writer::open_with_max_schema(config(dir.path(), SyncPolicy::Full).0, 1)
+        .err()
+        .expect("a v1-only build cannot open a v2 journal");
+    assert_eq!(err.code(), "JOURNAL_FUTURE_FORMAT");
     assert_eq!(
-        std::fs::metadata(dir.path().join(JOURNAL_FILE))
-            .unwrap()
-            .len(),
-        len,
+        std::fs::read(&path).unwrap(),
+        before,
         "the journal is untouched"
     );
     let (w, report) = reopen(dir.path());
-    assert_eq!(report.future_records, 0, "the v2 writer reads it all");
+    assert_eq!(report.uncommitted.len(), 1, "the v2 writer reads it all");
     assert!(w.snapshot().state.docs[&doc].hunks.len() == 2);
 }
 
