@@ -246,9 +246,10 @@ fn linearized_record(ctx: LinearizeCtx, revision: RevisionId, effects: ReviewEff
     }
 }
 
-/// The text of an observed preimage: stored, or still only in `doc`'s queue.
+/// The text of an observed preimage: stored (readable even through a
+/// poisoned pack's old handle), or still only in `doc`'s queue.
 fn base_text(g: &mut Inner, doc: DocId, hash: &BlobHash) -> Result<String, TxnError> {
-    if g.blobs.contains(hash) {
+    if g.blobs.readable(hash) {
         return g.blobs.get(hash);
     }
     queued_text(g, doc, hash)
@@ -256,11 +257,12 @@ fn base_text(g: &mut Inner, doc: DocId, hash: &BlobHash) -> Result<String, TxnEr
 }
 
 /// Every text the capture names, durable before the ack: the postimage,
-/// and the observed preimage when it lives only in this document's queue
-/// (a commit or capture not yet durable) or is genesis `""` — once, even
-/// when it is the postimage's own text.
+/// and the observed preimage when the pack does not durably hold it (it
+/// lives only in this document's queue, is genesis `""`, or the pack is
+/// poisoned and its index untrusted) — once, even when it is the
+/// postimage's own text.
 fn capture_blobs(
-    g: &Inner,
+    g: &mut Inner,
     doc: DocId,
     observed_preimage: &BlobHash,
     post: (BlobHash, String),
@@ -268,9 +270,7 @@ fn capture_blobs(
     let needs_preimage = *observed_preimage != post.0 && !g.blobs.contains(observed_preimage);
     let mut blobs = vec![post];
     if needs_preimage {
-        let text = queued_text(g, doc, observed_preimage).ok_or_else(|| {
-            TxnError::Invariant("observed preimage text is not stored or queued".into())
-        })?;
+        let text = base_text(g, doc, observed_preimage)?;
         blobs.push((observed_preimage.clone(), text));
     }
     Ok(blobs)

@@ -192,7 +192,7 @@ impl JournalFile {
         if let Err(e) = written {
             if self
                 .truncate_back()
-                .and_then(|_| self.sync_file(&self.file))
+                .and_then(|_| self.sync_rollback())
                 .is_err()
             {
                 self.poisoned = true;
@@ -220,6 +220,13 @@ impl JournalFile {
             return Err(io::Error::other("injected truncate failure"));
         }
         self.file.set_len(self.len)
+    }
+
+    fn sync_rollback(&self) -> io::Result<()> {
+        if self.faults.take_rollback_sync_failure() {
+            return Err(io::Error::other("injected rollback sync failure"));
+        }
+        self.sync_file(&self.file)
     }
 
     fn write_at_end(&mut self, bytes: &[u8]) -> io::Result<()> {

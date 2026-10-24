@@ -34,7 +34,7 @@ pub(crate) fn referenced_blob(blobs: &mut BlobStore, hash: &BlobHash) -> Result<
     if *hash == BlobHash::of_text("") {
         return Ok(String::new());
     }
-    if !blobs.contains(hash) {
+    if !blobs.readable(hash) {
         return Err(TxnError::Corrupt(format!(
             "blob {} is referenced but not stored",
             hash.as_str()

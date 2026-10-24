@@ -21,6 +21,21 @@ pub enum CompactionStep {
     DirSynced,
 }
 
+/// Which file an atomic rewrite replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rewritten {
+    Journal,
+    BlobPack,
+}
+
+/// A step after a rewrite's rename that can fail without killing the
+/// process: the instance lives on with its old handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AfterRename {
+    SyncDir,
+    Reopen,
+}
+
 type Hook = Arc<dyn Fn(&Envelope) + Send + Sync>;
 /// Runs once, with the writer lock NOT held.
 pub type LockHook = Box<dyn FnOnce() + Send>;
@@ -30,6 +45,7 @@ pub struct Faults {
     fail_appends: AtomicU32,
     fail_fsyncs: AtomicU32,
     fail_truncates: AtomicU32,
+    fail_rollback_syncs: AtomicU32,
     fail_blob_writes: AtomicU32,
     fail_blob_compactions: AtomicU32,
     /// `0` = off; otherwise the next append writes one byte fewer than
@@ -42,6 +58,7 @@ pub struct Faults {
     /// The next journal write fails with this OS error, before any byte.
     write_error: Mutex<Option<io::ErrorKind>>,
     compaction_crash: Mutex<Option<CompactionStep>>,
+    after_rename: Mutex<Option<(Rewritten, AfterRename)>>,
     append_hook: Mutex<Option<Hook>>,
     /// `0` = off; otherwise the writer-lock acquisition that fires `lock_hook`.
     lock_countdown: AtomicU32,
@@ -62,6 +79,11 @@ impl Faults {
     /// The next `n` truncate-backs after a failed journal write fail.
     pub fn fail_next_truncates(&self, n: u32) {
         self.fail_truncates.store(n, Ordering::SeqCst);
+    }
+    #[cfg(test)]
+    /// The next `n` syncs after a journal append's truncate-back fail.
+    pub fn fail_next_rollback_syncs(&self, n: u32) {
+        self.fail_rollback_syncs.store(n, Ordering::SeqCst);
     }
     #[cfg(test)]
     /// The next `n` blob-pack writes fail cleanly, before any byte.
@@ -103,6 +125,12 @@ impl Faults {
         *self.compaction_crash.lock().expect("faults lock") = Some(step);
     }
     #[cfg(test)]
+    /// The next rewrite of `file` fails at `step`, after its rename, with
+    /// a plain I/O error that leaves the instance alive.
+    pub fn fail_after_rename(&self, file: Rewritten, step: AfterRename) {
+        *self.after_rename.lock().expect("faults lock") = Some((file, step));
+    }
+    #[cfg(test)]
     /// Runs inside the writer lock just before an envelope is appended.
     pub fn set_append_hook(&self, hook: Option<Hook>) {
         *self.append_hook.lock().expect("faults lock") = hook;
@@ -126,6 +154,17 @@ impl Faults {
     }
     pub(crate) fn take_truncate_failure(&self) -> bool {
         take_one(&self.fail_truncates)
+    }
+    pub(crate) fn take_rollback_sync_failure(&self) -> bool {
+        take_one(&self.fail_rollback_syncs)
+    }
+    pub(crate) fn take_after_rename_failure(&self, file: Rewritten, step: AfterRename) -> bool {
+        let mut slot = self.after_rename.lock().expect("faults lock");
+        if *slot == Some((file, step)) {
+            *slot = None;
+            return true;
+        }
+        false
     }
     pub(crate) fn take_blob_write_failure(&self) -> bool {
         take_one(&self.fail_blob_writes)

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use sha2_v011::{Digest, Sha256};
 
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::faults::Faults;
+use crate::agent_journal::faults::{Faults, Rewritten};
 use crate::agent_journal::frame::{FrameSink, HEADER_LEN};
 use crate::agent_journal::ids::{hex, BlobHash};
 use crate::agent_journal::journal_file::{JournalFile, SyncPolicy};
@@ -131,7 +131,22 @@ impl BlobStore {
         self.file.is_poisoned()
     }
 
+    #[cfg(test)]
+    pub(crate) fn poison(&mut self) {
+        self.file.poison();
+    }
+
+    /// Whether the pack durably holds `hash`. `false` while poisoned: after
+    /// a failed rewrite past its rename the index may list a blob the file
+    /// on disk no longer holds, so presence proves nothing.
     pub fn contains(&self, hash: &BlobHash) -> bool {
+        !self.is_poisoned() && self.index.contains_key(hash)
+    }
+
+    /// Whether `get` can read `hash` through the current handle. Unlike
+    /// `contains` it holds while poisoned: the old handle still names the
+    /// file the index describes, valid for reads until reopen.
+    pub fn readable(&self, hash: &BlobHash) -> bool {
         self.index.contains_key(hash)
     }
 
@@ -146,8 +161,13 @@ impl BlobStore {
         self.index.get(hash).map(|&(_, len)| len)
     }
 
-    /// Idempotent.
+    /// Idempotent. Refused while poisoned, before the index is consulted.
     pub fn put(&mut self, hash: &BlobHash, text: &str) -> Result<(), TxnError> {
+        if self.is_poisoned() {
+            return Err(TxnError::Io(
+                "blob pack poisoned by an earlier ambiguous failure".into(),
+            ));
+        }
         if self.contains(hash) {
             return Ok(());
         }
@@ -193,18 +213,27 @@ impl BlobStore {
         let mut old = self.file.open_reader()?;
         let mut index = HashMap::with_capacity(present.len());
         let (mut pos, mut items) = (0u64, present.into_iter());
-        self.file.rewrite_each(&mut || {
-            let Some((hash, at)) = items.next() else {
-                return Ok(None);
-            };
-            let text = read_text(&mut old, at)?;
-            let p = payload(&hash, &text);
-            let skip = hash.as_str().len() as u64 + 1;
-            index.insert(hash, (pos + HEADER_LEN as u64 + skip, text.len() as u64));
-            pos += (HEADER_LEN + p.len()) as u64;
-            Ok(Some(p))
-        })?;
+        let faults = self.faults.clone();
+        let fail = |step| faults.take_after_rename_failure(Rewritten::BlobPack, step);
+        self.file.rewrite_each_faulted(
+            &mut || {
+                let Some((hash, at)) = items.next() else {
+                    return Ok(None);
+                };
+                let text = read_text(&mut old, at)?;
+                let p = payload(&hash, &text);
+                let skip = hash.as_str().len() as u64 + 1;
+                index.insert(hash, (pos + HEADER_LEN as u64 + skip, text.len() as u64));
+                pos += (HEADER_LEN + p.len()) as u64;
+                Ok(Some(p))
+            },
+            &fail,
+        )?;
         self.index = index;
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "blob_poison.test.rs"]
+mod blob_poison_tests;

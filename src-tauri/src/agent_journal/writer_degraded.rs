@@ -81,3 +81,7 @@ impl Writer {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[path = "persistence_boundary.test.rs"]
+mod persistence_boundary_tests;

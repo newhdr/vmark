@@ -90,6 +90,23 @@ impl Inner {
         Ok(())
     }
 
+    /// The one persistence boundary, checked before every append: nothing
+    /// is written while the writer is corrupt or either file is poisoned.
+    /// Poison is `Io`, the class a failed append already has, so captures
+    /// and terminal records queue and the drainer stops with order kept.
+    pub(crate) fn persistable(&self) -> Result<(), TxnError> {
+        if let Some(why) = &self.corrupt {
+            return Err(TxnError::Corrupt(why.clone()));
+        }
+        if self.journal.is_poisoned() || self.blobs.is_poisoned() {
+            return Err(TxnError::Io(
+                "writer poisoned by an earlier ambiguous failure; nothing persists until reopen"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn not_busy(&self, doc: DocId) -> Result<(), TxnError> {
         if self.degraded.get(&doc).is_some_and(|q| !q.is_empty()) {
             return Err(TxnError::JournalDegraded);
@@ -236,6 +253,7 @@ impl Writer {
         record: Record,
         blobs: &[(&BlobHash, &str)],
     ) -> Result<Envelope, TxnError> {
+        inner.persistable()?;
         let seq = inner.next_generation()?;
         for (hash, text) in blobs {
             inner.blobs.put(hash, text)?;

@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::faults::CompactionStep;
+use crate::agent_journal::faults::{AfterRename, CompactionStep, Rewritten};
 use crate::agent_journal::frame;
 use crate::agent_journal::journal_file::{open_rw, sync_dir, tmp_path, JournalFile, SyncPolicy};
 
@@ -28,6 +28,20 @@ impl JournalFile {
     pub fn rewrite_each(
         &mut self,
         next: &mut dyn FnMut() -> Result<Option<Vec<u8>>, TxnError>,
+    ) -> Result<(), TxnError> {
+        let faults = self.faults.clone();
+        self.rewrite_each_faulted(next, &|step| {
+            faults.take_after_rename_failure(Rewritten::Journal, step)
+        })
+    }
+
+    /// `rewrite_each` with the caller's post-rename fault check (the blob
+    /// pack keeps its injections apart from the journal's). A failure past
+    /// the rename returns with the instance poisoned and its old handle.
+    pub(crate) fn rewrite_each_faulted(
+        &mut self,
+        next: &mut dyn FnMut() -> Result<Option<Vec<u8>>, TxnError>,
+        fail_after_rename: &dyn Fn(AfterRename) -> bool,
     ) -> Result<(), TxnError> {
         if self.poisoned {
             return Err(TxnError::Io(
@@ -74,11 +88,17 @@ impl JournalFile {
         if self.faults.compaction_crash(CompactionStep::Renamed) {
             return Err(crash(CompactionStep::Renamed));
         }
+        if fail_after_rename(AfterRename::SyncDir) {
+            return Err(TxnError::Io("injected directory sync failure".into()));
+        }
         if self.sync == SyncPolicy::Full {
             sync_dir(&self.path)?;
         }
         if self.faults.compaction_crash(CompactionStep::DirSynced) {
             return Err(crash(CompactionStep::DirSynced));
+        }
+        if fail_after_rename(AfterRename::Reopen) {
+            return Err(TxnError::Io("injected reopen failure".into()));
         }
         self.file = open_rw(&self.path)?;
         self.len = written;
@@ -86,3 +106,7 @@ impl JournalFile {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "post_rename.test.rs"]
+mod post_rename_tests;
