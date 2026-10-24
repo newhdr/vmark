@@ -11,7 +11,7 @@ Nothing here is needed to build or run VMark.
 ├── README.md              # This file
 ├── settings.json          # Shared settings: hooks and enabled plugins (checked in)
 ├── settings.local.json    # Personal settings (gitignored)
-├── rules/                 # Project rules, loaded into every session
+├── rules/                 # Project rules, loaded when a matching path is touched
 ├── hooks/                 # PreToolUse guards wired in settings.json, with their tests
 ├── adr/                   # Architecture decision records, cited by id across the repo
 ├── tdd-guardian/          # tdd-guardian config and state, and the tracked plans
@@ -44,7 +44,7 @@ Each has a self-test (`*.test.mjs`) that runs in the gates tier (`pnpm test:gate
 
 ## Rules (`rules/`)
 
-Loaded into every Claude Code session. Several are enforced by a gate; `AGENTS.md` names which.
+A rule with `paths:` frontmatter loads only when Claude Code touches a matching file; one without `paths:` loads in every session. `AGENTS.md` is the only file Codex and Gemini read, so it repeats the load-bearing points on purpose. Several rules are enforced by a gate; `AGENTS.md` names which.
 
 | File | Scope |
 |------|-------|
@@ -121,15 +121,12 @@ Not enabled here, but used by the maintainer and referenced by the rules: **`cc-
 
 ## Agents (`agents/`)
 
-Subagents used by `/feature-workflow`:
+Project subagents. `planner`, `implementer` and `verifier` are deliberately not defined here: a project agent overrides a user-level one of the same name, and the maintainer's user-level versions carry the model and effort routing.
 
 | Agent | Role |
 |-------|------|
-| `planner` | Turns a goal into work items with tests and acceptance gates |
-| `implementer` | Scoped changes with tests |
 | `auditor` | Reviews the diff for logic, duplication and rule compliance |
 | `test-runner` | Runs unit tests and E2E flows |
-| `verifier` | Final check against gates and rules |
 | `spec-guardian` | Validates planned work against specs and rules |
 | `impact-analyst` | Finds the smallest correct change set |
 | `release-steward` | Commit messages and release notes |
