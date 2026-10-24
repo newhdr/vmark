@@ -13,6 +13,15 @@
  * `dispatchV2` to the handlers that change a document. An attribution that
  * does not validate is refused with an error reply before any handler runs.
  *
+ * Trust boundary: provenance, certificates, capture ids, hunks and spans are
+ * produced inside the webview by its own collectors, never by an MCP client.
+ * A request whose arguments carry one of those keys is refused, naming the
+ * key, before any handler runs and whatever the operation's unknown-field
+ * posture: `readOperationArgs` only logs undeclared fields, which would
+ * silently drop the key rather than refuse it. No contract declares these
+ * keys (`provenanceTrustBoundary.test.ts`), so no version of a client sends
+ * them and the refusal cannot break version skew.
+ *
  * Origin: MCP pruning plan (retired).
  *
  * @coordinates-with utils.ts — respond()
@@ -37,6 +46,15 @@ const READ_ONLY_BLOCKED = new Set<string>([
   "vmark.selection.set",
 ]);
 
+/** Argument keys only the webview's own collectors produce. */
+const TRUST_RESERVED_KEYS = ["capture", "certificate", "hunks", "provenance", "spans"] as const;
+
+/** The trust-reserved keys `args` carries, sorted. */
+function reservedKeysIn(args: unknown): string[] {
+  if (typeof args !== "object" || args === null) return [];
+  return TRUST_RESERVED_KEYS.filter((key) => Object.hasOwn(args, key));
+}
+
 /** Route an MCP request through the v2 dispatcher. */
 export async function handleRequest(event: McpRequestEvent): Promise<void> {
   const { id, type } = event;
@@ -45,6 +63,19 @@ export async function handleRequest(event: McpRequestEvent): Promise<void> {
     // First, before any request-specific decision: an unattributable
     // request is refused as such, whatever it asks for.
     const context = createMcpWriteContext(event);
+
+    const reserved = reservedKeysIn(event.args);
+    if (reserved.length > 0) {
+      await respond({
+        id,
+        success: false,
+        error:
+          `Refused: argument(s) ${reserved.map((k) => `'${k}'`).join(", ")} are reserved. ` +
+          "Provenance, certificates, captures, hunks and spans are recorded by VMark itself " +
+          "and are never accepted from an MCP client; resend without them.",
+      });
+      return;
+    }
 
     // Gate on the tab the mutation TARGETS, not the active one. These
     // request types accept a `tabId`, so an active-tab check let writes to
