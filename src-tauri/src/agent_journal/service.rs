@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
+use crate::agent_journal::admission::page_table::PageTable;
 use crate::agent_journal::capture::{docs_with_pending, linearize_all_pending};
 use crate::agent_journal::controller::Controller;
 use crate::agent_journal::degraded_drain::DrainScheduler;
@@ -142,6 +143,11 @@ pub struct AgentJournalStatus {
     pub uncommitted_at_start: usize,
     /// Selection certificates that fell back to a barrier since open.
     pub uncertified_fallbacks: u64,
+    /// The writer's per-open name, which every framed request must carry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incarnation: Option<String>,
+    /// Page registrations refused at the per-label cap since launch.
+    pub registration_cap_refusals: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub legacy: Option<LegacyImportReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,6 +179,8 @@ pub struct AgentJournalState {
     pub(super) git_exports: Arc<Mutex<()>>,
     /// Set by the generation-event forwarder (`generation_events`).
     live_updates: Arc<LiveUpdatesCell>,
+    /// Live webview pages; process-wide, so it outlives no writer.
+    pages: Arc<PageTable>,
 }
 
 impl AgentJournalState {
@@ -221,6 +229,11 @@ impl AgentJournalState {
             .map(|w| Controller::new(w, self.docs.clone(), self.drains.clone()))
     }
 
+    /// The process's page registrations.
+    pub fn pages(&self) -> &Arc<PageTable> {
+        &self.pages
+    }
+
     /// The forwarder's live-update state, which it marks itself.
     pub fn live_updates(&self) -> &Arc<LiveUpdatesCell> {
         &self.live_updates
@@ -237,6 +250,8 @@ impl AgentJournalState {
             truncated_tail_bytes: 0,
             uncommitted_at_start: 0,
             uncertified_fallbacks: 0,
+            incarnation: None,
+            registration_cap_refusals: self.pages.registration_cap_refusals(),
             legacy: None,
             retirement: None,
             identity,
@@ -260,6 +275,7 @@ impl AgentJournalState {
                 status.truncated_tail_bytes = s.open.truncated_tail_bytes;
                 status.uncommitted_at_start = s.open.uncommitted.len();
                 status.uncertified_fallbacks = s.writer.uncertified_fallbacks();
+                status.incarnation = Some(s.writer.incarnation().to_string());
                 status.retirement = Some(s.retirement.clone());
                 status.gc = Some(s.gc.clone());
                 match &s.legacy {

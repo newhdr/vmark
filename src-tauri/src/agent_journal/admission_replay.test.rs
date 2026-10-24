@@ -139,7 +139,11 @@ fn a_retry_after_the_transaction_ended_is_refused() {
     c.abort(&p.txn.to_string(), "edited").expect("abort");
     let len = c.writer.journal_len();
     let err = c.prepare(&raw).expect_err("terminal");
-    assert_eq!(journal_code(&err), "INVALID_REQUEST");
+    assert_eq!(journal_code(&err), "STALE_REQUEST");
+    let detail = err.detail().expect("detail");
+    assert_eq!(detail["uncertain"], json!(false));
+    assert_eq!(detail["request"]["state"], json!("terminal"));
+    assert_eq!(detail["request"]["status"], json!("aborted"));
     assert_eq!(c.writer.journal_len(), len);
 }
 

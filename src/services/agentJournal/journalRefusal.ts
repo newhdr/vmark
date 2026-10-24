@@ -12,6 +12,9 @@
  *   - `field` names the request field a refusal is about. `provenance`
  *     means only the window's map was refused and nothing was recorded:
  *     the caller resends the same request without it.
+ *   - `STALE_REQUEST` (a request that ended, was fenced, or names a stale
+ *     writer or page) and `STALE_PAGE` (a commit or abort whose page
+ *     registration is no longer live) are the request protocol's answers.
  *   - `JOURNAL_TIMEOUT` is never sent by the journal: the client raises
  *     it when a call on the save path outlives its deadline
  *     (`journalDeadline.ts`).
@@ -36,6 +39,8 @@ const JOURNAL_CODES = [
   "INVARIANT_BROKEN",
   "JOURNAL_CORRUPT",
   "JOURNAL_FUTURE_FORMAT",
+  "STALE_REQUEST",
+  "STALE_PAGE",
   "JOURNAL_UNAVAILABLE",
   "JOURNAL_TIMEOUT",
 ] as const;

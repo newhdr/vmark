@@ -20,6 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 
+use crate::agent_journal::admission::identity::Incarnation;
+use crate::agent_journal::admission::requests::Requests;
 use crate::agent_journal::blob_store::BlobStore;
 use crate::agent_journal::capture_seq::CaptureSeqs;
 use crate::agent_journal::codec;
@@ -82,6 +84,8 @@ pub(crate) struct Inner {
     pub(crate) capture_seqs: CaptureSeqs,
     /// Certificates that fell back to a barrier since open (`certificate`).
     pub(crate) uncertified_fallbacks: u64,
+    /// Request ids in flight or fenced, and transaction owners (`requests`).
+    pub(crate) requests: Requests,
 }
 
 impl Inner {
@@ -130,20 +134,8 @@ pub struct Writer {
     pub(crate) inner: Mutex<Inner>,
     subscribers: Mutex<Vec<mpsc::Sender<JournalEvent>>>,
     pub(crate) faults: Arc<Faults>,
-}
-
-impl Inner {
-    /// The generation the next record (or a rewrite's header floor) takes.
-    /// `u64::MAX` is reserved — replay refuses it — so at the cap this
-    /// refuses before anything is written, instead of producing a journal
-    /// the next open reads as corrupt.
-    pub(crate) fn next_generation(&self) -> Result<u64, TxnError> {
-        self.proj
-            .generation
-            .checked_add(1)
-            .filter(|g| *g < u64::MAX)
-            .ok_or_else(|| TxnError::Io("journal generation exhausted".into()))
-    }
+    /// Fixed at open; read without the lock (`admission::identity`).
+    pub(crate) incarnation: Incarnation,
 }
 
 impl Writer {
@@ -198,9 +190,11 @@ impl Writer {
                 corrupt: None,
                 capture_seqs: CaptureSeqs::default(),
                 uncertified_fallbacks: 0,
+                requests: Requests::default(),
             }),
             subscribers: Mutex::new(Vec::new()),
             faults: cfg.faults,
+            incarnation: Incarnation::fresh(),
         };
         {
             let mut g = w.lock();

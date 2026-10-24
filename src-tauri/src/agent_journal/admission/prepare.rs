@@ -5,8 +5,9 @@
 //! recorded only once the frame is durable.
 //!
 //! Order: a request id already receipted answers from its receipt (the
-//! stored reply when its transaction is still prepared and the payload
-//! digest matches; refused otherwise) before any other check, since the
+//! stored reply when its transaction is still executable and the payload
+//! digest matches; the request's state otherwise, `reconcile`) before any
+//! other check, since the
 //! first attempt's own reservation and baseline would refuse an identical
 //! retry. Then parent CAS, capture seq, restore source, admission
 //! (healthy, not degraded or reserved, a free reservation slot).
@@ -24,6 +25,7 @@ use crate::agent_journal::admission::publish::Staging;
 use crate::agent_journal::admission::receipt::{
     Outcome, PayloadDigest, PreparedResponse, Receipt, RequestId,
 };
+use crate::agent_journal::admission::reconcile::lookup;
 use crate::agent_journal::admission::reduce::preflight;
 use crate::agent_journal::admission::stage::{staged, Live};
 use crate::agent_journal::controlled::Prep;
@@ -31,7 +33,7 @@ use crate::agent_journal::controlled_restore::{source_text, RestorePrepared};
 use crate::agent_journal::controlled_wire::ControlledPrepared;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
-use crate::agent_journal::projection::{Projection, TxnStatus};
+use crate::agent_journal::projection::Projection;
 use crate::agent_journal::provenance::Certificate;
 use crate::agent_journal::record::{Envelope, SCHEMA_V3};
 use crate::agent_journal::review::ReviewOp;
@@ -125,7 +127,7 @@ pub(crate) fn prepare_admitted(
     request: Option<Request>,
 ) -> Result<PreparedResponse, TxnError> {
     if let Some(r) = &request {
-        if let Some(stored) = answered(&g.proj, r)? {
+        if let Some(stored) = lookup(g, r)? {
             return Ok(stored);
         }
     }
@@ -171,30 +173,6 @@ pub(crate) fn prepare_admitted(
         g.capture_seqs.record(id);
     }
     Ok(response)
-}
-
-/// The stored reply for an identical retry of a prepared request; `None`
-/// for a request id never receipted.
-fn answered(p: &Projection, r: &Request) -> Result<Option<PreparedResponse>, TxnError> {
-    let Some(receipt) = p.requests.get(&r.id) else {
-        return Ok(None);
-    };
-    if receipt.digest != r.digest {
-        return Err(TxnError::InvalidRequest(format!(
-            "request {} was already used for another payload",
-            r.id
-        )));
-    }
-    match p.txns.get(&receipt.txn()).map(|t| &t.status) {
-        Some(TxnStatus::Prepared) => {
-            let Outcome::Prepared(response) = &receipt.outcome;
-            Ok(Some(response.clone()))
-        }
-        _ => Err(TxnError::InvalidRequest(format!(
-            "request {} answered a transaction that has ended",
-            r.id
-        ))),
-    }
 }
 
 /// Whether the buffer is recorded as a human baseline on `head`: it

@@ -123,24 +123,29 @@ pub fn prepare_restore_with(
     req: RestorePrepareRequest,
     digest: Option<PayloadDigest>,
 ) -> Result<RestorePrepared, TxnError> {
-    let baseline_provenance = decode_field(req.baseline_provenance)?;
     let request = Request::from_parts(req.request_id, digest)?;
-    let prep = Prep {
+    let prep = restore_prep(req)?;
+    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
+        PreparedResponse::Restore(p) => Ok(p),
+        PreparedResponse::Controlled(_) => Err(reused_id()),
+    }
+}
+
+/// What `req` asks the writer to prepare: the person's restore of its
+/// source, its baseline map decoded.
+pub(crate) fn restore_prep(req: RestorePrepareRequest) -> Result<Prep, TxnError> {
+    Ok(Prep {
         parent: req.parent,
         preimage: req.preimage,
         actor: Actor::Human,
         initiator: Actor::Human,
         tool: RESTORE_TOOL.into(),
         review_op: ReviewOp::Restore { source: req.source },
-        baseline_provenance,
+        baseline_provenance: decode_field(req.baseline_provenance)?,
         baseline_touched: req.baseline_touched,
         certificate: None,
         capture: req.capture,
-    };
-    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
-        PreparedResponse::Restore(p) => Ok(p),
-        PreparedResponse::Controlled(_) => Err(reused_id()),
-    }
+    })
 }
 
 /// The uncommitted transaction a prepared restore of its preimage resolves.

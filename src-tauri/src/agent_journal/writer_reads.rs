@@ -1,10 +1,26 @@
 //! The writer's read accessors: snapshots, heads, health and blob text for
 //! commands, plus reservations and counters only tests read. Each takes the
-//! writer lock once and copies what it returns, so no caller holds the lock.
+//! writer lock once and copies what it returns, so no caller holds the lock;
+//! the incarnation, fixed at open, takes none. Also the next generation.
 
+use crate::agent_journal::admission::identity::Incarnation;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId};
-use crate::agent_journal::writer::{Snapshot, Writer};
+use crate::agent_journal::writer::{Inner, Snapshot, Writer};
+
+impl Inner {
+    /// The generation the next record (or a rewrite's header floor) takes.
+    /// `u64::MAX` is reserved — replay refuses it — so at the cap this
+    /// refuses before anything is written, instead of producing a journal
+    /// the next open reads as corrupt.
+    pub(crate) fn next_generation(&self) -> Result<u64, TxnError> {
+        self.proj
+            .generation
+            .checked_add(1)
+            .filter(|g| *g < u64::MAX)
+            .ok_or_else(|| TxnError::Io("journal generation exhausted".into()))
+    }
+}
 
 impl Writer {
     pub fn snapshot(&self) -> Snapshot {
@@ -13,6 +29,11 @@ impl Writer {
             generation: g.proj.generation,
             state: g.proj.clone(),
         }
+    }
+
+    /// This open's incarnation. Takes no lock: it never changes.
+    pub fn incarnation(&self) -> &Incarnation {
+        &self.incarnation
     }
 
     pub fn head(&self, doc: DocId) -> Option<RevisionId> {

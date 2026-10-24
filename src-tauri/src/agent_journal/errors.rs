@@ -1,6 +1,7 @@
 //! Structured refusals. `code()` is the wire token the MCP bridge and the
 //! review panel branch on; the message is for logs.
 
+use crate::agent_journal::admission::answer::RequestRefusal;
 use crate::agent_journal::ids::{HunkId, RevisionId, TxnId};
 use crate::agent_journal::provenance::Block;
 
@@ -33,6 +34,18 @@ pub enum TxnError {
     /// (`None`). Returned before `prepare` reserves anything: no record, no
     /// state, `reviewGen` or generation change. Not a record kind.
     AmbiguousRevert { hunk: HunkId, block: Option<Block> },
+    /// A bounded request table is full (in-flight requests, a label's page
+    /// registrations, the generation counter). Nothing was inserted.
+    Saturated(String),
+    /// A commit or abort names a page registration that is no longer live.
+    /// Nothing changed; owner cleanup ends the transaction.
+    StalePage(String),
+    /// A page registration for a window label that is not open (never
+    /// opened, or destroyed): wire state `staleGeneration`, uncertain.
+    StaleRegistration(String),
+    /// A request-protocol answer for a decoded request id; its wire token
+    /// follows its state (`admission::answer`).
+    Request(Box<RequestRefusal>),
     /// The caller sent something the protocol never allows.
     InvalidRequest(String),
     /// A provenance map that does not certify what it claims (another
@@ -70,6 +83,10 @@ impl TxnError {
             Self::ReviewBacklogFull { .. } => "REVIEW_BACKLOG_FULL",
             Self::ReviewStateExhausted { .. } => "REVIEW_STATE_EXHAUSTED",
             Self::AmbiguousRevert { .. } => "AMBIGUOUS_REVERT",
+            Self::Saturated(_) => "JOURNAL_BUSY",
+            Self::StalePage(_) => "STALE_PAGE",
+            Self::StaleRegistration(_) => "STALE_REQUEST",
+            Self::Request(r) => r.state.code(),
             Self::InvalidRequest(_) | Self::InvalidProvenance(_) => "INVALID_REQUEST",
             Self::InvalidText(_) => "INVALID_TEXT",
             Self::Io(_) | Self::Indeterminate(_) => "JOURNAL_IO",

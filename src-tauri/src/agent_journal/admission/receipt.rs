@@ -60,6 +60,11 @@ impl PreparedResponse {
             Self::Restore(p) => (p.doc, p.txn, p.revision),
         }
     }
+
+    /// The transaction the reply prepared.
+    pub(crate) fn txn(&self) -> TxnId {
+        self.names().1
+    }
 }
 
 impl Receipt {

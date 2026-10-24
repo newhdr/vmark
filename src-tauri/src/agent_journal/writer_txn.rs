@@ -62,22 +62,28 @@ impl Writer {
     }
 
     pub fn commit(&self, txn: TxnId, req: CommitRequest) -> Result<CommitOutcome, TxnError> {
-        self.commit_with(txn, req, None).map(|(out, _)| out)
+        self.commit_with(txn, req, None, None).map(|(out, _)| out)
     }
 
     /// `commit`, checking a selection edit's certificate (`sent` with the
     /// commit, else the prepared one): certified, its window and hunks;
-    /// otherwise the barrier (`certificate`).
+    /// otherwise the barrier (`certificate`). `authorize`, when given, is
+    /// asked once the transaction is known open, before anything changes,
+    /// in the same critical section as the append.
     pub(crate) fn commit_with(
         &self,
         txn: TxnId,
         req: CommitRequest,
         sent: Option<&Certificate>,
+        authorize: Option<Authorize<'_>>,
     ) -> Result<(CommitOutcome, Certification), TxnError> {
         let mut g = self.lock();
         // Refused, not queued: no content has changed yet.
         g.healthy()?;
         let t = open_txn(&g, txn)?;
+        if let Some(a) = authorize {
+            a(&g)?;
+        }
         let post = BlobHash::of_text(&req.postimage);
         check_restore(&g.proj, &t, &post, req.resolves)?;
         let preimage = referenced_blob(&mut g.blobs, &t.preimage)?;
@@ -116,8 +122,21 @@ impl Writer {
     }
 
     pub fn abort(&self, txn: TxnId, reason: &str) -> Result<Durability, TxnError> {
+        self.abort_with(txn, reason, None)
+    }
+
+    /// `abort`, asking `authorize` once the transaction is known open.
+    pub(crate) fn abort_with(
+        &self,
+        txn: TxnId,
+        reason: &str,
+        authorize: Option<Authorize<'_>>,
+    ) -> Result<Durability, TxnError> {
         let mut g = self.lock();
         let t = open_txn(&g, txn)?;
+        if let Some(a) = authorize {
+            a(&g)?;
+        }
         let durable = self.terminal(
             &mut g,
             t.doc,
@@ -168,8 +187,9 @@ impl Writer {
     /// fails (keeping the reservation). Queues behind anything already
     /// queued for the document, preserving order. A record whose text
     /// would take the queue past the byte budget is refused instead
-    /// (`JournalDegraded`), leaving the transaction open.
-    fn terminal(
+    /// (`JournalDegraded`), leaving the transaction open. Ended or queued,
+    /// the transaction has no owner any more.
+    pub(crate) fn terminal(
         &self,
         g: &mut Inner,
         doc: DocId,
@@ -187,6 +207,7 @@ impl Writer {
         if g.degraded.get(&doc).is_some_and(|q| !q.is_empty()) {
             g.admit_queued_terminal(&queued)?;
             g.degraded.entry(doc).or_default().push_back(queued);
+            g.requests.owners.remove(&txn);
             return Ok(false);
         }
         let refs: Vec<(&BlobHash, &str)> =
@@ -194,11 +215,13 @@ impl Writer {
         match self.append(g, txn, queued.record.clone(), &refs) {
             Ok(_) => {
                 g.reservations.remove(&doc);
+                g.requests.owners.remove(&txn);
                 Ok(true)
             }
             Err(TxnError::Io(_)) => {
                 g.admit_queued_terminal(&queued)?;
                 g.degraded.entry(doc).or_default().push_back(queued);
+                g.requests.owners.remove(&txn);
                 Ok(false)
             }
             Err(e) => Err(e),
@@ -206,9 +229,13 @@ impl Writer {
     }
 }
 
+/// A check a caller runs inside the writer's critical section; its refusal
+/// refuses the operation before anything changes.
+pub(crate) type Authorize<'a> = &'a dyn Fn(&Inner) -> Result<(), TxnError>;
+
 /// The transaction is `prepared`, holds its document's reservation, and
 /// its terminal record is not already queued.
-pub(super) fn open_txn(g: &Inner, txn: TxnId) -> Result<TxnEntry, TxnError> {
+pub(crate) fn open_txn(g: &Inner, txn: TxnId) -> Result<TxnEntry, TxnError> {
     let t = g
         .proj
         .txns

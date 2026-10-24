@@ -36,6 +36,8 @@ use crate::agent_journal::provenance_field::decode_field;
 use crate::agent_journal::review::ReviewOp;
 use crate::agent_journal::writer::{CommitRequest, Durability, Inner, LinearizeRequest, Writer};
 use crate::agent_journal::writer_derive::linearize_effects_in;
+use crate::agent_journal::writer_txn::{open_txn, Authorize};
+use std::cell::Cell;
 
 use crate::agent_journal::controlled_restore::restored_uncommitted;
 use crate::agent_journal::controlled_wire::{decode, ControlledCommitRequest};
@@ -62,25 +64,30 @@ pub fn prepare_controlled_with(
     req: ControlledPrepareRequest,
     digest: Option<PayloadDigest>,
 ) -> Result<ControlledPrepared, TxnError> {
-    req.actor.validate().map_err(TxnError::InvalidRequest)?;
-    let baseline_provenance = decode_field(req.baseline_provenance.clone())?;
     let request = Request::from_parts(req.request_id, digest)?;
-    let prep = Prep {
+    let prep = controlled_prep(req)?;
+    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
+        PreparedResponse::Controlled(p) => Ok(p),
+        PreparedResponse::Restore(_) => Err(reused_id()),
+    }
+}
+
+/// What `req` asks the writer to prepare, its actor checked and its
+/// baseline map decoded.
+pub(crate) fn controlled_prep(req: ControlledPrepareRequest) -> Result<Prep, TxnError> {
+    req.actor.validate().map_err(TxnError::InvalidRequest)?;
+    Ok(Prep {
         parent: req.parent,
         preimage: req.preimage,
         actor: req.actor.clone(),
         initiator: req.actor,
         tool: req.tool,
         review_op: ReviewOp::Review,
-        baseline_provenance,
+        baseline_provenance: decode_field(req.baseline_provenance)?,
         baseline_touched: req.baseline_touched,
         certificate: req.certificate,
         capture: req.capture,
-    };
-    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
-        PreparedResponse::Controlled(p) => Ok(p),
-        PreparedResponse::Restore(_) => Err(reused_id()),
-    }
+    })
 }
 
 /// A request id whose receipt answers another kind of prepare.
@@ -150,7 +157,32 @@ pub fn commit_controlled(
     txn: TxnId,
     payload: &[u8],
 ) -> Result<ControlledCommitted, TxnError> {
+    commit_controlled_with(w, txn, payload, None)
+}
+
+/// `commit_controlled`, asking `authorize` (the caller's ownership check)
+/// before the effects are derived and again in the commit's own critical
+/// section. A commit it refuses changes nothing: the transaction stays
+/// open for its owner, or for the sweep.
+pub(crate) fn commit_controlled_with(
+    w: &Writer,
+    txn: TxnId,
+    payload: &[u8],
+    authorize: Option<Authorize<'_>>,
+) -> Result<ControlledCommitted, TxnError> {
     let doc = txn_doc(w, txn).ok_or_else(unknown_txn)?;
+    let denied = Cell::new(false);
+    let checked = |g: &Inner| -> Result<(), TxnError> {
+        let out = authorize.map_or(Ok(()), |a| a(g));
+        denied.set(out.is_err());
+        out
+    };
+    if authorize.is_some() {
+        let g = w.lock();
+        if open_txn(&g, txn).is_ok() {
+            checked(&g)?;
+        }
+    }
     let committed = decode::<ControlledCommitRequest>(payload).and_then(|req| {
         let sent = req.certificate.as_ref();
         let mut commit = CommitRequest {
@@ -160,7 +192,12 @@ pub fn commit_controlled(
             effects: Default::default(),
         };
         commit.effects = w.derive_commit_effects_with(txn, &commit, sent)?;
-        w.commit_with(txn, commit, sent)
+        w.commit_with(
+            txn,
+            commit,
+            sent,
+            authorize.map(|_| &checked as Authorize<'_>),
+        )
     });
     match committed {
         Ok((out, certification)) => {
@@ -175,7 +212,9 @@ pub fn commit_controlled(
             })
         }
         Err(e) => {
-            end_unrecorded(w, txn, &e);
+            if !denied.get() {
+                end_unrecorded(w, txn, &e);
+            }
             Err(e)
         }
     }
@@ -205,8 +244,18 @@ pub fn abort_controlled(
     txn: TxnId,
     reason: AbortReason,
 ) -> Result<Durability, TxnError> {
+    abort_controlled_with(w, txn, reason, None)
+}
+
+/// `abort_controlled`, asking `authorize` in the abort's critical section.
+pub(crate) fn abort_controlled_with(
+    w: &Writer,
+    txn: TxnId,
+    reason: AbortReason,
+    authorize: Option<Authorize<'_>>,
+) -> Result<Durability, TxnError> {
     txn_doc(w, txn).ok_or_else(unknown_txn)?;
-    w.abort(txn, &reason.record_text())
+    w.abort_with(txn, &reason.record_text(), authorize)
 }
 
 /// The document `txn` belongs to, if the journal knows the transaction.
