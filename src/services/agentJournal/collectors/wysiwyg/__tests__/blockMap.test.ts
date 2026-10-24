@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL1.4 — The block map certifies a WYSIWYG window block by block: an identity window has no breaks; every break is named by why it broke — a touched block (pm-touched), a block inserted (pm-inserted) or removed (pm-removed), a paired block whose serialization changed (serialization-changed), or only a separator between paired blocks (separator); multi-block inserts, deletes and a reorder each stay bounded; empty spans are adjacency glue only; head and tail text join a run only at the document edge; CJK and astral text are measured in UTF-16 units; and pairs that cannot tile both images (an invariant failure upstream) yield a problem, never ranges.
+// WI-AL1.4 — The block map certifies a WYSIWYG window block by block: an identity window has no breaks; every break is named by why it broke — a touched block (pm-touched), a block inserted (pm-inserted) or removed (pm-removed), a paired block whose serialization changed (serialization-changed), or only a separator between paired blocks (separator); multi-block inserts, deletes and a reorder each stay bounded; empty spans are adjacency glue only, but a touched block with no characters is a zero-width break (WI-AL2.0: a net-zero edit of an empty document is never an identity); head and tail text join a run only at the document edge; CJK and astral text are measured in UTF-16 units; and pairs that cannot tile both images (an invariant failure upstream) yield a problem, never ranges.
 import { describe, expect, it } from "vitest";
 import type { BlockSpan } from "@/utils/markdownPipeline/serializerSpans";
 import { blockRanges, type SpannedText } from "../blockMap";
@@ -81,6 +81,13 @@ describe("blockRanges", () => {
     expect(blockRanges(base, base, all(3), "w")).toEqual([]);
     const head = md(["aa", "bb"]);
     expect(blockRanges(base, head, [[0, 0], [2, 1]], "w")).toEqual([{ from: 2, to: 4, insert: 2, origin: "w:separator" }]);
+  });
+
+  it("a touched block with no characters of its own is a zero-width break, never an identity", () => {
+    const empty: SpannedText = { markdown: "", spans: [{ from: 0, to: 0 }] };
+    expect(blockRanges(empty, empty, [], "w")).toEqual([{ from: 0, to: 0, insert: 0, origin: "w:pm-touched" }]);
+    // A paired empty block is glue: still nothing.
+    expect(blockRanges(empty, empty, [[0, 0]], "w")).toEqual([]);
   });
 
   it("an empty document against a non-empty one is one break", () => {

@@ -11,6 +11,10 @@
  *     whose serialization changed (neighbour dependencies, global passes) —
  *     is a bounded break, named by why it broke.
  *   - Head and tail text join a run only at the document edge.
+ *   - A touched block with no characters of its own (the empty paragraph of
+ *     an empty document) is a zero-width break at its position: a gap of no
+ *     width is skipped only when no unpaired block sits in it, so a net-zero
+ *     edit there is never an identity.
  *   - The segments must tile both images and certified text must be
  *     identical, or there is no bounded map (the caller breaks the whole
  *     document).
@@ -60,6 +64,20 @@ function overlapping(spans: readonly BlockSpan[], from: number, to: number): num
   return out;
 }
 
+/** Indices of the empty spans at `at`; spans ascend. */
+function emptyAt(spans: readonly BlockSpan[], at: number): number[] {
+  let lo = 0;
+  let hi = spans.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (spans[mid].to < at) lo = mid + 1;
+    else hi = mid;
+  }
+  const out: number[] = [];
+  for (let i = lo; i < spans.length && spans[i].from <= at; i++) if (spans[i].from === at && empty(spans[i])) out.push(i);
+  return out;
+}
+
 interface Pairing {
   paired0: ReadonlySet<number>;
   paired1: ReadonlySet<number>;
@@ -67,8 +85,16 @@ interface Pairing {
   changed1: ReadonlySet<number>;
 }
 
+/** Why a gap broke; `[]` for a gap of no width that no unpaired block sits in (nothing to break). */
 function reasonsFor(gap: { from: number; to: number; postFrom: number; postTo: number }, sp0: readonly BlockSpan[], sp1: readonly BlockSpan[], p: Pairing): BreakReason[] {
   const reasons = new Set<BreakReason>();
+  if (gap.from === gap.to && gap.postFrom === gap.postTo) {
+    // @edge-case A touched empty block has no width; it still broke.
+    if (emptyAt(sp0, gap.from).some((i) => !p.paired0.has(i))) reasons.add("pm-removed");
+    if (emptyAt(sp1, gap.postFrom).some((i) => !p.paired1.has(i))) reasons.add("pm-inserted");
+    if (reasons.size === 2) return ["pm-touched"];
+    return [...reasons];
+  }
   for (const i of overlapping(sp0, gap.from, gap.to)) {
     if (p.changed0.has(i)) reasons.add("serialization-changed");
     else if (!p.paired0.has(i)) reasons.add("pm-removed");
@@ -135,9 +161,9 @@ function segmentsOf(base: SpannedText, head: SpannedText, pmPairs: BlockPairs): 
   let cursor = 0;
   let postCursor = 0;
   const pushBreak = (to: number, postTo: number) => {
-    if (to === cursor && postTo === postCursor) return;
     const gap = { from: cursor, to, postFrom: postCursor, postTo };
-    segments.push({ kind: "break", ...gap, reasons: reasonsFor(gap, base.spans, head.spans, pairing) });
+    const reasons = reasonsFor(gap, base.spans, head.spans, pairing);
+    if (reasons.length > 0) segments.push({ kind: "break", ...gap, reasons });
   };
   for (const run of runsOf(base, head, pairs)) {
     pushBreak(run.from, run.from + run.delta);

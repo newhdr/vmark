@@ -14,6 +14,10 @@
  *     does not serialize to the session's base text, spans that cannot be
  *     certified, or a map that does not tile — each is one whole-document
  *     break whose origin says which.
+ *   - A window that holds steps names at least one break: when the block map
+ *     names none (a net-zero edit that touched no block, only a position
+ *     between two), nothing locates it and the window is a whole break
+ *     (`unlocated-steps`), never an identity.
  *   - Budgets: the edges a window retains across flushes are bounded by
  *     `MAX_WINDOW_STEPS` step maps, the serializer's size budget bounds what
  *     is serialized again, and the correspondence's range-mapping budget
@@ -108,5 +112,6 @@ export function materializeWindow(schema: Schema, w: PendingWindow, baseText: st
   const pairs = correspond(w.from.doc, w.head.doc, w.edges);
   if (pairs === null) return whole("correspondence-budget", true);
   const out = blockRanges(base, head, pairs, WYSIWYG_ORIGIN);
-  return Array.isArray(out) ? out : whole("invariant");
+  if (!Array.isArray(out)) return whole("invariant");
+  return out.length === 0 && w.edges.length > 0 ? whole("unlocated-steps") : out;
 }

@@ -1,4 +1,4 @@
-// WI-AL1.4 — The WYSIWYG window: consecutive flushes extend one window up to its declared step budget (past it, a capOverflow whole break that later flushes keep), every whole-document reason maps to its break (chain-cap and window-budget as capOverflow, the rest snapshot-only), an unknown step, a base document that does not serialize to the session's base text, a document over the span size budget and a failed head serialization each fail closed, an identity window yields no ranges, one edit yields one bounded range, and a window whose touched ranges would cost more than the range-mapping budget to carry is a capOverflow break.
+// WI-AL1.4 — The WYSIWYG window: consecutive flushes extend one window up to its declared step budget (past it, a capOverflow whole break that later flushes keep), every whole-document reason maps to its break (chain-cap and window-budget as capOverflow, the rest snapshot-only), an unknown step, a base document that does not serialize to the session's base text, a document over the span size budget and a failed head serialization each fail closed, an identity window yields no ranges, a window that holds steps yet names no break is a whole break (WI-AL2.0: never an identity), one edit yields one bounded range, and a window whose touched ranges would cost more than the range-mapping budget to carry is a capOverflow break.
 import { describe, expect, it } from "vitest";
 import { getSchema } from "@tiptap/core";
 import { StepMap } from "@tiptap/pm/transform";
@@ -31,6 +31,12 @@ describe("wysiwyg window", () => {
     const w = extendWindow(null, a, ok(), a, "one\n\ntwo\n", OPTS);
     expect(materializeWindow(schema, w, "one\n\ntwo\n")).toEqual([]);
     expect(w.ran).toBe(true);
+  });
+
+  it("a window that holds steps but whose block map names no break is a whole break, never an identity", () => {
+    const a = spanned("one\n\ntwo\n");
+    const w = extendWindow(null, a, ok(edge(a, 1)), a, "one\n\ntwo\n", OPTS);
+    expect(materializeWindow(schema, w, "one\n\ntwo\n")).toEqual({ whole: "snapshotOnly", origin: "wysiwyg:unlocated-steps" });
   });
 
   it("an edit of one block is one bounded range named by its block", () => {

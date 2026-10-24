@@ -1,15 +1,21 @@
-// WI-AL2.0 — The WYSIWYG net-zero regression end to end, through the real provenance session, the journaled-mutation coordinator and the journal fake: agent `x → a`, the person deletes and retypes `a`, a distant agent write, a certified disjoint human edit. The distant write's prepare is touched and records a baseline whose map blocks the retyped hunk; the later save maps the disjoint agent hunk exactly; with a save and an editor/session restart after the retype, the save carries the break instead; a net-zero edit arms the epoch (a crash leaves it open); the same delete-and-retype in Source mode is touched too.
+// WI-AL2.0 — The WYSIWYG net-zero regression end to end, through the real provenance session, the journaled-mutation coordinator and the journal fake: agent `x → a`, the person deletes and retypes `a`, a distant agent write through the production write path (its target capture and re-checks flush the editor; the test never does), a certified disjoint human edit. The distant write's prepare is touched and records a baseline whose map blocks the retyped hunk; the later save maps the disjoint agent hunk exactly; with a save and an editor/session restart after the retype, the save carries the break instead; a net-zero edit arms the epoch (a crash leaves it open); the same delete-and-retype in Source mode is touched too.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
 vi.mock("@/utils/debug", async (importOriginal) => ({ ...(await importOriginal<object>()), journalWarn: vi.fn() }));
+vi.mock("@/services/mcpBridge/utils", () => ({ respond: vi.fn() }));
 
 import type { Editor } from "@tiptap/core";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
-import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
+import { TEST_ATTRIBUTION, TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
+import { useRevisionStore } from "@/stores/documentStore";
+import { useTabStore } from "@/stores/tabStore";
+import type { DocumentTab } from "@/stores/tabStoreTypes";
+import { registerWysiwygFlusher } from "@/utils/wysiwygFlush";
+import { runJournaledEdit } from "@/services/mcpBridge/v2/journaledEdit";
 import { journalActorFor } from "../journalActor";
 import { prepareControlledWrite, type PreparedTxn } from "../journalClient";
 import { prepareWithBaselineRetry } from "../controlledMutation";
@@ -68,6 +74,38 @@ async function agentWrite(editor: Editor, post: string): Promise<PreparedTxn> {
   return prepared!;
 }
 
+/**
+ * A `document.write` of `post` through the production write path
+ * (`runJournaledEdit`: target capture, re-check, coordinator), with the
+ * editor's flusher registered as `useTiptapFlush` registers it. Nothing here
+ * flushes by hand: the write path's own flushes report the editor.
+ */
+async function documentWrite(editor: Editor, post: string): Promise<PreparedTxn> {
+  const tab: DocumentTab = { kind: "document", id: "t1", filePath: PATH, title: "notes", isPinned: false, formatId: "markdown" };
+  useTabStore.setState({ tabs: { main: [tab] }, activeTabId: { main: "t1" }, untitledCounter: 0 });
+  registerWysiwygFlusher("t1", () => flush(editor));
+  try {
+    const calls = fake.prepareControlledWrite.mock.calls.length;
+    const out = await runJournaledEdit("w1", {
+      tab: { tabId: "t1", revision: useRevisionStore.getState().getRevision("t1"), filePath: PATH },
+      preimage: store().documents.t1.content,
+      requireFocus: false,
+      tool: "document.write",
+      context: TEST_WRITE_CONTEXT,
+      apply: () => {
+        store().setEditorContent("t1", post);
+        return { postimage: post, value: "ok" };
+      },
+    });
+    expect(out).toMatchObject({ value: "ok" });
+    expect(fake.prepareControlledWrite.mock.calls.length).toBe(calls + 1);
+  } finally {
+    registerWysiwygFlusher("t1", null);
+  }
+  load(editor, post);
+  return (await fake.prepareControlledWrite.mock.results.at(-1)!.value) as PreparedTxn;
+}
+
 async function save(text: string) {
   return beginJournalSave("t1", PATH, text, { saveType: "manual" }).record();
 }
@@ -101,7 +139,7 @@ describe("net-zero WYSIWYG edits through the journal", () => {
     const editor = boot();
     await agentWrite(editor, T1); // H: x → a
     deleteAndRetype(editor, "a");
-    const distant = await agentWrite(editor, T2); // the load right after the net-zero edit
+    const distant = await documentWrite(editor, T2); // the load right after the net-zero edit, no hand flush
     expect(prepareInput(1)).toMatchObject({ preimage: T1, baselineTouched: true });
     expect(distant.baseline).not.toBeNull();
     const baselineMap = decodePayload(prepareInput(1).baselineProvenance);
