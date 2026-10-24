@@ -434,6 +434,7 @@ fn window_save(
         author: None,
         claims_revision: claims,
         provenance: None,
+        capture: None,
     };
     super::capture::capture_save(w, doc, req).expect("capture")
 }

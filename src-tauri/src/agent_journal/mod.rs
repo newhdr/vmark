@@ -26,7 +26,8 @@
 //!   — the MCP edit tools as a window drives them over IPC: prepare,
 //!   commit, abort, and the background drain of a degraded document.
 //! - `capture` — a file save recorded as an observation and linearized onto
-//!   the head (also after a held prepare settles, a drain, and a restart).
+//!   the head (also after a held prepare settles, a drain, and a restart);
+//!   `capture_seq` refuses a capture whose seq does not advance.
 //! - `doc_key`, `doc_index`, `doc_renames`, `service_identity` — durable document identity:
 //!   entry-spelling keys, the persisted key-to-UUID op log, and binds on Save As,
 //!   rename and an external rename.
@@ -52,6 +53,7 @@
 pub mod actor;
 pub mod blob_store;
 pub mod capture;
+pub mod capture_seq;
 pub mod codec;
 mod codec_v1;
 pub mod commands;
@@ -152,6 +154,9 @@ mod capture_claims_tests;
 #[cfg(test)]
 #[path = "capture.test.rs"]
 mod capture_tests;
+#[cfg(test)]
+#[path = "capture_trust.test.rs"]
+mod capture_trust_tests;
 #[cfg(test)]
 #[path = "checkpoints.test.rs"]
 mod checkpoints_tests;

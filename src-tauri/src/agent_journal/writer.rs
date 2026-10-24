@@ -21,6 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 
 use crate::agent_journal::blob_store::BlobStore;
+use crate::agent_journal::capture_seq::CaptureSeqs;
 use crate::agent_journal::codec;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::faults::Faults;
@@ -74,6 +75,8 @@ pub(crate) struct Inner {
     /// Set when a pass finds the journal corrupt (a reachable blob the pack
     /// lost); every later write is refused until the journal is reopened.
     pub(crate) corrupt: Option<String>,
+    /// The last capture seq per session (`capture_seq`); in memory only.
+    pub(crate) capture_seqs: CaptureSeqs,
 }
 
 impl Inner {
@@ -194,6 +197,7 @@ impl Writer {
                 unpinned_labels: BTreeSet::new(),
                 unpinned_overflow: false,
                 corrupt: None,
+                capture_seqs: CaptureSeqs::default(),
             }),
             subscribers: Mutex::new(Vec::new()),
             faults: cfg.faults,

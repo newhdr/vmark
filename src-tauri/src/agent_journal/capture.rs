@@ -9,9 +9,10 @@
 //! Otherwise the save is a `pendingObservation` — author the human unless
 //! the window names the agent whose own output it persists, initiator the
 //! person, autosave or agent that asked for the save — on the window's
-//! observed parent (the
-//! revision or pending observation its buffer was built on; when the
-//! window names none, the head, or genesis for a new document). Once that
+//! observed parent (the revision or pending observation its buffer was
+//! built on; when the window names none, the head, or genesis for a new
+//! document), refused first if its capture seq does not extend its
+//! session's (`capture_seq`). Once that
 //! append is durable the window's base root moves to it, then every pending
 //! observation of the document is linearized in order unless a reservation
 //! or the degraded queue holds it (`journaled: pending`, linearized when
@@ -46,6 +47,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
+use crate::agent_journal::capture_seq::{observe_bound, CaptureId};
 use crate::agent_journal::controlled::linearize_one;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
@@ -86,6 +88,9 @@ pub struct CaptureRequest {
     /// armed epoch; `None`: a `snapshotOnly` barrier.
     #[serde(default)]
     pub provenance: Option<ProvenanceField>,
+    /// The capture this save froze; `None`: unbound (`capture_seq`).
+    #[serde(default)]
+    pub capture: Option<CaptureId>,
 }
 
 /// How far a save got into the journal.
@@ -144,17 +149,15 @@ pub fn capture_save(
                 revision,
             })
     });
-    let out = w.observe_for_window(
-        ObserveRequest {
-            doc,
-            actor: author,
-            initiator: req.initiator,
-            postimage: req.postimage,
-            observed_parent,
-            provenance,
-        },
-        Some(&req.window),
-    )?;
+    let observe = ObserveRequest {
+        doc,
+        actor: author,
+        initiator: req.initiator,
+        postimage: req.postimage,
+        observed_parent,
+        provenance,
+    };
+    let out = observe_bound(w, observe, &req.window, req.capture.as_ref())?;
     if out.journaled == Journaled::No {
         return Ok(reply(doc, JournaledFlag::No, Some(out.observation), None));
     }

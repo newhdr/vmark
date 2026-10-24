@@ -269,6 +269,7 @@ fn a_verified_claim_pins_its_head_before_a_racing_commit_and_collection() {
             author: None,
             claims_revision: Some(h1),
             provenance: None,
+            capture: None,
         };
         let policy = GcPolicy {
             max_revisions: 1,
