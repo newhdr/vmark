@@ -21,6 +21,11 @@
  * Either way the abort reports the basis like any other, so the caller keeps
  * a baseline the prepare recorded before it rethrows the error.
  *
+ * A prepared write may carry `effects`, run after a successful apply and
+ * before its commit; what it returns rides on the commit. An effects step
+ * that throws still commits the applied text (without extras) and the
+ * outcome is `appliedWithError` carrying that error — never a skipped commit.
+ *
  * Key decisions:
  *   - `verify` and `apply` are synchronous and run back to back with no
  *     `await` between them, so nothing the user does can land in between.
@@ -43,33 +48,21 @@
  *     recorded" in the panel.
  *
  * @coordinates-with services/agentJournal/journalClient.ts — the IPC calls
- * @coordinates-with services/mcpBridge/v2/documentWrite.ts — the first caller
- * @coordinates-with services/agentJournal/historyRestore.ts — a restore, through `runPreparedWrite`
+ * @coordinates-with services/agentJournal/journaledMutation.ts — every tab mutation, through `runPreparedWrite`
  * @module services/agentJournal/controlledMutation
  */
 
 import {
   abortControlledWrite,
   commitControlledWrite,
-  prepareControlledWrite,
   type AbortReason,
-  type PrepareInput,
+  type CommitExtras,
   type PreparedTxn,
 } from "./journalClient";
 import { journalDocumentReady } from "./documentBinding";
 import { toJournalRefusal, type JournalRefusal } from "./journalRefusal";
 import { journalWarn } from "@/utils/debug";
 import { beginWriteReport } from "./recordingReport";
-
-export interface ControlledWrite<T> {
-  prepare: PrepareInput;
-  /** After the prepare ack: why the write must not go ahead, or `null`. */
-  verify: () => AbortReason | null;
-  /** Apply now; the text the document then holds, or why the editor refused. */
-  apply: () => { postimage: string; value: T } | { refused: AbortReason };
-  /** After an apply that threw: settle the document and return its text; throw when it cannot be read. */
-  recover: () => string;
-}
 
 export type ControlledOutcome<T> =
   | { status: "refused"; refusal: JournalRefusal }
@@ -80,7 +73,7 @@ export type ControlledOutcome<T> =
    * verify or apply threw (the document unchanged); the caller rethrows
    * `thrown.error` once it has kept the basis.
    */
-  | { status: "aborted"; reason: AbortReason; durable: boolean; basis: string | null; thrown?: { error: unknown } }
+  | { status: "aborted"; reason: AbortReason; basis: string | null; thrown?: { error: unknown } }
   /**
    * `basis`: the committed revision; or, when the journal refused the
    * commit (the transaction then ends `uncommitted` and the head does not
@@ -89,8 +82,9 @@ export type ControlledOutcome<T> =
   | { status: "applied"; value: T; revision: string; durable: boolean; basis: string | null }
   /**
    * The apply threw after changing the document: `postimage`, the text read
-   * back, was committed in its place. `durable` and `basis` as for `applied`;
-   * there is no `value`, since the apply never produced one.
+   * back, was committed in its place. Or the apply succeeded and its effects
+   * step threw: `postimage` was committed without extras. `durable` and
+   * `basis` as for `applied`; there is no `value`.
    */
   | { status: "appliedWithError"; error: unknown; postimage: string; revision: string; durable: boolean; basis: string | null }
   /**
@@ -101,11 +95,16 @@ export type ControlledOutcome<T> =
    */
   | { status: "recoveryRequired"; error: unknown; txn: string };
 
-async function abort(txn: string, reason: AbortReason): Promise<boolean> {
+/**
+ * Append `aborted`. Whether it landed is not reported: an append that failed
+ * or was rejected leaves the reservation to the journal's degraded queue,
+ * which refuses the next write until it drains (see the header).
+ */
+async function abort(txn: string, reason: AbortReason): Promise<void> {
   try {
-    return (await abortControlledWrite(txn, reason)).durable;
+    await abortControlledWrite(txn, reason);
   } catch {
-    return false;
+    // Refused either way; the reservation and the degraded queue carry it.
   }
 }
 
@@ -127,7 +126,7 @@ export async function prepareWithBaselineRetry<I extends { baselineProvenance: u
   }
 }
 
-/** A controlled write whose prepare is the caller's (a restore, …). */
+/** A controlled write; its prepare is the caller's (an MCP edit, a restore). */
 export interface PreparedWrite<T, P extends PreparedTxn> {
   /** The parent the prepare states; the basis when it records no baseline. */
   parent: string | null;
@@ -140,19 +139,8 @@ export interface PreparedWrite<T, P extends PreparedTxn> {
   apply: (prepared: P) => { postimage: string; value: T } | { refused: AbortReason };
   /** After an apply that threw: settle the document and return its text; throw when it cannot be read. */
   recover: (prepared: P) => string;
-}
-
-/** Run one controlled write through the journal. */
-export function runControlledWrite<T>(write: ControlledWrite<T>): Promise<ControlledOutcome<T>> {
-  return runPreparedWrite({
-    parent: write.prepare.parent,
-    preimage: write.prepare.preimage,
-    docKey: write.prepare.docKey,
-    prepare: () => prepareWithBaselineRetry(write.prepare, prepareControlledWrite),
-    verify: write.verify,
-    apply: write.apply,
-    recover: write.recover,
-  });
+  /** After a successful apply, before its commit: extra fields for the commit. A throw is answered `appliedWithError`. */
+  effects?: (postimage: string) => Promise<CommitExtras>;
 }
 
 /** Commit `postimage`: whether it landed durably, and the tab's basis afterwards. */
@@ -161,9 +149,10 @@ async function commit(
   postimage: string,
   basis: string | null,
   report: (durable: boolean) => void,
+  extras?: CommitExtras,
 ): Promise<{ durable: boolean; basis: string | null }> {
   try {
-    const ack = await commitControlledWrite(prepared.txn, postimage);
+    const ack = await commitControlledWrite(prepared.txn, postimage, extras);
     const landed = ack.applied && ack.doc === prepared.doc && ack.revision === prepared.revision;
     if (!landed) journalWarn("commit acknowledged another write; treating it as not durable:", ack);
     const durable = landed && ack.durable;
@@ -194,13 +183,10 @@ export async function runPreparedWrite<T, P extends PreparedTxn>(
     return { status: "refused", refusal: toJournalRefusal(error) };
   }
   const basis = prepared.baseline ?? write.parent;
-  const aborted: Aborted<T> = async (reason, thrown) => ({
-    status: "aborted",
-    reason,
-    durable: await abort(prepared.txn, reason),
-    basis,
-    ...(thrown && { thrown }),
-  });
+  const aborted: Aborted<T> = async (reason, thrown) => {
+    await abort(prepared.txn, reason);
+    return { status: "aborted", reason, basis, ...(thrown && { thrown }) };
+  };
   let reason: AbortReason | null;
   try {
     reason = write.verify(prepared);
@@ -215,8 +201,26 @@ export async function runPreparedWrite<T, P extends PreparedTxn>(
     return recoverFromThrownApply(write, prepared, { basis, report, aborted }, error);
   }
   if ("refused" in applied) return aborted(applied.refused);
-  const landed = await commit(prepared, applied.postimage, basis, report);
+  const { postimage } = applied;
+  const effects = write.effects ? await settleEffects(write.effects, postimage) : { extras: undefined };
+  const landed = await commit(prepared, postimage, basis, report, effects.extras);
+  if ("error" in effects) {
+    journalWarn("the commit effects failed; committed the applied text without them:", effects.error);
+    return { status: "appliedWithError", error: effects.error, postimage, revision: prepared.revision, ...landed };
+  }
   return { status: "applied", value: applied.value, revision: prepared.revision, ...landed };
+}
+
+/** Run the effects step: its extras, or the error it threw (synchronously or not). */
+async function settleEffects(
+  effects: (postimage: string) => Promise<CommitExtras>,
+  postimage: string,
+): Promise<{ extras: CommitExtras } | { extras: undefined; error: unknown }> {
+  try {
+    return { extras: await effects(postimage) };
+  } catch (error) {
+    return { extras: undefined, error };
+  }
 }
 
 /** An apply threw: abort only once the document reads back unchanged (see the header). */

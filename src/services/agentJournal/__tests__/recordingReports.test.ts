@@ -3,11 +3,13 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
-import type { CapturedSave } from "../journalClient";
+import { prepareControlledWrite, type CapturedSave } from "../journalClient";
 import { journalActorFor } from "../journalActor";
 import { JOURNAL_DEADLINE_MS } from "../journalDeadline";
 import { MAX_OUTSTANDING_SAVES, beginJournalSave } from "../saveJournal";
-import { runControlledWrite } from "../controlledMutation";
+import { prepareWithBaselineRetry } from "../controlledMutation";
+import { runJournaledMutation, type JournaledOutcome } from "../journaledMutation";
+import { journalTabLife, resetJournalBases } from "../documentIdentity";
 import { resetUnsavedProvenanceSources } from "../unsavedProvenance";
 import { resetRecordingLifetimes } from "../recordingReport";
 import { useJournalRecordingStore } from "@/stores/journalRecordingStore";
@@ -23,16 +25,23 @@ const problem = (key = KEY) => useJournalRecordingStore.getState().docs[key]?.pr
 const save = (content: string) => beginJournalSave(TAB, PATH, content, MANUAL).record();
 
 function agentWrite(text: string) {
-  return runControlledWrite({
-    prepare: { docKey: KEY, parent: null, preimage: "", actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write", baselineProvenance: null, baselineTouched: false },
+  return runJournaledMutation({
+    tabId: TAB,
+    life: journalTabLife(TAB),
+    docKey: KEY,
+    preimage: "",
+    retryHint: "retry",
+    prepare: (b) => prepareWithBaselineRetry({ ...b, actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write" }, prepareControlledWrite),
     verify: () => null,
     apply: () => ({ postimage: text, value: null }),
     recover: () => text,
+    outcome: (o: JournaledOutcome<null>) => o,
   });
 }
 
 beforeEach(() => {
   fake.reset();
+  resetJournalBases();
   useJournalRecordingStore.getState().reset();
   resetRecordingLifetimes();
   // An entry is kept only for an open document (recordingLifetimes.test.ts).

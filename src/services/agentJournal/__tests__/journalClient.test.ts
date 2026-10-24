@@ -86,6 +86,15 @@ describe("commitControlledWrite", () => {
     });
   });
 
+  it("carries commit extras beside the postimage; an extra never replaces the postimage", async () => {
+    invokeMock.mockResolvedValueOnce({ doc: DOC, revision: REV, applied: true, durable: true });
+    await commitControlledWrite(TXN, "after", { review: { hunks: [] }, postimage: "forged" });
+    expect(invokeMock).toHaveBeenCalledWith("agent_journal_commit", {
+      txn: TXN,
+      payload: JSON.stringify({ review: { hunks: [] }, postimage: "after" }),
+    });
+  });
+
   it("rejects with a JournalRefusal when the commit is refused", async () => {
     invokeMock.mockRejectedValueOnce({ code: "conflict", message: "m", detail: { journalCode: "JOURNAL_DEGRADED" } });
     await expect(commitControlledWrite(TXN, "x")).rejects.toMatchObject({ journalCode: "JOURNAL_DEGRADED" });

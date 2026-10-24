@@ -49,6 +49,13 @@ export interface PrepareInput {
 import type { PreparedTxn } from "./journalIpc";
 export type { PreparedTxn };
 
+/**
+ * Extra fields a commit carries beside its `postimage`, computed between the
+ * apply and the commit (`journaledMutation.ts` effects). Opaque here: the
+ * journal validates them (it refuses an unknown field).
+ */
+export type CommitExtras = Readonly<Record<string, unknown>>;
+
 export interface CommittedTxn {
   doc: string;
   revision: string;
@@ -109,9 +116,12 @@ export async function prepareControlledWrite(input: PrepareInput): Promise<Prepa
   return parsePreparedTxn(command, await call(command, { payload: JSON.stringify(input) }));
 }
 
-/** Commit an open transaction with the applied text. Rejects with a `JournalRefusal`. */
-export async function commitControlledWrite(txn: string, postimage: string): Promise<CommittedTxn> {
-  const r = await call("agent_journal_commit", { txn, payload: JSON.stringify({ postimage }) });
+/**
+ * Commit an open transaction with the applied text and any `extras` (which
+ * never replace the postimage). Rejects with a `JournalRefusal`.
+ */
+export async function commitControlledWrite(txn: string, postimage: string, extras?: CommitExtras): Promise<CommittedTxn> {
+  const r = await call("agent_journal_commit", { txn, payload: JSON.stringify({ ...extras, postimage }) });
   if (
     !isObject(r) ||
     !isString(r.doc) ||

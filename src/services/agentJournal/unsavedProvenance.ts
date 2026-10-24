@@ -19,7 +19,7 @@
  *
  * @coordinates-with services/agentJournal/provenance/session.ts — freeze and fork
  * @coordinates-with services/agentJournal/saveJournal.ts — freezes a save's buffer
- * @coordinates-with services/mcpBridge/v2/journaledEdit.ts — freezes the preimage, forks at the apply
+ * @coordinates-with services/agentJournal/journaledMutation.ts — freezes the preimage, forks at the apply
  * @module services/agentJournal/unsavedProvenance
  */
 

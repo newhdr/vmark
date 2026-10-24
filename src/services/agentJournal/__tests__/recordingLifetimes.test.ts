@@ -3,10 +3,12 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
-import type { CapturedSave, CommittedTxn } from "../journalClient";
+import { prepareControlledWrite, type CapturedSave, type CommittedTxn } from "../journalClient";
 import { journalActorFor } from "../journalActor";
 import { beginJournalSave } from "../saveJournal";
-import { runControlledWrite } from "../controlledMutation";
+import { prepareWithBaselineRetry } from "../controlledMutation";
+import { runJournaledMutation, type JournaledOutcome } from "../journaledMutation";
+import { journalTabLife, resetJournalBases } from "../documentIdentity";
 import { resetUnsavedProvenanceSources } from "../unsavedProvenance";
 import { resetRecordingLifetimes, sameOpenFiles, startRecordingLifetimes, trackedRecordingKeys } from "../recordingReport";
 import { beginRecordingSubmission, useJournalRecordingStore } from "@/stores/journalRecordingStore";
@@ -38,18 +40,26 @@ function holdNextCommit(): (ack: CommittedTxn) => void {
   return (v) => answer(v);
 }
 
+/** An agent write to `path` from a tab of its own (the outcome is reported under the key, not the tab). */
 function agentWrite(path: string, text: string) {
-  return runControlledWrite({
-    prepare: { docKey: key(path), parent: null, preimage: "", actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write", baselineProvenance: null, baselineTouched: false },
+  return runJournaledMutation({
+    tabId: "agent",
+    life: journalTabLife("agent"),
+    docKey: key(path),
+    preimage: "",
+    retryHint: "retry",
+    prepare: (b) => prepareWithBaselineRetry({ ...b, actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write" }, prepareControlledWrite),
     verify: () => null,
     apply: () => ({ postimage: text, value: null }),
     recover: () => text,
+    outcome: (o: JournaledOutcome<null>) => o,
   });
 }
 
 let stop: () => void = () => {};
 beforeEach(() => {
   fake.reset();
+  resetJournalBases();
   useJournalRecordingStore.getState().reset();
   useDocumentStore.setState({ documents: {} });
   resetRecordingLifetimes();

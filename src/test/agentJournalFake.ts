@@ -26,6 +26,7 @@ import type {
   AbortReason,
   CaptureInput,
   CapturedSave,
+  CommitExtras,
   CommittedTxn,
   PrepareInput,
   PreparedTxn,
@@ -126,7 +127,8 @@ function createFake() {
     return { doc: input.docKey, txn, revision, generation: String(counter), baseline };
   };
 
-  const commit = async (txn: string, postimage: string): Promise<CommittedTxn> => {
+  // `_extras`: recorded by the mock for assertions; the fake's writer ignores them.
+  const commit = async (txn: string, postimage: string, _extras?: CommitExtras): Promise<CommittedTxn> => {
     const t = txns.get(txn);
     if (!t) throw new JournalRefusal("INVALID_REQUEST", "unknown txn");
     const d = doc(t.docKey);
