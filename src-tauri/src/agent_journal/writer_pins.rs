@@ -126,8 +126,24 @@ impl Writer {
         }
         g.unpinned_labels.remove(label);
         // The label itself, so a capture still in flight cannot register a
-        // name this window never held (labels are never reused).
+        // name this window never held. A label can be built again (`main`
+        // is a fixed label), so the rebuild reopens it
+        // (`reopen_window_label`).
         g.remember_released(label);
+    }
+
+    /// The app window `label` is being built again (`main` is rebuilt under
+    /// its fixed label): forget the bare label `release_window_label`
+    /// remembered, so the new window's names register. Every released name
+    /// stays remembered, so a late capture under a name the old window held
+    /// is still refused; one in flight under a name it never held now
+    /// registers, over-pinning that base until the label is released again.
+    /// Idempotent; a no-op for a label never released, and for a name.
+    pub fn reopen_window_label(&self, label: &str) {
+        if window_label(label) != label {
+            return;
+        }
+        self.lock().released.retain(|r| r != label);
     }
 
     /// Attribute an unpinned overflow to the app windows alive now. Past
@@ -156,3 +172,7 @@ impl Writer {
         self.lock().external.insert(revision);
     }
 }
+
+#[cfg(test)]
+#[path = "writer_reopen.test.rs"]
+mod reopen_tests;

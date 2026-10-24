@@ -204,8 +204,8 @@ pub(crate) fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             window_status::prune(app, &label);
             // Drop the window's filesystem watcher. The frontend's own
             // `stop_watching` invoke runs in the dying webview and can race
-            // its teardown; window labels are never reused, so without this
-            // each closed window would leak a recursive watcher (idempotent).
+            // its teardown, so without this each closed window would leak a
+            // recursive watcher (idempotent).
             if let Err(e) = crate::watcher::stop_watching(label.clone()) {
                 log::warn!("[Tauri] Failed to stop watcher for {:?}: {}", label, e);
             }

@@ -268,26 +268,9 @@ impl AgentJournalState {
     }
 }
 
-/// The app window `label` was destroyed: release the journal base roots
-/// its documents held (`Writer::release_window_label`), then attribute any
-/// unpinned overflow to the windows still open
-/// (`Writer::reconcile_live_windows`). No-op until ready.
-pub fn release_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>, label: &str) {
-    use tauri::Manager;
-    if let Some(writer) = app
-        .try_state::<AgentJournalState>()
-        .and_then(|s| s.writer())
-    {
-        writer.release_window_label(label);
-        let live = app
-            .webview_windows()
-            .into_keys()
-            .filter(|l| l != label)
-            .collect();
-        writer.reconcile_live_windows(&live);
-    }
-}
-
+#[path = "service_windows.rs"]
+mod windows;
+pub use windows::{release_window_label, reopen_window_label};
 #[path = "service_off.rs"]
 mod off;
 pub use off::StartFailure;

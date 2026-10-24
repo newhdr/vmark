@@ -246,7 +246,8 @@ fn releasing_an_app_window_label_drops_exactly_its_bases_and_they_never_return()
 
 /// A capture in flight when its app window is destroyed registers a tab
 /// name the window never held before: the release must still refuse it, or
-/// the stale base stays pinned until restart. Labels are never reused.
+/// the stale base stays pinned until restart. A label built again (`main`)
+/// is reopened first (`writer_reopen.test.rs`).
 #[test]
 fn a_capture_landing_after_its_app_window_closed_registers_no_new_name() {
     let (_dir, w, _c, _) = setup();
