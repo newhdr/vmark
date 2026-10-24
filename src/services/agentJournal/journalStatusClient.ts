@@ -20,6 +20,9 @@
  *     warnings, a deferred or failed pass, a blob sweep error), so none
  *     reads as healthy. The counts of the startup report stay with their
  *     own readers.
+ *   - `uncertifiedFallbacks` is required and checked the same way: the
+ *     selection certificates that fell back to a whole-document barrier
+ *     since the journal opened.
  *
  * @coordinates-with src-tauri/src/agent_journal/service.rs — `AgentJournalStatus`
  * @module services/agentJournal/journalStatusClient
@@ -88,6 +91,8 @@ export interface JournalHealth {
   identityError: string | null;
   /** The startup retention pass, when it ran or tried to. */
   retention: JournalRetention | null;
+  /** Selection certificates recorded as a whole-document barrier instead, since the journal opened. */
+  uncertifiedFallbacks: number;
 }
 
 function parseWarning(w: unknown): JournalRetentionWarning | null {
@@ -143,7 +148,8 @@ export async function readJournalHealth(): Promise<JournalHealth> {
     !optionalString(r.identityError) ||
     !isIdentityMode(r.identity) ||
     (r.identity === "disabled") !== (r.identityError !== undefined) ||
-    retention === null
+    retention === null ||
+    !isCount(r.uncertifiedFallbacks)
   ) {
     throw malformed(COMMAND);
   }
@@ -157,5 +163,6 @@ export async function readJournalHealth(): Promise<JournalHealth> {
     identity: r.identity,
     identityError: r.identityError ?? null,
     retention: retention ?? null,
+    uncertifiedFallbacks: r.uncertifiedFallbacks,
   };
 }

@@ -196,6 +196,7 @@ fn all_records() -> Vec<Record> {
             initiator: Actor::Human,
             tool: "document.write".into(),
             review_op: op,
+            certificate: None,
         });
     }
     for actor in all_actors() {

@@ -86,7 +86,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   bus.handlers.clear();
   journal.docs.clear();
-  journal.health = { phase: "ready", generation: "1", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", error: null, identityError: null, retention: null };
+  journal.health = { phase: "ready", generation: "1", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", error: null, identityError: null, retention: null, uncertifiedFallbacks: 0 };
   useJournalRecordingStore.getState().reset();
   // The real unrecorded-writes list reads the journal over IPC: one entry for /notes.md.
   vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
@@ -269,7 +269,7 @@ describe("McpHistoryButton", () => {
     });
 
     it("does not poll a journal that never started", async () => {
-      journal.health = { phase: "failed", generation: null, readOnly: false, degraded: false, liveUpdates: "failed", identity: "sessionOnly", error: "disk", identityError: null, retention: null };
+      journal.health = { phase: "failed", generation: null, readOnly: false, degraded: false, liveUpdates: "failed", identity: "sessionOnly", error: "disk", identityError: null, retention: null, uncertifiedFallbacks: 0 };
       render(<McpHistoryButton />);
       await tick(0);
       const reads = vi.mocked(readJournalHealth).mock.calls.length;

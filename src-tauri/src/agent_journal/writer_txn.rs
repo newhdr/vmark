@@ -13,16 +13,19 @@
 //!
 //! Every `committed` carries a provenance payload: the worker's
 //! certified map (checked by `writer_epoch::check_payload`), the revert's
-//! exact single change, or a writer-built whole-document barrier.
+//! exact single change, a selection edit's checked certificate
+//! (`certificate`), or a writer-built whole-document barrier.
 
 use crate::agent_journal::effects_rules::{check_effects, EffectsCtx};
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
 use crate::agent_journal::projection::{TxnEntry, TxnStatus};
+use crate::agent_journal::provenance::Certificate;
 use crate::agent_journal::record::Record;
 use crate::agent_journal::revert_gate::RevertDecision;
 use crate::agent_journal::review::ReviewOp;
 use crate::agent_journal::review_rules::{check_prepare, check_restore};
+use crate::agent_journal::writer::certificate::Certification;
 use crate::agent_journal::writer::{
     CommitOutcome, CommitRequest, Durability, Inner, PrepareRequest, Prepared, Reservation, Writer,
 };
@@ -57,6 +60,13 @@ impl Writer {
         if g.proj.postimage_of(head).as_ref() != Some(&pre) {
             return Err(TxnError::StaleParent { head });
         }
+        if let Some(c) = &req.certificate {
+            if c.basis() != basis_of(req.parent) || c.pre_hash() != pre.digest_hex() {
+                return Err(TxnError::InvalidRequest(
+                    "the certificate is not bound to the parent".into(),
+                ));
+            }
+        }
         check_prepare(&g.proj, req.doc, &req.review_op)?;
         if let ReviewOp::HunkRevert { hunk_id, .. } = &req.review_op {
             let p = plan(&g.proj, &mut g.blobs, req.doc, hunk_id, &req.preimage)?;
@@ -77,6 +87,7 @@ impl Writer {
             initiator: req.initiator,
             tool: req.tool,
             review_op: req.review_op,
+            certificate: req.certificate,
         };
         let env = self.append(g, txn, record, &[(&pre, &req.preimage)])?;
         g.reservations.insert(req.doc, Reservation { txn });
@@ -88,6 +99,18 @@ impl Writer {
     }
 
     pub fn commit(&self, txn: TxnId, req: CommitRequest) -> Result<CommitOutcome, TxnError> {
+        self.commit_with(txn, req, None).map(|(out, _)| out)
+    }
+
+    /// `commit`, checking a selection edit's certificate (`sent` with the
+    /// commit, else the prepared one): certified, its window and hunks;
+    /// otherwise the barrier (`certificate`).
+    pub(crate) fn commit_with(
+        &self,
+        txn: TxnId,
+        req: CommitRequest,
+        sent: Option<&Certificate>,
+    ) -> Result<(CommitOutcome, Certification), TxnError> {
         let mut g = self.lock();
         // Refused, not queued: no content has changed yet.
         g.healthy()?;
@@ -95,7 +118,8 @@ impl Writer {
         let post = BlobHash::of_text(&req.postimage);
         check_restore(&g.proj, &t, &post, req.resolves)?;
         let preimage = referenced_blob(&mut g.blobs, &t.preimage)?;
-        let (window, reverted) = self.commit_window(&mut g, &t, &preimage, &req)?;
+        let (window, reverted, certification) =
+            self.commit_window(&mut g, &t, &preimage, &req, sent)?;
         let reverted_ref = reverted.as_ref().map(|(id, r)| (id, *r));
         let ctx = EffectsCtx {
             doc: g.proj.docs.get(&t.doc),
@@ -120,11 +144,12 @@ impl Writer {
             effects: req.effects,
         };
         let durable = self.terminal(&mut g, t.doc, txn, record, vec![(post, req.postimage)])?;
-        Ok(CommitOutcome {
+        let out = CommitOutcome {
             revision: t.revision,
             applied: true,
             durable,
-        })
+        };
+        Ok((out, certification))
     }
 
     pub fn abort(&self, txn: TxnId, reason: &str) -> Result<Durability, TxnError> {

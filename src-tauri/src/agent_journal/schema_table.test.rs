@@ -1,4 +1,4 @@
-// WI-AL2.0s — the per-version table: a kind labelled below its version is corrupt, the writer labels each record with its minimum (never below v2), and a v3 label on a v2 kind decodes
+// WI-AL2.0s — the per-version table: a kind labelled below its version is corrupt, the writer labels each record with its minimum (never below v2), and a v3 label on a v2 kind decodes, and a prepared record's selection certificate is a v3 field (WI-AL2.1c)
 //! The per-version record table (R35).
 //!
 //! Edge cases: a v1 label on a v2 kind (refused by `check` directly, since
@@ -7,9 +7,15 @@
 //! (`Future`, never `Corrupt`).
 
 use super::{check, label, min_schema};
+use crate::agent_journal::actor::Actor;
 use crate::agent_journal::codec::{self, Decoded};
+use crate::agent_journal::ids::{BlobHash, RevisionId};
 use crate::agent_journal::ids::{DocId, TxnId};
-use crate::agent_journal::record::{Envelope, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V2};
+use crate::agent_journal::provenance::{Provenance, ProvenancePayload, PROVENANCE_CAP};
+use crate::agent_journal::record::{
+    Envelope, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3,
+};
+use crate::agent_journal::review::ReviewOp;
 
 fn env(version: u32, record: Record) -> Envelope {
     Envelope {
@@ -60,4 +66,31 @@ fn a_v3_label_on_a_v2_kind_decodes_and_one_past_the_maximum_is_future() {
         codec::decode(&past).unwrap(),
         Decoded::Future { version, .. } if version == MAX_SUPPORTED_SCHEMA + 1
     ));
+}
+
+/// A `prepared` record, with or without a selection edit's certificate.
+fn prepared(certificate: Option<ProvenancePayload>) -> Record {
+    Record::Prepared {
+        doc: DocId::new(),
+        parent: None,
+        revision: RevisionId::new(),
+        preimage: BlobHash::of_text("a"),
+        actor: Actor::Human,
+        initiator: Actor::Human,
+        tool: "selection.set".into(),
+        review_op: ReviewOp::Review,
+        certificate,
+    }
+}
+
+#[test]
+fn a_prepared_certificate_is_a_v3_field() {
+    let map = Provenance::new(1, PROVENANCE_CAP).unwrap();
+    let cert = ProvenancePayload::encode("d", "0", "genesis", "a", "a", &map).unwrap();
+    assert_eq!(min_schema(&prepared(None)), SCHEMA_V1);
+    assert_eq!(label(&prepared(None)), SCHEMA_V2, "no certificate stays v2");
+    assert_eq!(min_schema(&prepared(Some(cert.clone()))), SCHEMA_V3);
+    assert_eq!(label(&prepared(Some(cert.clone()))), SCHEMA_V3);
+    let err = check(&env(SCHEMA_V2, prepared(Some(cert)))).unwrap_err();
+    assert_eq!(err.code(), "JOURNAL_CORRUPT", "{err}");
 }

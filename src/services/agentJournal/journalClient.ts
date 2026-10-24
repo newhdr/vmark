@@ -12,6 +12,9 @@
  *   - Generations are canonical decimal strings: a JavaScript number loses
  *     precision above 2^53. A reply that is not the expected shape is
  *     refused as `JOURNAL_UNAVAILABLE`, never trusted.
+ *   - A prepare and a commit answer whether a selection certificate was
+ *     used; a fallback to the whole-document barrier is logged here, once
+ *     for every caller, and the journal counts it in its status.
  *
  * @coordinates-with src-tauri/src/agent_journal/commands.rs — the commands
  * @module services/agentJournal/journalClient
@@ -19,7 +22,9 @@
 
 import type { JournalMcpActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
+import type { SelectionCertificate } from "./selectionCertificate";
 import { callJournal as call, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
+import { journalWarn } from "@/utils/debug";
 
 /** Why re-verification refused to apply. */
 export type AbortReason = "edited" | "closed" | "composing" | "selection" | "applyRefused";
@@ -51,6 +56,11 @@ export interface PrepareInput {
    * equal again: an equal-text baseline is then still recorded.
    */
   baselineTouched: boolean;
+  /**
+   * A Source `selection.set`'s exact change (`selectionCertificate.ts`).
+   * Omitted otherwise: the commit is then a whole-document barrier.
+   */
+  certificate?: SelectionCertificate | null;
 }
 
 import type { PreparedTxn } from "./journalIpc";
@@ -117,10 +127,27 @@ export interface CapturedSave {
   revision: string | null;
 }
 
+/** Why the journal did not use a selection certificate (`FallbackReason` in Rust). */
+const FALLBACK_REASONS = ["notTheParent", "notThePostimage", "wholeBreak", "splitsACharacter", "noFreeSlots"] as const;
+
+/**
+ * Check a reply's `certified` and `fallbackReason` (a certified reply has no
+ * reason) and log a fallback: the write was recorded as a barrier.
+ */
+function checkCertification(command: string, r: Record<string, unknown>, doc: string): void {
+  const reason = r.fallbackReason;
+  const known = reason === null || FALLBACK_REASONS.some((f) => f === reason);
+  if (typeof r.certified !== "boolean" || !known || (r.certified && reason !== null)) throw malformed(command);
+  if (reason !== null) journalWarn(`${command}: the selection certificate for ${doc} was not used (${String(reason)}); recorded as a barrier`);
+}
+
 /** Prepare a controlled write. Rejects with a `JournalRefusal`. */
 export async function prepareControlledWrite(input: PrepareInput): Promise<PreparedTxn> {
   const command = "agent_journal_prepare";
-  return parsePreparedTxn(command, await call(command, { payload: JSON.stringify(input) }));
+  const r = await call(command, { payload: JSON.stringify(input) });
+  const prepared = parsePreparedTxn(command, r);
+  checkCertification(command, r as Record<string, unknown>, prepared.doc);
+  return prepared;
 }
 
 /**
@@ -138,6 +165,7 @@ export async function commitControlledWrite(txn: string, postimage: string, extr
   ) {
     throw malformed("agent_journal_commit");
   }
+  checkCertification("agent_journal_commit", r, r.doc);
   return { doc: r.doc, revision: r.revision, applied: r.applied, durable: r.durable };
 }
 

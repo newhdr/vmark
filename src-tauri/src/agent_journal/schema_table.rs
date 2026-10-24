@@ -14,11 +14,15 @@
 //! by `codec_v1`.
 
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::record::{Envelope, Record, SCHEMA_V1, SCHEMA_V2};
+use crate::agent_journal::record::{Envelope, Record, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3};
 
 /// The lowest schema version that may carry `record`.
 pub(crate) fn min_schema(record: &Record) -> u32 {
     match record {
+        Record::Prepared {
+            certificate: Some(_),
+            ..
+        } => SCHEMA_V3,
         Record::JournalHeader { .. }
         | Record::Prepared { .. }
         | Record::Aborted { .. }

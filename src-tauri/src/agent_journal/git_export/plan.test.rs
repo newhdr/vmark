@@ -306,6 +306,7 @@ fn a_controlled_revision_names_its_tool_and_a_restore_says_so() {
             initiator: Actor::Human,
             tool: "history.restore".into(),
             review_op: ReviewOp::None,
+            certificate: None,
             status: TxnStatus::Committed,
             seq: 1,
         },

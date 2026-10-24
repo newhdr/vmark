@@ -63,6 +63,7 @@ fn prepared(review_op: ReviewOp) -> Envelope {
         initiator: Actor::Human,
         tool: "t".into(),
         review_op,
+        certificate: None,
     })
 }
 

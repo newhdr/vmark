@@ -34,9 +34,12 @@
  *     and a user edit, selection move, focus switch or composition during
  *     the prepare aborts it — a focus switch even when the request named the
  *     focused tab, since the edit targets the user's selection. The apply
- *     resolves the editor again after the prepare. The commit is a
- *     whole-document barrier: no operation map is claimed for the
- *     replacement. A replacement the surface proves changes nothing
+ *     resolves the editor again after the prepare. In Source, the exact
+ *     change (`{from, to, insert}` over the editor's text, when that text
+ *     is the journal's preimage) is certified with the prepare, so older
+ *     hunks elsewhere map through it. In WYSIWYG the commit is a
+ *     whole-document barrier: the serialized change is not known before
+ *     the apply, and no operation map is claimed for it. A replacement the surface proves changes nothing
  *     (`wouldChange`) is answered before the prepare with the current
  *     revision. An apply that throws is read back with the editor mirrored
  *     into the store first (`journaledEdit.ts` answers it).
@@ -201,6 +204,8 @@ export async function handleSelectionSet(
     // The journal's preimage is the store's buffer, flushed from the editor.
     flushLiveEditors();
     const preimage = useDocumentStore.getState().documents[tab.tabId]?.content ?? contentBefore;
+    // Source offsets name preimage positions only when the editor holds the preimage.
+    const change = surface.mode === "source" && contentBefore === preimage ? { ...surface.range(), insert: content } : undefined;
 
     const outcome = await runJournaledEdit(id, {
       tab,
@@ -209,6 +214,7 @@ export async function handleSelectionSet(
       // or not the request named it.
       requireFocus: true,
       tool: "selection.set",
+      ...(change ? { change } : {}),
       context,
       apply: () => applySelectionEdit(tab.tabId, content),
       recover: () => recoverSelectionEdit(tab.tabId),

@@ -12,13 +12,16 @@
  * read-back after the caller's `recover`, and the MCP answer.
  *
  * Key decisions:
- *   - Every tool's commit is a whole-document barrier: none of them hands
- *     the journal an operation map. `document.write` and `document.transform`
- *     replace the whole text; `workflow.apply_patch` re-stringifies a YAML
- *     tree; `selection.set` in WYSIWYG re-serializes the whole document. A
- *     map the journal could certify would need an armed editing epoch and a
- *     postimage-exact op list for each of these, so the journal records the
- *     conservative barrier rather than a guessed mapping (fail closed).
+ *   - A commit is a whole-document barrier unless the edit names its exact
+ *     change (`change`): only a Source `selection.set` knows one before it
+ *     applies. Its certificate goes with the prepare; the journal binds it
+ *     to the parent it mints and checks it against the applied text, and
+ *     falls back to the barrier when it does not hold. `document.write`,
+ *     `document.transform`, `workflow.apply_patch` and a WYSIWYG
+ *     `selection.set` send none: the journal records the conservative
+ *     barrier rather than a guessed mapping (fail closed).
+ *   - A certificate that cannot be built is logged and not sent: the write
+ *     goes ahead as a barrier, never refused for it.
  *   - Refusals and aborts are answered here, so a caller only sees the
  *     applied outcome; `null` means the request has been answered. An apply
  *     that threw and changed the buffer is answered INTERNAL with
@@ -38,6 +41,7 @@
  *
  * @coordinates-with services/agentJournal/journaledMutation.ts — the coordinator
  * @coordinates-with services/agentJournal/controlledMutation.ts — the controlled prepare
+ * @coordinates-with services/agentJournal/selectionCertificate.ts — the certificate of `change`
  * @coordinates-with writeTarget.ts — the re-verify
  * @coordinates-with journalV2Error.ts — refusal and abort answers
  * @module services/mcpBridge/v2/journaledEdit
@@ -50,6 +54,8 @@ import { prepareWithBaselineRetry } from "@/services/agentJournal/controlledMuta
 import { runJournaledMutation, type JournaledOutcome } from "@/services/agentJournal/journaledMutation";
 import { journalActorFor } from "@/services/agentJournal/journalActor";
 import { journalTabLife } from "@/services/agentJournal/documentIdentity";
+import { selectionCertificate, type ExactChange, type SelectionCertificate } from "@/services/agentJournal/selectionCertificate";
+import { journalWarn } from "@/utils/debug";
 import { structuredError } from "./tabGuard";
 import { captureWriteTarget, recheckWriteTarget, reverifyWriteTarget } from "./writeTarget";
 import { abortedError, appliedWithErrorError, journalRefusalError, recoveryRequiredError } from "./journalV2Error";
@@ -66,6 +72,11 @@ export interface JournaledEdit<T> {
   requireFocus: boolean;
   /** The tool name recorded on the revision (`document.transform`, …). */
   tool: string;
+  /**
+   * The exact change `apply` will dispatch, in `preimage` offsets: sent as a
+   * certificate. Omitted when the edit cannot name one (a barrier).
+   */
+  change?: ExactChange;
   context: McpWriteContext;
   /**
    * Apply now, synchronously. `postimage` is the text the store holds
@@ -84,6 +95,17 @@ function storeText(tabId: string): string {
   const text = useDocumentStore.getState().documents[tabId]?.content;
   if (text === undefined) throw new Error(`tab ${tabId} has no document`);
   return text;
+}
+
+/** The certificate of `edit.change` against the prepare's `preimage`; `null` without one. */
+async function certificateFor(edit: JournaledEdit<unknown>, preimage: string): Promise<SelectionCertificate | null> {
+  if (!edit.change || preimage !== edit.preimage) return null;
+  try {
+    return await selectionCertificate(preimage, edit.change);
+  } catch (error) {
+    journalWarn(`${edit.tool}: no certificate for its change; recording a barrier:`, error);
+    return null;
+  }
 }
 
 /** The applied edit, or `null` when the request was refused or aborted (already answered). */
@@ -109,8 +131,9 @@ export async function runJournaledEdit<T>(
     preimage: edit.preimage,
     retryHint: "re-read and retry",
     recheck: () => recheckWriteTarget(target),
-    prepare: (baseline) =>
-      prepareWithBaselineRetry(
+    prepare: async (baseline) => {
+      const certificate = await certificateFor(edit, baseline.preimage);
+      return prepareWithBaselineRetry(
         {
           docKey: baseline.docKey,
           parent: baseline.parent,
@@ -119,9 +142,11 @@ export async function runJournaledEdit<T>(
           tool: edit.tool,
           baselineProvenance: baseline.baselineProvenance,
           baselineTouched: baseline.baselineTouched,
+          ...(certificate ? { certificate } : {}),
         },
         prepareControlledWrite,
-      ),
+      );
+    },
     verify: () => reverifyWriteTarget(target),
     apply: edit.apply,
     recover: () => {

@@ -78,6 +78,7 @@ pub fn prepare_req(
         initiator: agent(),
         tool: "document.write".into(),
         review_op: op,
+        certificate: None,
     }
 }
 

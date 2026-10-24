@@ -26,10 +26,10 @@ import { resolveTab, type GuardedTab } from "../tabGuard";
 const BRIDGE_TOTAL_MS = 20_000;
 const TAB = "t1";
 const KEY = "path:/notes/a.md";
-const PREPARED = { doc: "doc-1", txn: "txn-1", revision: "rev-1", generation: "1", baseline: null };
+const PREPARED = { doc: "doc-1", txn: "txn-1", revision: "rev-1", generation: "1", baseline: null, certified: false, fallbackReason: null };
 const DEFAULTS: Record<string, unknown> = {
   agent_journal_prepare: PREPARED,
-  agent_journal_commit: { doc: "doc-1", revision: "rev-1", applied: true, durable: true },
+  agent_journal_commit: { doc: "doc-1", revision: "rev-1", applied: true, durable: true, certified: false, fallbackReason: null },
   agent_journal_abort: { durable: true },
 };
 

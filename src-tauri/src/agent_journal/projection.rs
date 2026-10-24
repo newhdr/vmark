@@ -137,6 +137,8 @@ pub struct TxnEntry {
     pub initiator: Actor,
     pub tool: String,
     pub review_op: ReviewOp,
+    /// A selection edit's certificate, bound to `parent`.
+    pub certificate: Option<ProvenancePayload>,
     pub status: TxnStatus,
     pub seq: u64,
 }

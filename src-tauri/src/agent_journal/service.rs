@@ -140,6 +140,8 @@ pub struct AgentJournalStatus {
     pub live_updates: LiveUpdates,
     pub truncated_tail_bytes: u64,
     pub uncommitted_at_start: usize,
+    /// Selection certificates that fell back to a barrier since open.
+    pub uncertified_fallbacks: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub legacy: Option<LegacyImportReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -234,6 +236,7 @@ impl AgentJournalState {
             live_updates: self.live_updates.get(),
             truncated_tail_bytes: 0,
             uncommitted_at_start: 0,
+            uncertified_fallbacks: 0,
             legacy: None,
             retirement: None,
             identity,
@@ -256,6 +259,7 @@ impl AgentJournalState {
                 status.degraded = s.writer.health().is_err() || s.writer.any_degraded_queue();
                 status.truncated_tail_bytes = s.open.truncated_tail_bytes;
                 status.uncommitted_at_start = s.open.uncommitted.len();
+                status.uncertified_fallbacks = s.writer.uncertified_fallbacks();
                 status.retirement = Some(s.retirement.clone());
                 status.gc = Some(s.gc.clone());
                 match &s.legacy {

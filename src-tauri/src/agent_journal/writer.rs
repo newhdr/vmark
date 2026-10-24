@@ -37,12 +37,15 @@ use replay::Replay;
 
 pub use crate::agent_journal::writer_budget::RetentionBudget;
 
+#[path = "certificate.rs"]
+pub mod certificate;
 #[path = "writer_replay.rs"]
 mod replay;
 pub use crate::agent_journal::writer_observe::{
     Journaled, LinearizeRequest, Linearized, ObserveOutcome, ObserveRequest,
 };
 pub use crate::agent_journal::writer_review::ReviewRequest;
+use crate::agent_journal::writer_types::now_ms;
 pub use crate::agent_journal::writer_types::{
     CommitOutcome, CommitRequest, Durability, JournalEvent, OpenReport, PrepareRequest, Prepared,
     Reservation, Snapshot, WriterConfig,
@@ -77,6 +80,8 @@ pub(crate) struct Inner {
     pub(crate) corrupt: Option<String>,
     /// The last capture seq per session (`capture_seq`); in memory only.
     pub(crate) capture_seqs: CaptureSeqs,
+    /// Certificates that fell back to a barrier since open (`certificate`).
+    pub(crate) uncertified_fallbacks: u64,
 }
 
 impl Inner {
@@ -125,12 +130,6 @@ pub struct Writer {
     pub(crate) inner: Mutex<Inner>,
     subscribers: Mutex<Vec<mpsc::Sender<JournalEvent>>>,
     pub(crate) faults: Arc<Faults>,
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 impl Inner {
@@ -198,6 +197,7 @@ impl Writer {
                 unpinned_overflow: false,
                 corrupt: None,
                 capture_seqs: CaptureSeqs::default(),
+                uncertified_fallbacks: 0,
             }),
             subscribers: Mutex::new(Vec::new()),
             faults: cfg.faults,

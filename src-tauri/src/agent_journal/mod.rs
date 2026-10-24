@@ -20,8 +20,8 @@
 //!   side, pinned by `src/test/fixtures/agentJournal/*.json`.
 //! - `writer*` — the single writer: reservations, parent CAS, degraded
 //!   queue, generation + broadcast, pin roots; `writer_epoch` (editing
-//!   epochs, payload rules), `writer_revert` (the exact revert). `hydration` — the
-//!   window-side consumer of a snapshot plus the broadcast.
+//!   epochs, payload rules), `writer_revert` (the exact revert), `certificate`
+//!   (selection edits). `hydration` — the window-side consumer of a snapshot plus the broadcast.
 //! - `controlled` (its wire shapes in `controlled_wire`), `doc_registry`, `degraded_drain`, `refusal`, `commands`
 //!   — the MCP edit tools as a window drives them over IPC: prepare,
 //!   commit, abort, and the background drain of a degraded document.

@@ -65,6 +65,75 @@ impl TryFrom<PayloadWire> for ProvenancePayload {
     }
 }
 
+/// A selection edit's certificate: a payload without the document, epoch
+/// and basis, which the window cannot know before the writer mints the
+/// parent. Decoding validates every other field rule; `bind` names them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "CertificateWire")]
+pub struct Certificate(ProvenancePayload);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CertificateWire {
+    provenance_version: u32,
+    unit: String,
+    cap: u64,
+    pre_hash: String,
+    post_hash: String,
+    body: Body,
+}
+
+/// The placeholder ids an unbound certificate is validated under.
+const UNBOUND: &str = "unbound";
+
+impl TryFrom<CertificateWire> for Certificate {
+    type Error = String;
+    fn try_from(w: CertificateWire) -> Result<Self, String> {
+        PayloadWire {
+            provenance_version: w.provenance_version,
+            unit: w.unit,
+            cap: w.cap,
+            document: UNBOUND.into(),
+            epoch: "0".into(),
+            basis: UNBOUND.into(),
+            pre_hash: w.pre_hash,
+            post_hash: w.post_hash,
+            body: w.body,
+        }
+        .try_into()
+        .map(Self)
+    }
+}
+
+impl Certificate {
+    /// The SHA-256 (bare hex) of the text the certificate maps from.
+    pub fn pre_hash(&self) -> &str {
+        &self.0.pre_hash
+    }
+
+    /// The UTF-16 length of the text the certificate maps from.
+    pub fn len_a(&self) -> u64 {
+        self.0.body.len_a
+    }
+
+    /// The payload this certificate is once bound to `document`, `epoch`
+    /// and `basis`.
+    pub fn bind(
+        self,
+        document: &str,
+        epoch: &str,
+        basis: &str,
+    ) -> Result<ProvenancePayload, String> {
+        check_ids(document, epoch, basis)?;
+        Ok(ProvenancePayload {
+            document: document.into(),
+            epoch: epoch.into(),
+            basis: basis.into(),
+            ..self.0
+        })
+    }
+}
+
 fn is_hex64(s: &str) -> bool {
     s.len() == 64
         && s.bytes()
@@ -169,6 +238,11 @@ impl ProvenancePayload {
 
     pub fn basis(&self) -> &str {
         &self.basis
+    }
+
+    /// The SHA-256 (bare hex) of the text the payload maps from.
+    pub fn pre_hash(&self) -> &str {
+        &self.pre_hash
     }
 }
 

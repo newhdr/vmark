@@ -197,6 +197,7 @@ fn prepared(doc: DocId, parent: Option<RevisionId>, revision: RevisionId, pre: &
         initiator: agent(),
         tool: "test".into(),
         review_op: ReviewOp::None,
+        certificate: None,
     }
 }
 

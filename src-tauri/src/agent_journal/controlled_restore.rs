@@ -120,6 +120,7 @@ pub fn prepare_restore(
             review_op,
             baseline_provenance,
             baseline_touched: req.baseline_touched,
+            certificate: None,
         },
     )?;
     Ok(RestorePrepared {
@@ -131,4 +132,15 @@ pub fn prepare_restore(
         text,
         resolves,
     })
+}
+
+/// The uncommitted transaction a prepared restore of its preimage resolves.
+pub(crate) fn restored_uncommitted(w: &Writer, txn: TxnId) -> Option<TxnId> {
+    let g = w.lock();
+    match &g.proj.txns.get(&txn)?.review_op {
+        ReviewOp::Restore {
+            source: RestoreSource::UncommittedPreimage { txn },
+        } => Some(*txn),
+        _ => None,
+    }
 }

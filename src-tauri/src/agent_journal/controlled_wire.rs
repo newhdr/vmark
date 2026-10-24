@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
+use crate::agent_journal::provenance::Certificate;
 use crate::agent_journal::provenance_field::ProvenanceField;
+use crate::agent_journal::writer::certificate::FallbackReason;
 
 /// Longest accepted tool name, in bytes.
 pub const TOOL_MAX_BYTES: usize = 64;
@@ -37,6 +39,10 @@ pub struct ControlledPrepareRequest {
     /// then still recorded (as a `snapshotOnly` barrier without a map).
     #[serde(default)]
     pub baseline_touched: bool,
+    /// A Source `selection.set`'s exact change, certified before the
+    /// apply and bound to the parent the writer mints (`certificate`).
+    #[serde(default)]
+    pub certificate: Option<Certificate>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -49,12 +55,19 @@ pub struct ControlledPrepared {
     pub generation: u64,
     /// The human revision recorded for unjournaled buffer text, if any.
     pub baseline: Option<RevisionId>,
+    /// The prepare persisted a certificate bound to the minted parent.
+    pub certified: bool,
+    /// Why a sent certificate was not used; `None` when none was sent.
+    pub fallback_reason: Option<FallbackReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ControlledCommitRequest {
     pub(crate) postimage: String,
+    /// A WYSIWYG `selection.set`'s map, certified after the apply.
+    #[serde(default)]
+    pub(crate) certificate: Option<Certificate>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -64,6 +77,10 @@ pub struct ControlledCommitted {
     pub revision: RevisionId,
     pub applied: bool,
     pub durable: bool,
+    /// The effects came from a checked certificate, not the barrier.
+    pub certified: bool,
+    /// Why a certificate was not used at commit; `None` when none applied.
+    pub fallback_reason: Option<FallbackReason>,
 }
 
 /// Why the window aborted the transaction: its re-verification refused to

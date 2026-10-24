@@ -28,6 +28,8 @@ pub const MAX_SUPPORTED_SCHEMA: u32 = SCHEMA_VERSION;
 pub const SCHEMA_V1: u32 = 1;
 /// The provenance schema: every record kind this build writes today.
 pub const SCHEMA_V2: u32 = 2;
+/// The selection edit schema: a `prepared` record may carry a certificate.
+pub const SCHEMA_V3: u32 = 3;
 
 /// The framed unit. Unknown fields are corruption at every level: a
 /// current-version record this build only half understands would otherwise
@@ -140,6 +142,9 @@ pub enum Record {
         initiator: Actor,
         tool: String,
         review_op: ReviewOp,
+        /// A selection edit's certificate, bound to `parent` (v3).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        certificate: Option<ProvenancePayload>,
     },
     Aborted {
         reason: String,

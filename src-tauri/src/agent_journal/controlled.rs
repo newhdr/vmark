@@ -12,29 +12,31 @@
 //! the loser is refused with nothing appended (ADR-AL6). Abort records why
 //! re-verification failed.
 //!
-//! Review effects are derived by the writer, never sent by the window.
-//! The commit carries no provenance, so it is a `wholeDocumentWrite`
-//! barrier: every older live hunk is blocked, none is silently moved. The
-//! baseline carries the provenance the window flushed for its unsaved
-//! edits (`baselineProvenance`); without one it is a `snapshotOnly`
-//! barrier (fail closed). A refused commit ends the transaction
-//! `uncommitted`, since the window has already applied and never retries.
+//! Review effects are derived by the writer, never sent by the window. A
+//! commit is a `wholeDocumentWrite` barrier (every older live hunk
+//! blocked, none silently moved) unless a `selection.set` certificate,
+//! sent with the prepare or the commit, checks (`certificate`). The
+//! baseline carries the map flushed for unsaved edits
+//! (`baselineProvenance`); without one it is a `snapshotOnly` barrier. A
+//! refused commit ends the transaction `uncommitted` (no retry).
 //!
 //! @module agent_journal/controlled
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
-use crate::agent_journal::provenance::ProvenancePayload;
+use crate::agent_journal::provenance::{Certificate, ProvenancePayload};
 use crate::agent_journal::provenance_field::decode_field;
 use crate::agent_journal::record::ObservedRef;
-use crate::agent_journal::review::{RestoreSource, ReviewOp};
+use crate::agent_journal::review::ReviewOp;
+use crate::agent_journal::writer::certificate::{bind_to_parent, note_fallback};
 use crate::agent_journal::writer::{
     CommitRequest, Durability, Inner, LinearizeRequest, ObserveRequest, PrepareRequest, Writer,
 };
 use crate::agent_journal::writer_derive::linearize_effects_in;
 use crate::agent_journal::writer_observe::Journaled;
 
+use crate::agent_journal::controlled_restore::restored_uncommitted;
 use crate::agent_journal::controlled_wire::{decode, ControlledCommitRequest};
 pub use crate::agent_journal::controlled_wire::{
     decode_prepare, AbortReason, ControlledCommitted, ControlledPrepareRequest, ControlledPrepared,
@@ -62,6 +64,7 @@ pub fn prepare_controlled(
             review_op: ReviewOp::Review,
             baseline_provenance,
             baseline_touched: req.baseline_touched,
+            certificate: req.certificate,
         },
     )
 }
@@ -76,6 +79,7 @@ pub(crate) struct Prep {
     pub(crate) review_op: ReviewOp,
     pub(crate) baseline_provenance: Option<ProvenancePayload>,
     pub(crate) baseline_touched: bool,
+    pub(crate) certificate: Option<Certificate>,
 }
 
 /// Admission, parent CAS, pending captures, the baseline, then the
@@ -99,6 +103,9 @@ pub(crate) fn prepare_after_baseline(
     }
     let baseline = record_baseline(w, g, doc, head, &prep)?;
     let parent = baseline.or(head);
+    let (certificate, fallback_reason) =
+        bind_to_parent(g, doc, parent, &prep.preimage, prep.certificate)?.split();
+    let certified = certificate.is_some();
     let prepared = w.prepare_in(
         g,
         PrepareRequest {
@@ -109,14 +116,20 @@ pub(crate) fn prepare_after_baseline(
             initiator: prep.initiator,
             tool: prep.tool,
             review_op: prep.review_op,
+            certificate,
         },
     )?;
+    if let Some(r) = fallback_reason {
+        note_fallback(g, doc, r);
+    }
     Ok(ControlledPrepared {
         doc,
         txn: prepared.txn,
         revision: prepared.revision,
         generation: prepared.generation,
         baseline,
+        certified,
+        fallback_reason,
     })
 }
 
@@ -200,9 +213,10 @@ fn linearize_one_in(
     Ok(done.map(|l| l.revision))
 }
 
-/// Commit `txn` with the applied text as a `wholeDocumentWrite` barrier
-/// (a `restore` barrier for a restore, which also resolves the uncommitted
-/// transaction it restores — read from the prepared op, never sent).
+/// Commit `txn` with the applied text: certified through a checked
+/// selection certificate, else a `wholeDocumentWrite` barrier (a `restore`
+/// barrier for a restore, which also resolves the uncommitted transaction
+/// it restores — read from the prepared op, never sent).
 ///
 /// The window commits only after applying, and never retries a refused
 /// commit, so a refusal for a known open transaction also ends it as
@@ -216,37 +230,32 @@ pub fn commit_controlled(
 ) -> Result<ControlledCommitted, TxnError> {
     let doc = txn_doc(w, txn).ok_or_else(unknown_txn)?;
     let committed = decode::<ControlledCommitRequest>(payload).and_then(|req| {
+        let sent = req.certificate.as_ref();
         let mut commit = CommitRequest {
             postimage: req.postimage,
             resolves: restored_uncommitted(w, txn),
             provenance: None,
             effects: Default::default(),
         };
-        commit.effects = w.derive_commit_effects(txn, &commit)?;
-        w.commit(txn, commit)
+        commit.effects = w.derive_commit_effects_with(txn, &commit, sent)?;
+        w.commit_with(txn, commit, sent)
     });
     match committed {
-        Ok(out) => Ok(ControlledCommitted {
-            doc,
-            revision: out.revision,
-            applied: out.applied,
-            durable: out.durable,
-        }),
+        Ok((out, certification)) => {
+            let (certified, fallback_reason) = w.report_certification(doc, &certification);
+            Ok(ControlledCommitted {
+                doc,
+                revision: out.revision,
+                applied: out.applied,
+                durable: out.durable,
+                certified,
+                fallback_reason,
+            })
+        }
         Err(e) => {
             end_unrecorded(w, txn, &e);
             Err(e)
         }
-    }
-}
-
-/// The uncommitted transaction a prepared restore of its preimage resolves.
-fn restored_uncommitted(w: &Writer, txn: TxnId) -> Option<TxnId> {
-    let g = w.lock();
-    match &g.proj.txns.get(&txn)?.review_op {
-        ReviewOp::Restore {
-            source: RestoreSource::UncommittedPreimage { txn },
-        } => Some(*txn),
-        _ => None,
     }
 }
 

@@ -21,8 +21,8 @@ const invokeMock = vi.mocked(invoke);
 const TXN = "txn-1";
 const REV = "rev-1";
 const DOC = "doc-1";
-const PREPARED = { doc: DOC, txn: TXN, revision: REV, generation: "1", baseline: null };
-const COMMITTED = { doc: DOC, revision: REV, applied: true, durable: true };
+const PREPARED = { doc: DOC, txn: TXN, revision: REV, generation: "1", baseline: null, certified: false, fallbackReason: null };
+const COMMITTED = { doc: DOC, revision: REV, applied: true, durable: true, certified: false, fallbackReason: null };
 const DEFAULTS: Record<Command, unknown> = {
   agent_journal_prepare: PREPARED,
   agent_journal_commit: COMMITTED,

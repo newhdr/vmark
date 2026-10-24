@@ -2,7 +2,8 @@
 //! worker-side ledger: the spans and capture transitions of every live
 //! hunk through the record's own window, with no new hunks — except a
 //! restore's one `restore` hunk, which covers the whole text (the
-//! overwritten text is its base, so reverting it gives that text back). A record with
+//! overwritten text is its base, so reverting it gives that text back),
+//! and a certified selection edit's one hunk per changed run. A record with
 //! no certified map gets a whole-document barrier window, so every older
 //! live hunk is blocked rather than guessed at. The derived effects are
 //! submitted back through `commit` / `linearize_next`, which re-derive and
@@ -11,10 +12,11 @@
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
 use crate::agent_journal::projection::{ObservationEntry, RevisionKind};
-use crate::agent_journal::provenance::Provenance;
+use crate::agent_journal::provenance::{Certificate, Provenance};
 use crate::agent_journal::review::{Hunk, HunkKind, Range, ReviewEffects, ReviewOp};
 use crate::agent_journal::span_map::{derive, DeriveCtx};
 use crate::agent_journal::text::utf16_len;
+use crate::agent_journal::writer::certificate::Certification;
 use crate::agent_journal::writer::{CommitRequest, Inner, Writer};
 use crate::agent_journal::writer_revert::referenced_blob;
 use crate::agent_journal::writer_txn::open_txn;
@@ -152,18 +154,31 @@ fn restore_hunk(
 }
 
 impl Writer {
-    /// Effects committing open transaction `txn` as `req` must carry when
-    /// it adds no hunks (`req.effects` is ignored). With no provenance a
-    /// `review` commit is a `wholeDocumentWrite` barrier.
+    /// Effects committing open transaction `txn` as `req` must carry
+    /// (`req.effects` is ignored). With no provenance a
+    /// `review` commit is a `wholeDocumentWrite` barrier unless its
+    /// selection certificate checks (`derive_commit_effects_with`).
     pub fn derive_commit_effects(
         &self,
         txn: TxnId,
         req: &CommitRequest,
     ) -> Result<ReviewEffects, TxnError> {
+        self.derive_commit_effects_with(txn, req, None)
+    }
+
+    /// `derive_commit_effects` for a selection edit: a certificate that
+    /// checks contributes its window and writer-derived hunks.
+    pub(crate) fn derive_commit_effects_with(
+        &self,
+        txn: TxnId,
+        req: &CommitRequest,
+        sent: Option<&Certificate>,
+    ) -> Result<ReviewEffects, TxnError> {
         let mut g = self.lock();
         let t = open_txn(&g, txn)?;
         let preimage = referenced_blob(&mut g.blobs, &t.preimage)?;
-        let (window, reverted) = self.commit_window(&mut g, &t, &preimage, req)?;
+        let (window, reverted, certification) =
+            self.commit_window(&mut g, &t, &preimage, req, sent)?;
         if reverted.is_some() {
             return Err(TxnError::InvalidRequest(
                 "a hunkRevert's effects are not derived here".into(),
@@ -178,7 +193,10 @@ impl Writer {
                     &req.postimage,
                 )?]
             }
-            _ => Vec::new(),
+            _ => match certification {
+                Certification::Certified(hunks) => hunks,
+                _ => Vec::new(),
+            },
         };
         derived(
             &g,

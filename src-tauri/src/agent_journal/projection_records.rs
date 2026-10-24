@@ -43,6 +43,7 @@ impl Projection {
                 initiator,
                 tool,
                 review_op,
+                certificate,
             } => {
                 self.check_prepared(txn, *doc, *parent, *revision, preimage)?;
                 self.docs.entry(*doc).or_default();
@@ -57,6 +58,7 @@ impl Projection {
                         initiator: initiator.clone(),
                         tool: tool.clone(),
                         review_op: review_op.clone(),
+                        certificate: certificate.clone(),
                         status: TxnStatus::Prepared,
                         seq,
                     },

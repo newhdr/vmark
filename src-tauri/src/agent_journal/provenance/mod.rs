@@ -13,6 +13,7 @@
 
 mod accumulator;
 mod body;
+mod changed;
 mod intervals;
 mod payload;
 mod pieces;
@@ -21,7 +22,8 @@ mod runs;
 use serde::{Deserialize, Serialize};
 
 pub use accumulator::{Provenance, SpanMapping};
-pub use payload::ProvenancePayload;
+pub use changed::ChangedRun;
+pub use payload::{Certificate, ProvenancePayload};
 pub use pieces::Section;
 
 /// Hard memory cap in entries (TS default, and the largest a payload may declare).

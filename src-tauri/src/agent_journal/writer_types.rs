@@ -48,6 +48,9 @@ pub struct PrepareRequest {
     pub initiator: Actor,
     pub tool: String,
     pub review_op: ReviewOp,
+    /// A selection edit's certificate, already bound to `parent`.
+    #[serde(default)]
+    pub certificate: Option<crate::agent_journal::provenance::ProvenancePayload>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,4 +104,11 @@ pub enum JournalEvent {
     /// An append failed: nothing new to read, but the journal's health may
     /// have changed (a poisoned writer, a document's queued record).
     HealthChanged,
+}
+
+/// Unix milliseconds now, the `at` of every envelope.
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
