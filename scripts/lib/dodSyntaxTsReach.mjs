@@ -80,11 +80,15 @@ function tableCallbacks(call, fn, ctx, bind) {
   });
 }
 
-/** [start, end) pairs of evidence in `sf`, from its registered cases, suite titles and hooks. */
-export function tsEvidenceSpans(sf) {
+/**
+ * [start, end) pairs of evidence in `sf`, from its registered cases, suite
+ * titles and hooks — or from the subset of `testRoots(sf)` the caller passes
+ * as `roots` (one case alone, for a named witness).
+ */
+export function tsEvidenceSpans(sf, roots = testRoots(sf)) {
   const checker = oneFileChecker(sf);
   const ctx = { checker, changed: reassigned(sf, checker) };
-  const { cases, suiteTitles, hooks, bodies } = testRoots(sf);
+  const { cases, suiteTitles, hooks, bodies } = roots;
   if (cases.length === 0) return [];
   const spans = [];
   const seen = new Set();

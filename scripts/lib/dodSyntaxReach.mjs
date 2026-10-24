@@ -15,6 +15,8 @@
  *     dodSyntaxTsReach.mjs (what they read and call).
  *   - Rust: dodSyntaxRustReach.mjs (which test fns cargo runs here, and the
  *     uniquely resolved plain-path calls and const reads they make).
+ * `tsCaseReach` and `rustFnReach` reduce a file to what ONE case reaches: the
+ * evidence of a single named witness, not of the file.
  *
  * @coordinates-with scripts/dod-syntax.mjs — the `--test-reach` flag of both grep probes
  * @coordinates-with scripts/lib/dodSyntaxTs.mjs — the comment-blanked text
@@ -57,6 +59,21 @@ function reach(roots) {
 /** A TypeScript / JavaScript test file, parsed as `sf`, reduced to what its cases read and execute. */
 export function tsTestReach(sf, source) {
   return keepOnly(tsCode(sf, source, { keepStrings: true }), tsEvidenceSpans(sf));
+}
+
+/**
+ * A TypeScript test file reduced to what the ONE registered case `call` (from
+ * `roots`, its file's `testRoots`) reads and executes — its title, table and
+ * handler, and what those reach. Suite titles and hooks are not its evidence.
+ */
+export function tsCaseReach(sf, source, roots, call) {
+  const one = { cases: [call], suiteTitles: [], hooks: [], bodies: roots.bodies };
+  return keepOnly(tsCode(sf, source, { keepStrings: true }), tsEvidenceSpans(sf, one));
+}
+
+/** A Rust test file reduced to what the ONE root `fn` (from `rustReachRoots`) reads and executes. */
+export function rustFnReach(source, fn) {
+  return keepOnly(rustCode(source, { keepStrings: true }), reach([fn]).flatMap((it) => it.spans));
 }
 
 /**

@@ -15,6 +15,10 @@
 # Self-contained: the plan is maintainer-local and gitignored, so this file
 # never reads it — every assertion is a path, symbol, test or command written
 # below. Tests are found by their header and then run (scripts/lib/al-gate.sh).
+# Phases 2 and 3 are accepted on named witnesses: each Definition-of-Done row
+# maps to one test, listed in scripts/al-witnesses.json, that must exist under
+# its exact title, match its assertions and run alone to one pass
+# (scripts/lib/al-witness.sh). Their keyword lines remain as pre-checks.
 #
 # Phase 0's spike artifacts live under dev-docs/grills (the exact folder is
 # GRILLS_DIR in scripts/check-al-spike-results.mjs), which
@@ -47,6 +51,7 @@ al_parse_args '^[0-4]$' usage "$@"
 cd "$ROOT" || exit 64
 source "$SCRIPT_DIR/lib/dod-assertions.sh"
 source "$SCRIPT_DIR/lib/al-slices.sh"
+source "$SCRIPT_DIR/lib/al-witness.sh"
 
 RS_BRIDGE=src-tauri/src/mcp_bridge
 TS_BRIDGE=src/services/mcpBridge
@@ -123,16 +128,18 @@ phase_1() {
 }
 
 phase_2() {
-  local wi all="WI-AL2.1 WI-AL2.2 WI-AL2.3 WI-AL2.4 WI-AL2.5"
+  local wi all="WI-AL2.0g WI-AL2.0 WI-AL2.0s WI-AL2.1a WI-AL2.1d WI-AL2.1c WI-AL2.1b WI-AL2.2a WI-AL2.2f WI-AL2.2g WI-AL2.2b WI-AL2.2c WI-AL2.2d WI-AL2.2e WI-AL2.3 WI-AL2.4 WI-AL2.5"
   echo "Phase 2 — review"
   for wi in $all; do al_require_tests "$wi"; done
+  # Keyword pre-checks: cheap and coarse. The phase is accepted on the named
+  # witnesses at the end of this block, one test per row.
   # The revert spike's decision: diff-match-patch, run in a worker that is
   # terminated at the deadline. A different choice changes this line.
-  al_pkg_dep diff-match-patch "WI-AL2.1: the spike's diff library is a dependency"
-  al_tests_cover WI-AL2.2 'prepare'                       "WI-AL2.2: injected prepare failure leaves content unchanged"
-  al_tests_cover WI-AL2.2 'durable'                       "WI-AL2.2: commit failure returns applied without durable"
-  al_test_has WI-AL2.2 '.' "WI-AL2.2: CJK and emoji fixtures" 'cjk' 'emoji'
-  al_tests_cover WI-AL2.2 'rtl'                           "WI-AL2.2: RTL fixtures"
+  al_pkg_dep diff-match-patch "WI-AL2.1a: the spike's diff library is a dependency"
+  al_tests_cover WI-AL2.2e 'prepare'                      "WI-AL2.2e: injected prepare failure leaves content unchanged"
+  al_tests_cover WI-AL2.2e 'durable'                      "WI-AL2.2e: commit failure returns applied without durable"
+  al_test_has WI-AL2.1a '.' "WI-AL2.1a: CJK and emoji fixtures" 'cjk' 'emoji'
+  al_tests_cover WI-AL2.1a 'rtl'                          "WI-AL2.1a: RTL fixtures"
   al_tests_cover WI-AL2.3 'settled'                       "WI-AL2.3: Clear reviewed settles"
   al_tests_cover WI-AL2.3 'restart'                       "WI-AL2.3: keep B of {A, B}, restart → only A pending"
   al_tests_cover WI-AL2.3 'revert.{0,40}revert'           "WI-AL2.3: revert of a revert restores exactly"
@@ -143,18 +150,19 @@ phase_2() {
   al_tests_cover WI-AL2.5 'bom'                           "WI-AL2.5: BOM-only save shows no hunks"
   al_tests_cover WI-AL2.5 'whitespace'                    "WI-AL2.5: a real whitespace edit shows"
   al_tests_cover "$all" 'cpuClock|measureGrowth|growthExponent' "phase 2: budgets measured with src/test/cpuClock.ts"
+  al_witnesses 2
   assert_exec "phase 2: lint:i18n" pnpm lint:i18n
 }
 
 phase_3() {
-  local wi op loc all="WI-AL3.1 WI-AL3.2 WI-AL3.3"
+  local wi op loc all="WI-AL3.1a WI-AL3.1b WI-AL3.2 WI-AL3.3"
   echo "Phase 3 — anchored comments and MCP tools"
   for wi in $all; do al_require_tests "$wi"; done
-  al_tests_cover WI-AL3.1 'ambiguous'                     "WI-AL3.1: duplicated passage → ambiguous"
-  al_tests_cover WI-AL3.1 'orphan'                        "WI-AL3.1: deleted passage → orphaned"
-  al_tests_cover WI-AL3.1 'heading'                       "WI-AL3.1: heading rename still resolves by context"
-  al_test_has WI-AL3.1 '.' "WI-AL3.1: CJK, emoji and RTL offsets exact" 'cjk' 'emoji' 'rtl'
-  al_tests_cover WI-AL3.1 'bound|limit|too (long|many)'   "WI-AL3.1: bound violations refused"
+  al_tests_cover WI-AL3.1a 'ambiguous'                    "WI-AL3.1a: duplicated passage → ambiguous"
+  al_tests_cover WI-AL3.1a 'orphan'                       "WI-AL3.1a: deleted passage → orphaned"
+  al_tests_cover WI-AL3.1a 'heading'                      "WI-AL3.1a: heading rename still resolves by context"
+  al_test_has WI-AL3.1a '.' "WI-AL3.1a: CJK, emoji and RTL offsets exact" 'cjk' 'emoji' 'rtl'
+  al_tests_cover WI-AL3.1b 'bound|limit|too (long|many)'  "WI-AL3.1b: bound violations refused"
   al_tests_cover WI-AL3.2 'reopen'                        "WI-AL3.2: user resolve and reopen"
   al_tests_cover "$all" '<script|text only|textContent'   "phase 3: comment HTML renders as text only"
   al_tests_cover WI-AL3.3 'resolve'                       "WI-AL3.3: agent resolve refused"
@@ -168,6 +176,7 @@ phase_3() {
       assert_grep "$op" "$loc/mcp-tools.md" "WI-AL3.3: $op in $loc/mcp-tools.md"
     done
   done
+  al_witnesses 3
   assert_exec "phase 3: lint:mcp-contracts" pnpm lint:mcp-contracts
   assert_exec "phase 3: lint:mcp-docs" pnpm lint:mcp-docs
 }

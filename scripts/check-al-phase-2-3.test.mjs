@@ -1,4 +1,5 @@
-// WI-AL0.7 — the phase 2 and phase 3 script-coverage lines name every script together: CJK alone, emoji alone or RTL alone never satisfies a line that requires all of them, nor do words spread over two tests
+// WI-AL2.0g — the phase 2 and phase 3 script-coverage pre-checks follow the split work items (2.1a, 3.1a) and still name every script together: CJK alone, emoji alone or RTL alone never satisfies a line that requires all of them, nor do words spread over two tests
+// Also under WI-AL0.7: the phase gate self-tests.
 /**
  * Runs the REAL `scripts/check-al-phase.sh <2|3> --no-exec` against fixture
  * trees (`--root`). Phases 2 and 3 are red on a bare fixture (most of their
@@ -49,8 +50,8 @@ function run(phase, root) {
 const line = (out, label) => out.split("\n").find((l) => l.includes(label)) ?? "";
 
 const CASES = [
-  { phase: 2, wi: "WI-AL2.2", label: "WI-AL2.2: CJK and emoji fixtures", words: ["CJK", "emoji"] },
-  { phase: 3, wi: "WI-AL3.1", label: "WI-AL3.1: CJK, emoji and RTL offsets exact", words: ["CJK", "emoji", "RTL"] },
+  { phase: 2, wi: "WI-AL2.1a", label: "WI-AL2.1a: CJK and emoji fixtures", words: ["CJK", "emoji"] },
+  { phase: 3, wi: "WI-AL3.1a", label: "WI-AL3.1a: CJK, emoji and RTL offsets exact", words: ["CJK", "emoji", "RTL"] },
 ];
 
 describe("check-al-phase.sh 2 and 3 — every named script, in one test", () => {
