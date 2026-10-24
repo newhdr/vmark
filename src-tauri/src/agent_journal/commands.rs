@@ -75,7 +75,7 @@ pub async fn agent_journal_commit(
 }
 
 /// Abort an open transaction; `reason` is `edited`, `closed`, `composing`,
-/// `selection` or `applyRefused`.
+/// `selection`, `applyRefused` or `timedOut`.
 ///
 /// # Errors
 /// A journal refusal; a failed append is `durable: false`, not an error.

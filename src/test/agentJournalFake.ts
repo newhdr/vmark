@@ -23,7 +23,7 @@
 
 import { vi } from "vitest";
 import type {
-  AbortReason,
+  JournalAbortReason,
   CaptureInput,
   CapturedSave,
   CommitExtras,
@@ -154,7 +154,7 @@ function createFake() {
     return { doc: t.docKey, revision: t.revision, applied: true, durable: true };
   };
 
-  const abort = async (txn: string, reason: AbortReason): Promise<{ durable: boolean }> => {
+  const abort = async (txn: string, reason: JournalAbortReason): Promise<{ durable: boolean }> => {
     const t = txns.get(txn);
     if (!t) throw new JournalRefusal("INVALID_REQUEST", "unknown txn");
     const d = doc(t.docKey);

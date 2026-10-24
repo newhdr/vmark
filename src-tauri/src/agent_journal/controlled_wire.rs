@@ -66,7 +66,8 @@ pub struct ControlledCommitted {
     pub durable: bool,
 }
 
-/// Why the window's re-verification refused to apply.
+/// Why the window aborted the transaction: its re-verification refused to
+/// apply, or (`TimedOut`) its prepare answered after the window gave up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AbortReason {
@@ -80,16 +81,24 @@ pub enum AbortReason {
     Selection,
     /// The editor refused the apply itself.
     ApplyRefused,
+    /// The prepare answered after the window's deadline; nothing was applied
+    /// and the editor refused nothing.
+    TimedOut,
 }
 
 impl AbortReason {
-    /// The text of the `aborted` record.
+    /// The text of the `aborted` record. A re-verification refusal reads
+    /// `reverify:<reason>`; a timeout carries no such prefix, because the
+    /// editor refused nothing.
     pub fn record_text(self) -> String {
         let wire = serde_json::to_value(self)
             .ok()
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_default();
-        format!("reverify:{wire}")
+        match self {
+            Self::TimedOut => wire,
+            _ => format!("reverify:{wire}"),
+        }
     }
 }
 

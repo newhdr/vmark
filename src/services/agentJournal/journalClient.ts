@@ -21,8 +21,15 @@ import type { JournalMcpActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
 import { callJournal as call, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
 
-/** Why re-verification refused to apply; the closed set Rust accepts. */
+/** Why re-verification refused to apply. */
 export type AbortReason = "edited" | "closed" | "composing" | "selection" | "applyRefused";
+
+/**
+ * Why a transaction is aborted; the closed set Rust accepts. `timedOut`: its
+ * prepare answered after the coordinator had given up on it, so the editor
+ * never refused anything.
+ */
+export type JournalAbortReason = AbortReason | "timedOut";
 
 export interface PrepareInput {
   /** `path:<file>` or `tab:<window>/<tab>` (see `documentIdentity.ts`). */
@@ -135,7 +142,7 @@ export async function commitControlledWrite(txn: string, postimage: string, extr
 }
 
 /** Abort an open transaction. `durable: false` = queued, the document stays reserved. */
-export async function abortControlledWrite(txn: string, reason: AbortReason): Promise<{ durable: boolean }> {
+export async function abortControlledWrite(txn: string, reason: JournalAbortReason): Promise<{ durable: boolean }> {
   const r = await call("agent_journal_abort", { txn, reason });
   if (!isObject(r) || typeof r.durable !== "boolean") throw malformed("agent_journal_abort");
   return { durable: r.durable };

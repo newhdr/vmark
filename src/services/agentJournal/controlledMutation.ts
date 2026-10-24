@@ -32,6 +32,15 @@
  *   - A failed or rejected abort still ends as `aborted`: the request is
  *     refused either way, and the journal keeps the reservation until its
  *     drainer lands the queued record.
+ *   - Every journal call is bounded (`journalDeadline.ts`). Readiness and
+ *     the prepare are one attempt under the smaller of the per-call deadline
+ *     and the caller's remaining budget; past it the write refuses
+ *     `JOURNAL_TIMEOUT` and applies nothing. The attempt re-checks its clock
+ *     right before the prepare, so a timed-out attempt never dispatches
+ *     late, and a prepare that answers late is aborted `timedOut`. A commit
+ *     past its deadline is not durable on the pre-write basis, with no retry
+ *     and no abort; its late acknowledgement is logged and ignored. An abort
+ *     past its deadline is logged; the reservation waits for it to land.
  *   - A prepare refused for its baseline map (`field: provenance`, recorded
  *     nothing) is resent once without it: the baseline is then a
  *     `snapshotOnly` barrier, which never certifies more than was seen.
@@ -57,10 +66,12 @@ import {
   commitControlledWrite,
   type AbortReason,
   type CommitExtras,
+  type JournalAbortReason,
   type PreparedTxn,
 } from "./journalClient";
+import { JOURNAL_DEADLINE_MS, journalTimeout, withJournalDeadline, type JournalBudget } from "./journalDeadline";
 import { journalDocumentReady } from "./documentBinding";
-import { toJournalRefusal, type JournalRefusal } from "./journalRefusal";
+import { JournalRefusal, toJournalRefusal } from "./journalRefusal";
 import { journalWarn } from "@/utils/debug";
 import { beginWriteReport } from "./recordingReport";
 
@@ -96,15 +107,19 @@ export type ControlledOutcome<T> =
   | { status: "recoveryRequired"; error: unknown; txn: string };
 
 /**
- * Append `aborted`. Whether it landed is not reported: an append that failed
- * or was rejected leaves the reservation to the journal's degraded queue,
- * which refuses the next write until it drains (see the header).
+ * Append `aborted`, bounded. Whether it landed is not reported: an append
+ * that failed or was rejected leaves the reservation to the journal's
+ * degraded queue, which refuses the next write until it drains; one not
+ * answered in time is logged (see the header).
  */
-async function abort(txn: string, reason: AbortReason): Promise<void> {
+async function abort(txn: string, reason: JournalAbortReason): Promise<void> {
   try {
-    await abortControlledWrite(txn, reason);
-  } catch {
+    await withJournalDeadline("an abort", () => abortControlledWrite(txn, reason));
+  } catch (error) {
     // Refused either way; the reservation and the degraded queue carry it.
+    if (error instanceof JournalRefusal && error.journalCode === "JOURNAL_TIMEOUT") {
+      journalWarn(`the abort of ${txn} was not answered in time; the document stays reserved until it lands`);
+    }
   }
 }
 
@@ -141,6 +156,8 @@ export interface PreparedWrite<T, P extends PreparedTxn> {
   recover: (prepared: P) => string;
   /** After a successful apply, before its commit: extra fields for the commit. A throw is answered `appliedWithError`. */
   effects?: (postimage: string) => Promise<CommitExtras>;
+  /** What is left of the caller's pre-apply budget; absent: the per-call deadline alone. */
+  budget?: JournalBudget;
 }
 
 /** Commit `postimage`: whether it landed durably, and the tab's basis afterwards. */
@@ -152,7 +169,12 @@ async function commit(
   extras?: CommitExtras,
 ): Promise<{ durable: boolean; basis: string | null }> {
   try {
-    const ack = await commitControlledWrite(prepared.txn, postimage, extras);
+    const ack = await withJournalDeadline(
+      "the commit",
+      () => commitControlledWrite(prepared.txn, postimage, extras),
+      JOURNAL_DEADLINE_MS,
+      (late) => journalWarn("a commit acknowledgement arrived after its deadline; ignored:", late),
+    );
     const landed = ack.applied && ack.doc === prepared.doc && ack.revision === prepared.revision;
     if (!landed) journalWarn("commit acknowledged another write; treating it as not durable:", ack);
     const durable = landed && ack.durable;
@@ -174,11 +196,7 @@ export async function runPreparedWrite<T, P extends PreparedTxn>(
   const report = beginWriteReport(write.docKey);
   let prepared: P;
   try {
-    if (write.docKey !== undefined) {
-      const ready = await journalDocumentReady(write.docKey);
-      if (!ready.ok) throw ready.refusal;
-    }
-    prepared = await write.prepare();
+    prepared = await prepareAttempt(write);
   } catch (error) {
     return { status: "refused", refusal: toJournalRefusal(error) };
   }
@@ -209,6 +227,30 @@ export async function runPreparedWrite<T, P extends PreparedTxn>(
     return { status: "appliedWithError", error: effects.error, postimage, revision: prepared.revision, ...landed };
   }
   return { status: "applied", value: applied.value, revision: prepared.revision, ...landed };
+}
+
+/**
+ * Readiness and the prepare as one bounded attempt. The clock is re-checked
+ * right before the prepare, so a timed-out attempt never dispatches; a
+ * prepare that answers after the deadline is aborted `timedOut`.
+ */
+function prepareAttempt<P extends PreparedTxn>(write: PreparedWrite<unknown, P>): Promise<P> {
+  const ms = Math.min(JOURNAL_DEADLINE_MS, write.budget?.remaining() ?? JOURNAL_DEADLINE_MS);
+  if (ms <= 0) return Promise.reject(journalTimeout("the prepare", JOURNAL_DEADLINE_MS));
+  const started = performance.now();
+  return withJournalDeadline(
+    "the prepare",
+    async () => {
+      if (write.docKey !== undefined) {
+        const ready = await journalDocumentReady(write.docKey);
+        if (!ready.ok) throw ready.refusal;
+        if (performance.now() - started >= ms) throw journalTimeout("the prepare", ms);
+      }
+      return write.prepare();
+    },
+    ms,
+    (late) => void abort(late.txn, "timedOut"),
+  );
 }
 
 /** Run the effects step: its extras, or the error it threw (synchronously or not). */

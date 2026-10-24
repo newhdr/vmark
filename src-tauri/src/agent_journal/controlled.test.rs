@@ -277,12 +277,65 @@ fn every_abort_reason_is_recorded_under_its_wire_name() {
         (AbortReason::Composing, "composing"),
         (AbortReason::Selection, "selection"),
         (AbortReason::ApplyRefused, "applyRefused"),
+        (AbortReason::TimedOut, "timedOut"),
     ] {
         let parsed: AbortReason = serde_json::from_value(serde_json::json!(wire)).unwrap();
         assert_eq!(parsed, reason);
-        assert_eq!(reason.record_text(), format!("reverify:{wire}"));
+        let want = if reason == AbortReason::TimedOut {
+            wire.to_owned()
+        } else {
+            format!("reverify:{wire}")
+        };
+        assert_eq!(reason.record_text(), want);
     }
     assert!(serde_json::from_value::<AbortReason>(serde_json::json!("whatever")).is_err());
+}
+
+/// `timedOut` (a prepare answered after the window gave up on it) is stored
+/// as the same free-text `reason` every older reason uses, in a v2 record, so
+/// a build that reads only schema v2 replays it, and the newer-build stop
+/// does not fire.
+#[test]
+fn a_timed_out_abort_is_a_v2_record_an_older_build_replays() {
+    let dir = tmp();
+    let (doc, txn) = {
+        let (w, _) = open(dir.path());
+        let docs = DocRegistry::default();
+        let p = prepare(&w, &docs, "k", "").unwrap();
+        assert!(
+            abort_controlled(&w, p.txn, AbortReason::TimedOut)
+                .unwrap()
+                .durable
+        );
+        (p.doc, p.txn)
+    };
+    let path = dir
+        .path()
+        .join(crate::agent_journal::journal_file::JOURNAL_FILE);
+    let scan = crate::agent_journal::frame::scan(&std::fs::read(&path).unwrap()).unwrap();
+    let aborted: Vec<serde_json::Value> = scan
+        .frames
+        .iter()
+        .map(|f| serde_json::from_slice::<serde_json::Value>(&f.payload).unwrap())
+        .filter(|v| v["record"]["kind"] == "aborted")
+        .collect();
+    assert_eq!(aborted.len(), 1);
+    assert_eq!(aborted[0]["record"]["reason"], "timedOut");
+    assert_eq!(
+        aborted[0]["schemaVersion"],
+        crate::agent_journal::record::SCHEMA_V2
+    );
+    let (older, _) = Writer::open_with_max_schema(
+        config(
+            dir.path(),
+            crate::agent_journal::journal_file::SyncPolicy::Full,
+        )
+        .0,
+        crate::agent_journal::record::SCHEMA_V2,
+    )
+    .expect("a v2-only build opens the journal");
+    assert_eq!(older.snapshot().state.txns[&txn].status, TxnStatus::Aborted);
+    assert_eq!(older.reservation(doc), None);
 }
 
 #[test]

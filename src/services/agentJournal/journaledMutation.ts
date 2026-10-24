@@ -43,6 +43,11 @@
  *     the hook's error. It never runs after an abort or a thrown apply.
  *   - The outcome mapper runs before the freeze and forks are invalidated,
  *     as each caller's answer did.
+ *   - Every await is bounded, so the answer fits the MCP bridge's total
+ *     (`journalDeadline.ts`): the pre-apply budget starts before the freeze
+ *     payload, and a payload or prepare attempt that outlives it refuses
+ *     `JOURNAL_TIMEOUT` with nothing applied; then the effects deadline and
+ *     one bounded commit (`controlledMutation.ts`).
  *
  * @coordinates-with services/agentJournal/controlledMutation.ts — the protocol
  * @coordinates-with services/agentJournal/unsavedProvenance.ts — the freeze and fork
@@ -54,6 +59,7 @@ import { useRevisionStore } from "@/stores/documentStore";
 import type { AbortReason, CommitExtras, PreparedTxn } from "./journalClient";
 import { runPreparedWrite } from "./controlledMutation";
 import { JournalRefusal } from "./journalRefusal";
+import { JOURNAL_PREAPPLY_BUDGET_MS, journalTimeout, settleWithin, startJournalBudget } from "./journalDeadline";
 import { forkUnsavedProvenance, freezeUnsavedProvenance, type JournalProvenancePayload } from "./unsavedProvenance";
 import type { ProvenanceFork } from "./provenance/session";
 import {
@@ -134,6 +140,7 @@ function withinEffectsDeadline(run: () => Promise<CommitExtras>): Promise<Commit
 /** Run one journaled mutation of `m.tabId`; the outcome mapper's answer. Rethrows an apply that threw with nothing changed. */
 export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: JournaledMutation<T, P, O>): Promise<O> {
   const { tabId, docKey, preimage } = m;
+  const budget = startJournalBudget();
   if (isJournalBasisEvicted(tabId, docKey)) {
     forgetJournalBasis(tabId, docKey);
     const evicted = new JournalRefusal("STALE_PARENT", `the tab's journal basis was evicted; ${m.retryHint}`);
@@ -154,7 +161,11 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
   };
   const { effects } = m;
   try {
-    const named = freeze ? await freeze.payload(parent) : null;
+    const frozen = freeze ? await settleWithin(freeze.payload(parent), budget.remaining()) : { value: null };
+    if (frozen === null) {
+      return await m.outcome({ status: "refused", refusal: journalTimeout("the provenance freeze", JOURNAL_PREAPPLY_BUDGET_MS) });
+    }
+    const named = frozen.value;
     // The payload awaited: the tab may have changed under it.
     const changed = freeze ? (m.recheck?.() ?? null) : null;
     if (changed) return await m.outcome({ status: "aborted", reason: changed });
@@ -186,6 +197,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
         }
         return postimage;
       },
+      budget,
       ...(effects && { effects: (postimage: string) => withinEffectsDeadline(() => effects(preimage, postimage)) }),
     });
 
