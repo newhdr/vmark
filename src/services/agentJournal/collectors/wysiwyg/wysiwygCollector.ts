@@ -18,8 +18,13 @@
  *     session has not materialized extend one window. A flush when the
  *     collector does not hold the session's text (another surface or an
  *     unannounced write changed it) breaks the whole document
- *     (`wysiwyg:no-certificate`); a flush that changes nothing reports
- *     nothing.
+ *     (`wysiwyg:no-certificate`).
+ *   - Whether a flush reports is decided by the ledger, never by Markdown
+ *     equality: a flush whose chain holds any step reports through the same
+ *     deferral even when the text is unchanged (a delete-and-retype, a mark
+ *     toggled back), so the touched blocks stay bounded breaks and the epoch
+ *     is armed; an unobserved, capped or uncertified chain at equal text is a
+ *     whole break. Only a chain proven to hold no step reports nothing.
  *   - A ledger gap after the anchor (the plugin set changed while live, a
  *     state installed behind the ledger's back) is reported at once: a loud
  *     warning and a whole-document break (`wysiwyg:unobserved-transaction`),
@@ -80,11 +85,15 @@ class EditorProvenance {
     const session = provenanceSessionFor(this.tabId);
     if (session !== this.#bound) this.#rebind(session);
     const collector = this.#collector;
-    if (!session || !collector || markdown === session.text) return;
+    if (!session || !collector) return;
     const held = collector.holds();
     const anchor = this.#anchor;
     const state = this.editor.state;
     const step = !anchor || !held ? "no-certificate" : this.ledger.chain(anchor.boundary, state);
+    // @edge-case Equal Markdown is not "nothing happened": a delete-and-retype
+    // or a mark toggled back changed blocks the text no longer shows. Only a
+    // chain proven to hold no step (selection-only) stays silent.
+    if (markdown === session.text && typeof step !== "string" && step.ok && step.edges.length === 0) return;
     const prior = held && this.#pending && !this.#pending.ran ? this.#pending : null;
     const next = this.#anchorHere();
     const from = anchor?.spanned ?? next.spanned;
