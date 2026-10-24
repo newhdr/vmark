@@ -8,6 +8,9 @@
 //! collected commit's `prepared`, a collected observation's
 //! `pendingObservation`, and every record of an `uncommitted` transaction
 //! a collected commit resolved (the resolution is gone with the commit).
+//! A dropped transaction takes its request receipt with it. An
+//! `admission` frame is rewritten as its items, each a top-level record
+//! mapped as above (`writer_gc`).
 //! The rewrite starts with a `journalHeader` one generation past the live
 //! one, so a reader that missed the `Resync` sees a gap at its next event.
 //!
@@ -51,6 +54,7 @@ pub fn header(floor: u64) -> Envelope {
         txn: TxnId(uuid::Uuid::nil()),
         at: 0,
         record,
+        receipt: None,
     }
 }
 
@@ -161,6 +165,9 @@ fn tombstone(m: &RevisionMeta, env: &Envelope, effects: &ReviewEffects) -> Envel
         txn: env.txn,
         at: env.at,
         record,
+        // Receipts ride only on `prepared` (`admission::receipt`), never on
+        // the revision records a tombstone replaces.
+        receipt: None,
     }
 }
 
@@ -185,5 +192,6 @@ pub fn expected(
     }
     e.txns.retain(|id, _| !dropped.contains(id));
     e.observations.retain(|id, _| !dropped.contains(id));
+    e.requests.retain(|_, r| !dropped.contains(&r.txn()));
     Ok(e)
 }

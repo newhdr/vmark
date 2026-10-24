@@ -614,12 +614,17 @@ fn commit_or_abort_of_an_unknown_transaction_is_invalid_and_writes_nothing() {
     assert_eq!(w.generation(), 0);
 }
 
-/// The records appended after the first `from` of the journal.
+/// The records appended after the first `from` of the journal, an
+/// admission frame read as its items.
 fn appended_since(w: &Writer, from: usize) -> Vec<crate::agent_journal::record::Record> {
+    use crate::agent_journal::record::Record;
     w.debug_records()
         .into_iter()
         .skip(from)
-        .map(|e| e.record)
+        .flat_map(|e| match e.record {
+            Record::Admission { items } => items.into_iter().map(|i| i.record).collect(),
+            r => vec![r],
+        })
         .collect()
 }
 

@@ -2,7 +2,8 @@
 //! `invalid-input`, …) is what generic frontend code branches on; the exact
 //! journal token rides in `detail.journalCode`, with the current head for
 //! `STALE_PARENT` and `field: "provenance"` for a map that does not certify
-//! its texts (the window resends without it). Messages are for agents and logs, never shown to a user.
+//! its texts (the window resends without it), and `indeterminate: true`
+//! for a prepare whose frame may or may not be durable. Messages are for agents and logs, never shown to a user.
 //!
 //! @module agent_journal/refusal
 
@@ -24,7 +25,7 @@ pub fn refusal(e: &TxnError) -> CommandError {
         TxnError::InvalidRequest(_) | TxnError::InvalidProvenance(_) | TxnError::InvalidText(_) => {
             ErrorCode::InvalidInput
         }
-        TxnError::Io(_) => ErrorCode::Io,
+        TxnError::Io(_) | TxnError::Indeterminate(_) => ErrorCode::Io,
         TxnError::Invariant(_) | TxnError::Corrupt(_) => ErrorCode::Internal,
         TxnError::FutureFormat { .. } => ErrorCode::Unsupported,
     };
@@ -34,6 +35,7 @@ pub fn refusal(e: &TxnError) -> CommandError {
             json!({ "journalCode": e.code(), "hunk": hunk, "block": block })
         }
         TxnError::InvalidProvenance(_) => json!({ "journalCode": e.code(), "field": "provenance" }),
+        TxnError::Indeterminate(_) => json!({ "journalCode": e.code(), "indeterminate": true }),
         _ => json!({ "journalCode": e.code() }),
     };
     CommandError::new(code, e.to_string()).with_detail(detail)

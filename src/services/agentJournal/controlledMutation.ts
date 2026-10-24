@@ -44,6 +44,8 @@
  *   - A prepare refused for its baseline map (`field: provenance`, recorded
  *     nothing) is resent once without it: the baseline is then a
  *     `snapshotOnly` barrier, which never certifies more than was seen.
+ *   - The prepare is sent in its capture's turn (`turn`, `captureId.ts`),
+ *     after readiness; the clock is re-checked inside the turn.
  *   - The prepare waits for a running bind of its key
  *     (`journalDocumentReady`), so a write never lands on the fresh document
  *     a Save As or rename is about to replace; a key whose bind failed
@@ -158,6 +160,8 @@ export interface PreparedWrite<T, P extends PreparedTxn> {
   effects?: (postimage: string) => Promise<CommitExtras>;
   /** What is left of the caller's pre-apply budget; absent: the per-call deadline alone. */
   budget?: JournalBudget;
+  /** Sends the prepare in its provenance capture's turn; absent: sent at once. */
+  turn?: <R>(send: () => Promise<R>) => Promise<R>;
 }
 
 /** Commit `postimage`: whether it landed durably, and the tab's basis afterwards. */
@@ -244,9 +248,12 @@ function prepareAttempt<P extends PreparedTxn>(write: PreparedWrite<unknown, P>)
       if (write.docKey !== undefined) {
         const ready = await journalDocumentReady(write.docKey);
         if (!ready.ok) throw ready.refusal;
-        if (performance.now() - started >= ms) throw journalTimeout("the prepare", ms);
       }
-      return write.prepare();
+      const send = () => {
+        if (performance.now() - started >= ms) throw journalTimeout("the prepare", ms);
+        return write.prepare();
+      };
+      return write.turn ? write.turn(async () => send()) : send();
     },
     ms,
     (late) => void abort(late.txn, "timedOut"),

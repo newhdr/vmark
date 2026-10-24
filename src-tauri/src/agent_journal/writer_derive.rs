@@ -9,9 +9,10 @@
 //! submitted back through `commit` / `linearize_next`, which re-derive and
 //! refuse any difference; a race between the two calls fails closed.
 
+use crate::agent_journal::admission::blobs::BlobRead;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
-use crate::agent_journal::projection::{ObservationEntry, RevisionKind};
+use crate::agent_journal::projection::{ObservationEntry, Projection, RevisionKind};
 use crate::agent_journal::provenance::{Certificate, Provenance};
 use crate::agent_journal::review::{Hunk, HunkKind, Range, ReviewEffects, ReviewOp};
 use crate::agent_journal::span_map::{derive, DeriveCtx};
@@ -37,23 +38,32 @@ pub(crate) struct LinearizeCtx {
 
 /// `None` when nothing of `doc` is pending.
 pub(crate) fn linearize_ctx(g: &mut Inner, doc: DocId) -> Result<Option<LinearizeCtx>, TxnError> {
-    let Some(&observation) = g.proj.docs.get(&doc).and_then(|d| d.pending.first()) else {
+    linearize_ctx_from(&g.proj, &mut g.blobs, doc)
+}
+
+/// `linearize_ctx` over any projection and blob view: a staged admission
+/// derives from its clone and its in-memory blobs.
+pub(crate) fn linearize_ctx_from(
+    proj: &Projection,
+    blobs: &mut dyn BlobRead,
+    doc: DocId,
+) -> Result<Option<LinearizeCtx>, TxnError> {
+    let Some(&observation) = proj.docs.get(&doc).and_then(|d| d.pending.first()) else {
         return Ok(None);
     };
-    let head = g.proj.head(doc);
+    let head = proj.head(doc);
     let head_text = match head {
         None => String::new(),
         Some(_) => {
-            let hash = g
-                .proj
+            let hash = proj
                 .postimage_of(head)
                 .ok_or_else(|| TxnError::Invariant("head has no text".into()))?;
-            referenced_blob(&mut g.blobs, &hash)?
+            referenced_blob(blobs, &hash)?
         }
     };
-    let entry = g.proj.observations[&observation].clone();
-    let post = referenced_blob(&mut g.blobs, &entry.postimage)?;
-    let (window, kind) = linearization_window(&g.proj, doc, observation, &head_text, &post)?;
+    let entry = proj.observations[&observation].clone();
+    let post = referenced_blob(blobs, &entry.postimage)?;
+    let (window, kind) = linearization_window(proj, doc, observation, &head_text, &post)?;
     Ok(Some(LinearizeCtx {
         observation,
         head,
@@ -75,7 +85,7 @@ pub(crate) fn linearize_effects_in(
         return Ok(None);
     };
     derived(
-        g,
+        &g.proj,
         doc,
         ctx.head,
         &ReviewOp::None,
@@ -86,8 +96,10 @@ pub(crate) fn linearize_effects_in(
     .map(Some)
 }
 
-fn derived(
-    g: &Inner,
+/// The spans and transitions every live hunk of `doc` takes through
+/// `window`, plus `new_hunks`, against `proj`.
+pub(crate) fn derived(
+    proj: &Projection,
     doc: DocId,
     parent: Option<RevisionId>,
     op: &ReviewOp,
@@ -96,7 +108,7 @@ fn derived(
     new_hunks: Vec<Hunk>,
 ) -> Result<ReviewEffects, TxnError> {
     let empty = Default::default();
-    let d = g.proj.docs.get(&doc).unwrap_or(&empty);
+    let d = proj.docs.get(&doc).unwrap_or(&empty);
     let ctx = DeriveCtx {
         doc: d,
         parent,
@@ -199,7 +211,7 @@ impl Writer {
             },
         };
         derived(
-            &g,
+            &g.proj,
             t.doc,
             t.parent,
             &t.review_op,

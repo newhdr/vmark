@@ -89,7 +89,7 @@ function open(tabId: string, doc: DocumentState, docKey: string, previous: Promi
   const session = new ProvenanceSession(
     doc.content,
     { arm, close: (epoch) => closeEpoch(docKey, epoch, armedOn), suspended: () => isJournalDocumentUnbound(docKey) },
-    { warn: journalWarn },
+    { view: `${getCurrentWindowLabel()}/${tabId}`, warn: journalWarn },
   );
   const unregister = registerUnsavedProvenanceSource(tabId, {
     freeze: (buffer) => session.freeze(buffer),

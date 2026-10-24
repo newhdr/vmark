@@ -11,7 +11,11 @@
 //! journal tail and a torn blob-pack tail behind it; a future content record
 //! followed by a v2 record that depends on it (must be `FUTURE_FORMAT`, not
 //! `JOURNAL_CORRUPT`); two documents, with an open transaction and an armed
-//! epoch that a writable open would close. Every journal command, through
+//! epoch that a writable open would close. WI-AL2.2a adds the deferred
+//! receipt kinds (R103 rule 8): a `decision` receipt and a comment-create
+//! record under a newer schema, top level and inside an admission, behind
+//! torn tails, are `FUTURE_FORMAT`; labelled schema 3 they are `Corrupt`.
+//! Every journal command, through
 //! IPC dispatch, is in `future_format_dispatch.test.rs`.
 
 use std::io::Write;
@@ -228,4 +232,83 @@ fn a_v2_journal_still_opens_and_new_records_stay_v2() {
     let now = w.snapshot().state;
     assert_eq!(now.docs[&doc].head, live.state.docs[&doc].head);
     assert_eq!(now.revisions, live.state.revisions);
+}
+
+/// A real receipted `prepared` (top level, schema 3) from `dir`'s journal,
+/// written through the controller with a request id.
+fn receipted_prepared(dir: &Path) -> serde_json::Value {
+    use crate::agent_journal::admission::admission_support::{body, controller, request_id};
+    let (c, _) = controller(dir);
+    c.prepare(&body(None, "", Some(&request_id())).to_string())
+        .expect("prepare");
+    let raw = c.writer.lock().journal.read_all().expect("journal");
+    raw.iter()
+        .map(|p| serde_json::from_slice::<serde_json::Value>(p).unwrap())
+        .find(|v| v["receipt"].is_object())
+        .expect("a receipted prepared")
+}
+
+/// The deferred receipt kinds, as the work item that adds them would write
+/// them under `version`: a `prepared` answered by a `decision` receipt and
+/// a comment-create record, at top level and inside an admission.
+fn deferred_kinds(prepared: &serde_json::Value, version: u32) -> Vec<serde_json::Value> {
+    let mut decision = prepared.clone();
+    decision["schemaVersion"] = version.into();
+    decision["receipt"]["outcome"] =
+        serde_json::json!({"kind": "decision", "response": {"applied": ["h1"]}});
+    let comment = serde_json::json!({
+        "schemaVersion": version, "seq": "900", "txn": TxnId::new(), "at": 0,
+        "record": {"kind": "commentCreated", "doc": DocId::new(), "body": "注释 — note"},
+        "receipt": {"requestId": uuid::Uuid::new_v4().to_string(), "digest": prepared["receipt"]["digest"],
+                    "outcome": {"kind": "commentCreated", "response": {"commentId": "c1"}}},
+    });
+    let admission = serde_json::json!({
+        "schemaVersion": version, "seq": "901", "txn": decision["txn"], "at": 0,
+        "record": {"kind": "admission", "items": [comment.clone(), decision.clone()]},
+    });
+    vec![decision, comment, admission]
+}
+
+#[test]
+fn deferred_receipt_kinds_under_a_newer_schema_are_future_format_with_torn_tails() {
+    let source = tmp();
+    let prepared = receipted_prepared(source.path());
+    for (case, future) in deferred_kinds(&prepared, MAX_SUPPORTED_SCHEMA + 1)
+        .into_iter()
+        .enumerate()
+    {
+        let dir = tmp();
+        {
+            let (w, _) = open(dir.path());
+            human_save(&w, DocId::new(), "a");
+            w.debug_append_raw(&serde_json::to_vec(&future).unwrap())
+                .unwrap();
+        }
+        append_raw(&dir.path().join(JOURNAL_FILE), &torn_frame(9 + case));
+        append_raw(&dir.path().join(BLOB_PACK), &torn_frame(5));
+        assert_off_and_untouched(dir.path(), MAX_SUPPORTED_SCHEMA);
+    }
+}
+
+#[test]
+fn deferred_receipt_kinds_labelled_schema_3_are_corrupt() {
+    use crate::agent_journal::codec;
+    let source = tmp();
+    let prepared = receipted_prepared(source.path());
+    assert!(
+        matches!(
+            codec::decode(&serde_json::to_vec(&prepared).unwrap()),
+            Ok(codec::Decoded::Known(_))
+        ),
+        "the unmodified receipted prepared decodes"
+    );
+    for (case, v3) in deferred_kinds(&prepared, MAX_SUPPORTED_SCHEMA)
+        .into_iter()
+        .enumerate()
+    {
+        let err = codec::decode(&serde_json::to_vec(&v3).unwrap())
+            .err()
+            .unwrap_or_else(|| panic!("case {case}: decoded a deferred kind inside schema 3"));
+        assert_eq!(err.code(), "JOURNAL_CORRUPT", "case {case}: {err}");
+    }
 }

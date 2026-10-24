@@ -268,6 +268,7 @@ impl Writer {
             txn,
             at: now_ms(),
             record,
+            receipt: None,
         };
         self.faults.run_hook(&env);
         inner.journal.append(&codec::encode(&env))?;

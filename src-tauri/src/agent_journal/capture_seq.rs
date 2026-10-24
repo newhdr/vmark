@@ -26,7 +26,13 @@
 //!     process runs: sessions are per tab and document key, so the map stays
 //!     small for any realistic run.
 //!   - Optional on the wire: a save that names no capture is unbound and not
-//!     checked, which is every save until the collectors mint capture ids.
+//!     checked (a tab with no provenance session). A window sends each
+//!     session's captures in seq order, one answered before the next is
+//!     sent, so a legitimate reordering never reaches this check.
+//!   - A controlled or restore prepare binds its capture the same way
+//!     (`admission::prepare`): checked after the parent CAS and before
+//!     admission, recorded only once its record or frame is durable; an
+//!     identical retry answered from its receipt is not checked again.
 //!   - `u64::MAX` is a valid seq that nothing extends: that session is done.
 //!
 //! @module agent_journal/capture_seq
@@ -83,7 +89,7 @@ impl TryFrom<CaptureIdWire> for CaptureId {
 pub(crate) struct CaptureSeqs(HashMap<String, u64>);
 
 impl CaptureSeqs {
-    fn check(&self, id: &CaptureId) -> Result<(), TxnError> {
+    pub(crate) fn check(&self, id: &CaptureId) -> Result<(), TxnError> {
         match self.0.get(&id.session) {
             Some(&last) if id.seq <= last => Err(TxnError::InvalidRequest(format!(
                 "capture seq {} does not extend the last seq {last} recorded for its session",
@@ -93,7 +99,7 @@ impl CaptureSeqs {
         }
     }
 
-    fn record(&mut self, id: &CaptureId) {
+    pub(crate) fn record(&mut self, id: &CaptureId) {
         self.0.insert(id.session.clone(), id.seq);
     }
 }

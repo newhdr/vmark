@@ -72,6 +72,7 @@ fn next(p: &Projection, txn: TxnId, record: Record) -> Envelope {
         txn,
         at: 1,
         record,
+        receipt: None,
     }
 }
 
@@ -440,6 +441,7 @@ fn a_second_header_after_a_zero_header_is_corruption() {
         record: Record::JournalHeader {
             generation_floor: floor,
         },
+        receipt: None,
     };
     let mut p = Projection::default();
     p.apply(&header(0, 0)).expect("a leading header");

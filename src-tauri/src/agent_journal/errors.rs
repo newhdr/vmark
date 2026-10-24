@@ -46,6 +46,11 @@ pub enum TxnError {
     InvalidText(String),
     /// The append did not become durable; nothing changed.
     Io(String),
+    /// A prepare's write failed in a way that poisoned the journal (an
+    /// fsync or truncate-back failure): the frame may or may not be
+    /// durable. The live state is unchanged; reopen replays all of it or
+    /// none. Wire token `JOURNAL_IO`, with `indeterminate: true`.
+    Indeterminate(String),
     /// A writer invariant is broken (e.g. a capture at a reviewGen no
     /// active hunk can reach). A bug, never a user-facing refusal.
     Invariant(String),
@@ -67,7 +72,7 @@ impl TxnError {
             Self::AmbiguousRevert { .. } => "AMBIGUOUS_REVERT",
             Self::InvalidRequest(_) | Self::InvalidProvenance(_) => "INVALID_REQUEST",
             Self::InvalidText(_) => "INVALID_TEXT",
-            Self::Io(_) => "JOURNAL_IO",
+            Self::Io(_) | Self::Indeterminate(_) => "JOURNAL_IO",
             Self::Invariant(_) => "INVARIANT_BROKEN",
             Self::Corrupt(_) => "JOURNAL_CORRUPT",
             Self::FutureFormat { .. } => "JOURNAL_FUTURE_FORMAT",

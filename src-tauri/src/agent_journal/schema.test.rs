@@ -267,6 +267,7 @@ fn env(record: Record) -> Envelope {
         txn: TxnId::new(),
         at: 1_760_000_000_000,
         record,
+        receipt: None,
     }
 }
 
@@ -332,6 +333,7 @@ fn golden_wire_shapes() {
         record: Record::JournalHeader {
             generation_floor: u64::MAX - 1,
         },
+        receipt: None,
     };
     let json = serde_json::to_value(&header).unwrap();
     assert_eq!(json["seq"], "18446744073709551615");

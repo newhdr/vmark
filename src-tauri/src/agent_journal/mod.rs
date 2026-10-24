@@ -7,8 +7,7 @@
 //!
 //! Layering, bottom up:
 //! - `frame` — length + checksum framing, torn-tail scan (pure).
-//! - `codec` — versioned envelope decoder (a schema-v1 record is upgraded
-//!   conservatively by `codec_v1`), legacy checkpoint conversion (pure).
+//! - `codec` — versioned envelope decoder (`codec_v1` upgrades v1; `admission` frames, receipts).
 //! - `journal_file`, `blob_store` — durable append, fsync, compaction (I/O).
 //! - `projection` — replay records into state; shared by live and restart.
 //! - `review_rules`, `review_slots`, `review_matrix`, `pins` — pure rules over the projection.
@@ -51,6 +50,7 @@
 //! @module agent_journal
 
 pub mod actor;
+pub mod admission;
 pub mod blob_store;
 pub mod capture;
 pub mod capture_seq;

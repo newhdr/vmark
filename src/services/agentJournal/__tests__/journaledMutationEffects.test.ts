@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe("runJournaledMutation — provenance", () => {
   function source(payloadDelay?: () => void) {
-    const freeze = { touched: true, payload: vi.fn(async () => (payloadDelay?.(), null)), recorded: vi.fn(), invalidate: vi.fn() };
+    const freeze = { touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: <T>(send: () => Promise<T>) => send(), payload: vi.fn(async () => (payloadDelay?.(), null)), recorded: vi.fn(), invalidate: vi.fn() };
     const forks: Array<{ text: string; recorded: ReturnType<typeof vi.fn>; invalidate: ReturnType<typeof vi.fn> }> = [];
     registerUnsavedProvenanceSource(TAB, {
       freeze: () => freeze,

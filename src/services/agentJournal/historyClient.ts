@@ -7,7 +7,8 @@
  * Key decisions:
  *   - Same wire rules as `journalClient.ts`: one JSON string payload,
  *     decimal-string generations and sequence numbers, a malformed reply
- *     refused as `JOURNAL_UNAVAILABLE`.
+ *     refused as `JOURNAL_UNAVAILABLE`; each restore prepare is one logical
+ *     request with its own `requestId`, and its reply is decoded losslessly.
  *   - An entry's actor is reduced to the label the panel shows (the
  *     session label, else the client's declared name); the journal keeps
  *     the full attribution.
@@ -19,7 +20,18 @@
 import type { PreparedTxn } from "./journalClient";
 import { parseJournalActor, type JournalActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
-import { callJournal, isDecimal, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
+import type { CaptureId } from "./provenance/captureId";
+import {
+  callJournal,
+  freezePreparePayload,
+  isDecimal,
+  isNullableString,
+  isObject,
+  isString,
+  malformed,
+  mintRequestId,
+  parsePreparedTxn,
+} from "./journalIpc";
 
 /** What a restore puts back: a revision, an uncommitted entry's preimage, or a pre-journal checkpoint. */
 export type RestoreSource =
@@ -37,6 +49,8 @@ export interface RestorePrepareInput {
   source: RestoreSource;
   baselineProvenance: JournalProvenancePayload | null;
   baselineTouched: boolean;
+  /** The provenance freeze the overwritten buffer was taken under; omitted when nothing froze it. */
+  capture?: CaptureId;
 }
 
 export interface PreparedRestore extends PreparedTxn {
@@ -59,13 +73,18 @@ export interface UncommittedEntry {
   complete: boolean;
 }
 
-/** Prepare a restore. Rejects with a `JournalRefusal`. */
-export async function prepareRestore(input: RestorePrepareInput): Promise<PreparedRestore> {
-  const command = "agent_journal_restore_prepare";
-  const r = await callJournal(command, { payload: JSON.stringify(input) });
+/** Read `command`'s reply as a restore prepare, losslessly. Throws `malformed`. */
+export function parseRestorePrepared(command: string, r: unknown): PreparedRestore {
   const prepared = parsePreparedTxn(command, r);
   if (!isObject(r) || typeof r.text !== "string" || !isNullableString(r.resolves)) throw malformed(command);
   return { ...prepared, text: r.text, resolves: r.resolves };
+}
+
+/** Prepare a restore, as one new logical request. Rejects with a `JournalRefusal`. */
+export async function prepareRestore(input: RestorePrepareInput): Promise<PreparedRestore> {
+  const command = "agent_journal_restore_prepare";
+  const payload = freezePreparePayload(input, mintRequestId());
+  return parseRestorePrepared(command, await callJournal(command, { payload }));
 }
 
 function entryOf(command: string, row: unknown): UncommittedEntry {

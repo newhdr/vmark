@@ -233,11 +233,12 @@ function submitSave(
     return refusedTicket("JOURNAL_DEGRADED");
   }
   const from = movedFrom(tabId, docKey, windowLabel);
-  const plan: SavePlan = {
-    tabId, docKey, from, window: windowNameFor(tabId, docKey, windowLabel), content, origin,
-    freeze: freezeFor(tabId, content), claim: { stamp: basisStamp(tabId, from ?? docKey), life: journalTabLife(tabId) },
-  };
+  const window = windowNameFor(tabId, docKey, windowLabel);
+  const claim: SaveClaim = { stamp: basisStamp(tabId, from ?? docKey), life: journalTabLife(tabId) };
   const link = linkChain(tabId, docKey, from ?? docKey);
+  // Frozen last: from here every exit settles the freeze (`record`'s
+  // `finally`, or `cancel`), or it would hold its session's send turn.
+  const plan: SavePlan = { tabId, docKey, from, window, content, origin, freeze: freezeFor(tabId, content), claim };
   // Live until the deadline passes, by the wall clock or the timer, whichever is first.
   let abandoned = false;
   let deadlineAt = Infinity;
@@ -246,7 +247,7 @@ function submitSave(
     link.base.then(async (parent) => {
       if (!live()) {
         link.release(parent);
-        return NOT_RECORDED;
+        return expired(plan.freeze);
       }
       let next: JournalObservedRef | null | undefined;
       try {
@@ -267,7 +268,7 @@ function submitSave(
         const refusal = toJournalRefusal(error);
         journalWarn("save not recorded in the agent edit journal:", refusal.journalCode, refusal.message);
         return { ...expired(plan.freeze), reason: refusal.journalCode };
-      });
+      }).finally(() => plan.freeze?.invalidate()); // a no-op once recorded: the first settle wins
       return outcome;
     },
     cancel() {

@@ -2,11 +2,12 @@
 //! text back — a revision, the preimage of an `uncommitted` transaction, or
 //! a legacy checkpoint — through the same protocol as an agent write.
 //!
-//! Prepare, in order: the source is resolved and checked first (an unknown,
-//! collected or foreign source, or full restore slots, refuses with nothing
-//! appended); then the controlled prepare — admission, parent CAS, pending
-//! captures, the overwritten buffer recorded as a human baseline, the
-//! writer's prepare with `reviewOp: restore`. The whole of it holds the
+//! Prepare, in order (`admission::prepare`): a request id already
+//! receipted is answered from its receipt; parent CAS; capture seq; the
+//! source resolved and checked (an unknown, collected or foreign source,
+//! or full restore slots, refuses with nothing appended); admission; then
+//! pending captures, the overwritten buffer recorded as a human baseline,
+//! the writer's prepare with `reviewOp: restore`. The whole of it holds the
 //! writer lock, so the source read is the source reserved. The reply hands
 //! the window the source text to apply.
 //!
@@ -28,7 +29,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
-use crate::agent_journal::controlled::{prepare_after_baseline, Prep};
+use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
+use crate::agent_journal::admission::receipt::{PayloadDigest, PreparedResponse, RequestId};
+use crate::agent_journal::capture_seq::CaptureId;
+use crate::agent_journal::controlled::{reused_id, Prep};
 use crate::agent_journal::controlled_wire::decode;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
@@ -55,10 +59,16 @@ pub struct RestorePrepareRequest {
     pub baseline_provenance: Option<ProvenanceField>,
     #[serde(default)]
     pub baseline_touched: bool,
+    /// Window-minted once per logical restore, reused on retry.
+    #[serde(default)]
+    pub request_id: Option<RequestId>,
+    /// The provenance capture the window froze for the overwritten buffer.
+    #[serde(default)]
+    pub capture: Option<CaptureId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RestorePrepared {
     pub doc: DocId,
     pub txn: TxnId,
@@ -79,7 +89,7 @@ pub fn decode_restore_prepare(payload: &[u8]) -> Result<RestorePrepareRequest, T
 }
 
 /// The text `source` holds for `doc`, after the prepare-time checks.
-fn source_text(
+pub(crate) fn source_text(
     g: &mut Inner,
     doc: DocId,
     op: &ReviewOp,
@@ -93,45 +103,44 @@ fn source_text(
     Ok((text, restore_resolves(source)))
 }
 
-/// Prepare a restore of `doc`. See the module docs for the order.
+/// Prepare a restore of `doc` sent with no request id. See the module
+/// docs for the order.
 pub fn prepare_restore(
     w: &Writer,
     doc: DocId,
     req: RestorePrepareRequest,
 ) -> Result<RestorePrepared, TxnError> {
+    prepare_restore_with(w, doc, req, None)
+}
+
+/// `prepare_restore` with the digest of the raw payload, which a request
+/// id's receipt stores. The source is read in the same critical section
+/// as the reservation: a collection or discard cannot invalidate it in
+/// between.
+pub fn prepare_restore_with(
+    w: &Writer,
+    doc: DocId,
+    req: RestorePrepareRequest,
+    digest: Option<PayloadDigest>,
+) -> Result<RestorePrepared, TxnError> {
     let baseline_provenance = decode_field(req.baseline_provenance)?;
-    let review_op = ReviewOp::Restore {
-        source: req.source.clone(),
+    let request = Request::from_parts(req.request_id, digest)?;
+    let prep = Prep {
+        parent: req.parent,
+        preimage: req.preimage,
+        actor: Actor::Human,
+        initiator: Actor::Human,
+        tool: RESTORE_TOOL.into(),
+        review_op: ReviewOp::Restore { source: req.source },
+        baseline_provenance,
+        baseline_touched: req.baseline_touched,
+        certificate: None,
+        capture: req.capture,
     };
-    // One critical section from the source check to the reservation: a
-    // collection or discard cannot invalidate the source in between.
-    let mut g = w.lock();
-    let (text, resolves) = source_text(&mut g, doc, &review_op, &req.source)?;
-    let prepared = prepare_after_baseline(
-        w,
-        &mut g,
-        doc,
-        Prep {
-            parent: req.parent,
-            preimage: req.preimage,
-            actor: Actor::Human,
-            initiator: Actor::Human,
-            tool: RESTORE_TOOL.into(),
-            review_op,
-            baseline_provenance,
-            baseline_touched: req.baseline_touched,
-            certificate: None,
-        },
-    )?;
-    Ok(RestorePrepared {
-        doc,
-        txn: prepared.txn,
-        revision: prepared.revision,
-        generation: prepared.generation,
-        baseline: prepared.baseline,
-        text,
-        resolves,
-    })
+    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
+        PreparedResponse::Restore(p) => Ok(p),
+        PreparedResponse::Controlled(_) => Err(reused_id()),
+    }
 }
 
 /// The uncommitted transaction a prepared restore of its preimage resolves.

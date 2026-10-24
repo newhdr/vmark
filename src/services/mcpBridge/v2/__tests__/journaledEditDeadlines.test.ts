@@ -49,7 +49,7 @@ function answer(overrides: Record<string, () => Promise<unknown>> = {}): void {
 function slowPayload(ms: number | null): void {
   registerUnsavedProvenanceSource(TAB, {
     freeze: () => ({
-      touched: false,
+      touched: false, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
       payload: () => (ms === null ? never() : after<NamedPayload | null>(ms, null)),
       recorded: () => {},
       invalidate: () => {},

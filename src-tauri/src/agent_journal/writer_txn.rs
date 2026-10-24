@@ -8,7 +8,8 @@
 //! cleanly or would edit another live hunk is `INVALID_REQUEST`. A refusal
 //! appends nothing. A commit refused for its effects keeps the transaction
 //! open so the worker can recompute; a caller that cannot recompute ends it
-//! with `record_uncommitted`. A commit's `resolves` is bound to its
+//! with `record_uncommitted`. The checks after admission live in
+//! `admission::prepared_record`. A commit's `resolves` is bound to its
 //! restore source (`review_rules::check_restore`).
 //!
 //! Every `committed` carries a provenance payload: the worker's
@@ -16,22 +17,21 @@
 //! exact single change, a selection edit's checked certificate
 //! (`certificate`), or a writer-built whole-document barrier.
 
+use crate::agent_journal::admission::prepared_record::prepared_record;
 use crate::agent_journal::effects_rules::{check_effects, EffectsCtx};
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
+use crate::agent_journal::ids::{BlobHash, DocId, TxnId};
 use crate::agent_journal::projection::{TxnEntry, TxnStatus};
 use crate::agent_journal::provenance::Certificate;
 use crate::agent_journal::record::Record;
-use crate::agent_journal::revert_gate::RevertDecision;
-use crate::agent_journal::review::ReviewOp;
-use crate::agent_journal::review_rules::{check_prepare, check_restore};
+use crate::agent_journal::review_rules::check_restore;
 use crate::agent_journal::writer::certificate::Certification;
 use crate::agent_journal::writer::{
     CommitOutcome, CommitRequest, Durability, Inner, PrepareRequest, Prepared, Reservation, Writer,
 };
 use crate::agent_journal::writer_degraded::Queued;
 use crate::agent_journal::writer_epoch::{basis_of, certified_payload};
-use crate::agent_journal::writer_revert::{plan, referenced_blob};
+use crate::agent_journal::writer_revert::referenced_blob;
 
 impl Writer {
     pub fn prepare(&self, req: PrepareRequest) -> Result<Prepared, TxnError> {
@@ -50,50 +50,13 @@ impl Writer {
         g.healthy()?;
         g.not_busy(req.doc)?;
         g.admit_reservation()?;
-        let head = g.proj.head(req.doc);
-        if head != req.parent {
-            return Err(TxnError::StaleParent { head });
-        }
-        // The preimage is the head text; before the first revision the
-        // recorded baseline is genesis `""`. Unsaved text is observed first.
-        let pre = BlobHash::of_text(&req.preimage);
-        if g.proj.postimage_of(head).as_ref() != Some(&pre) {
-            return Err(TxnError::StaleParent { head });
-        }
-        if let Some(c) = &req.certificate {
-            if c.basis() != basis_of(req.parent) || c.pre_hash() != pre.digest_hex() {
-                return Err(TxnError::InvalidRequest(
-                    "the certificate is not bound to the parent".into(),
-                ));
-            }
-        }
-        check_prepare(&g.proj, req.doc, &req.review_op)?;
-        if let ReviewOp::HunkRevert { hunk_id, .. } = &req.review_op {
-            let p = plan(&g.proj, &mut g.blobs, req.doc, hunk_id, &req.preimage)?;
-            if !matches!(p.decision, RevertDecision::Apply { .. }) {
-                return Err(TxnError::InvalidRequest(format!(
-                    "the revert does not apply: {:?}",
-                    p.decision
-                )));
-            }
-        }
-        let (txn, revision) = (TxnId::new(), RevisionId::new());
-        let record = Record::Prepared {
-            doc: req.doc,
-            parent: req.parent,
-            revision,
-            preimage: pre.clone(),
-            actor: req.actor,
-            initiator: req.initiator,
-            tool: req.tool,
-            review_op: req.review_op,
-            certificate: req.certificate,
-        };
-        let env = self.append(g, txn, record, &[(&pre, &req.preimage)])?;
-        g.reservations.insert(req.doc, Reservation { txn });
+        let doc = req.doc;
+        let r = prepared_record(&g.proj, &mut g.blobs, req)?;
+        let env = self.append(g, r.txn, r.record, &[(&r.pre, &r.preimage)])?;
+        g.reservations.insert(doc, Reservation { txn: r.txn });
         Ok(Prepared {
-            txn,
-            revision,
+            txn: r.txn,
+            revision: r.revision,
             generation: env.seq,
         })
     }

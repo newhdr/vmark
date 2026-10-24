@@ -18,8 +18,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
+use crate::agent_journal::admission::receipt::PayloadDigest;
 use crate::agent_journal::controlled_restore::{
-    decode_restore_prepare, prepare_restore, RestorePrepared,
+    decode_restore_prepare, prepare_restore_with, RestorePrepared,
 };
 use crate::agent_journal::controller::{decode, invalid, parse_txn, AbortReply, Controller};
 use crate::agent_journal::ids::{DocId, TxnId};
@@ -66,10 +67,11 @@ impl Controller {
     /// # Errors
     /// The journal refusal, with `detail.journalCode`.
     pub fn restore_prepare(&self, payload: &str) -> Result<RestorePrepared, CommandError> {
+        let digest = PayloadDigest::of(payload);
         let req = decode_restore_prepare(payload.as_bytes()).map_err(|e| refusal(&e))?;
         let doc = self.docs.resolve(&req.doc_key).map_err(|e| refusal(&e))?;
-        let out = prepare_restore(&self.writer, doc, req);
-        self.settle(doc);
+        let out = prepare_restore_with(&self.writer, doc, req, Some(digest));
+        self.settle_prepare(doc, out.is_ok());
         out.map_err(|e| refusal(&e))
     }
 

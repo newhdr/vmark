@@ -15,6 +15,10 @@
  *   - A prepare and a commit answer whether a selection certificate was
  *     used; a fallback to the whole-document barrier is logged here, once
  *     for every caller, and the journal counts it in its status.
+ *   - Each call of `prepareControlledWrite` is one logical request: it mints
+ *     one `requestId` and freezes the payload once (`freezePreparePayload`).
+ *     The journal answers an identical retry from its receipt, so a prepare
+ *     reply is decoded losslessly, every field in wire order.
  *
  * @coordinates-with src-tauri/src/agent_journal/commands.rs — the commands
  * @module services/agentJournal/journalClient
@@ -23,7 +27,17 @@
 import type { JournalMcpActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
 import type { SelectionCertificate } from "./selectionCertificate";
-import { callJournal as call, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
+import type { CaptureId } from "./provenance/captureId";
+import {
+  callJournal as call,
+  freezePreparePayload,
+  isNullableString,
+  isObject,
+  isString,
+  malformed,
+  mintRequestId,
+  parsePreparedTxn,
+} from "./journalIpc";
 import { journalWarn } from "@/utils/debug";
 
 /** Why re-verification refused to apply. */
@@ -61,10 +75,20 @@ export interface PrepareInput {
    * Omitted otherwise: the commit is then a whole-document barrier.
    */
   certificate?: SelectionCertificate | null;
+  /** The provenance freeze this buffer was taken under; omitted when nothing froze it. */
+  capture?: CaptureId;
 }
 
 import type { PreparedTxn } from "./journalIpc";
 export type { PreparedTxn };
+
+/** A controlled prepare's reply, every field the journal sent. */
+export interface ControlledPrepared extends PreparedTxn {
+  /** The prepare persisted the certificate it was sent. */
+  certified: boolean;
+  /** Why a sent certificate was not used; `null` when certified or none was sent. */
+  fallbackReason: FallbackReason | null;
+}
 
 /**
  * Extra fields a commit carries beside its `postimage`, computed between the
@@ -111,6 +135,8 @@ export interface CaptureInput {
    * `postimage`, under its armed epoch. `null`: a `snapshotOnly` barrier.
    */
   provenance: JournalProvenancePayload | null;
+  /** The provenance freeze this save was taken under; omitted for an unbound save. */
+  capture?: CaptureId;
 }
 
 const JOURNALED = ["yes", "pending", "no"] as const;
@@ -129,6 +155,8 @@ export interface CapturedSave {
 
 /** Why the journal did not use a certificate (`FallbackReason` in Rust). */
 const FALLBACK_REASONS = ["notTheParent", "notThePostimage", "wholeBreak", "splitsACharacter", "noFreeSlots", "overCap"] as const;
+type FallbackReason = (typeof FALLBACK_REASONS)[number];
+const isFallbackReason = (v: unknown): v is FallbackReason => FALLBACK_REASONS.some((f) => f === v);
 
 /**
  * Check a reply's `certified` and `fallbackReason` (a certified reply has no
@@ -136,18 +164,25 @@ const FALLBACK_REASONS = ["notTheParent", "notThePostimage", "wholeBreak", "spli
  */
 function checkCertification(command: string, r: Record<string, unknown>, doc: string): void {
   const reason = r.fallbackReason;
-  const known = reason === null || FALLBACK_REASONS.some((f) => f === reason);
+  const known = reason === null || isFallbackReason(reason);
   if (typeof r.certified !== "boolean" || !known || (r.certified && reason !== null)) throw malformed(command);
   if (reason !== null) journalWarn(`${command}: the certificate for ${doc} was not used (${String(reason)}); recorded as a barrier`);
 }
 
-/** Prepare a controlled write. Rejects with a `JournalRefusal`. */
-export async function prepareControlledWrite(input: PrepareInput): Promise<PreparedTxn> {
+/** Read `command`'s reply as a controlled prepare, losslessly. Throws `malformed`. */
+export function parseControlledPrepared(command: string, r: unknown): ControlledPrepared {
+  const { doc, txn, revision, generation, baseline } = parsePreparedTxn(command, r);
+  const reply = r as Record<string, unknown>;
+  checkCertification(command, reply, doc);
+  const fallbackReason = isFallbackReason(reply.fallbackReason) ? reply.fallbackReason : null;
+  return { doc, txn, revision, generation, baseline, certified: reply.certified === true, fallbackReason };
+}
+
+/** Prepare a controlled write, as one new logical request. Rejects with a `JournalRefusal`. */
+export async function prepareControlledWrite(input: PrepareInput): Promise<ControlledPrepared> {
   const command = "agent_journal_prepare";
-  const r = await call(command, { payload: JSON.stringify(input) });
-  const prepared = parsePreparedTxn(command, r);
-  checkCertification(command, r as Record<string, unknown>, prepared.doc);
-  return prepared;
+  const payload = freezePreparePayload(input, mintRequestId());
+  return parseControlledPrepared(command, await call(command, { payload }));
 }
 
 /**

@@ -17,7 +17,7 @@ use serde::Deserialize;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::BlobHash;
 use crate::agent_journal::record::{
-    Envelope, LegacyAnchor, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1,
+    Envelope, LegacyAnchor, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V3,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,11 +66,52 @@ pub fn decode_with_max(payload: &[u8], max: u32) -> Result<Decoded, TxnError> {
         crate::agent_journal::codec_v1::upgrade(&mut value)
             .map_err(|e| TxnError::Corrupt(format!("invalid v1 record: {e}")))?;
     }
+    Ok(Decoded::Known(Box::new(decode_known(value, version)?)))
+}
+
+/// One envelope of a version this reader supports. An `admission`'s items
+/// go through this same path, each required to be v3 like its frame (a v1
+/// or v4 child, or a nested frame, is corrupt — never upgraded or skipped).
+fn decode_known(mut value: serde_json::Value, version: u32) -> Result<Envelope, TxnError> {
     refuse_fields_on_unit_kinds(&value)?;
-    let env: Envelope = serde_json::from_value(value)
+    let children = take_admission_items(&mut value);
+    let mut env: Envelope = serde_json::from_value(value)
         .map_err(|e| TxnError::Corrupt(format!("invalid v{version} record: {e}")))?;
+    if let (Some(children), Record::Admission { items }) = (children, &mut env.record) {
+        for child in children {
+            let v = child
+                .get("schemaVersion")
+                .and_then(serde_json::Value::as_u64);
+            if v != Some(u64::from(SCHEMA_V3)) || version != SCHEMA_V3 {
+                return Err(TxnError::Corrupt(format!(
+                    "seq {}: an admission item is not schema v3",
+                    env.seq
+                )));
+            }
+            if child.pointer("/record/kind") == Some(&serde_json::json!("admission")) {
+                return Err(TxnError::Corrupt(format!(
+                    "seq {}: a nested admission",
+                    env.seq
+                )));
+            }
+            items.push(decode_known(child, SCHEMA_V3)?);
+        }
+    }
     check_shape(&env)?;
-    Ok(Decoded::Known(Box::new(env)))
+    Ok(env)
+}
+
+/// An `admission`'s raw items, left as an empty array in `value` so the
+/// frame deserializes without them.
+fn take_admission_items(value: &mut serde_json::Value) -> Option<Vec<serde_json::Value>> {
+    let record = value.get_mut("record")?.as_object_mut()?;
+    if record.get("kind")? != "admission" {
+        return None;
+    }
+    match record.get_mut("items")? {
+        serde_json::Value::Array(items) => Some(std::mem::take(items)),
+        _ => None,
+    }
 }
 
 /// `deny_unknown_fields` cannot see extra keys beside the tag of a unit
@@ -88,9 +129,12 @@ fn refuse_fields_on_unit_kinds(value: &serde_json::Value) -> Result<(), TxnError
     }
 }
 
-/// v2 invariants serde cannot express: a v2 commit always carries its map.
+/// Invariants serde cannot express: a v2 commit always carries its map; a
+/// receipt names its own `prepared`; an admission keeps its frame rules.
 fn check_shape(env: &Envelope) -> Result<(), TxnError> {
     crate::agent_journal::schema_table::check(env)?;
+    crate::agent_journal::admission::receipt::check_binding(env)?;
+    crate::agent_journal::admission::shape::check(env)?;
     match &env.record {
         Record::Committed {
             provenance: None, ..

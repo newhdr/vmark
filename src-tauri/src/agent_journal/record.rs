@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
+use crate::agent_journal::admission::receipt::Receipt;
 use crate::agent_journal::ids::{BlobHash, DocId, HunkId, RevisionId, TxnId};
 use crate::agent_journal::provenance::ProvenancePayload;
 use crate::agent_journal::review::{
@@ -44,6 +45,11 @@ pub struct Envelope {
     /// Unix milliseconds.
     pub at: u64,
     pub record: Record,
+    /// The request this record answers, on a `prepared` (v3): its id, the
+    /// digest of its payload and the reply exactly as first sent
+    /// (`admission::receipt`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<Receipt>,
 }
 
 /// What an observation was built on. Decoded through [`ObservedRefWire`],
@@ -244,6 +250,12 @@ pub enum Record {
         doc: DocId,
         #[serde(with = "crate::agent_journal::u64_wire")]
         epoch: u64,
+    },
+    /// One multi-record write as one frame (v3): complete child envelopes
+    /// with contiguous `seq` from this envelope's, one `at`, one document
+    /// (`admission::shape`). Durable whole or not at all.
+    Admission {
+        items: Vec<Envelope>,
     },
     /// Immutable migrated checkpoint; outside revision chains.
     LegacyCheckpoint {

@@ -25,6 +25,8 @@
  *   - Epochs are armed lazily (first change or freeze) and closed once
  *     nothing is left to certify; arm and close run on one serialized
  *     chain, and an arm that answers after dispose is closed at once.
+ *   - Every freeze, the over-budget one included, takes the session's next
+ *     capture id and send turn (`captureId.ts`): seqs reach the journal in order.
  *   - Budgets: at most `maxFrozen` windows frozen and unsettled (past it a
  *     freeze is refused loudly and the next window is uncertifiable), and
  *     the accumulator's entry cap (`capOverflow`).
@@ -43,6 +45,7 @@
 import type { ArmedEpoch } from "../epochClient";
 import { EpochLease, type SessionJournal } from "./epochLease";
 import { PROVENANCE_CAP } from "./accumulator";
+import { captureMinter, type CaptureId, type CaptureTurn } from "./captureId";
 import { certificateAuthority, type ViewCertificate } from "./certificates";
 import { encodePayload, textHash } from "./payload";
 import type { Section } from "./pieces";
@@ -81,13 +84,15 @@ export class ProvenanceSession {
   readonly #cap: number;
   readonly #maxFrozen: number;
   readonly #warn: SessionOptions["warn"];
+  readonly #mintCapture: () => { id: CaptureId; turn: CaptureTurn };
 
-  constructor(text: string, journal: SessionJournal, { cap = PROVENANCE_CAP, maxFrozen = MAX_FROZEN_WINDOWS, warn }: SessionOptions) {
+  constructor(text: string, journal: SessionJournal, { cap = PROVENANCE_CAP, maxFrozen = MAX_FROZEN_WINDOWS, view = "", warn }: SessionOptions) {
     this.#text = text;
     this.#lease = new EpochLease(journal, { onArmed: (a) => this.#handshake(a), afterArm: () => this.#maybeClose(), warn });
     this.#cap = cap;
     this.#maxFrozen = maxFrozen;
     this.#warn = warn;
+    this.#mintCapture = captureMinter(view);
     this.#window = openWindow(text, { kind: "handshake" }, cap);
     this.#initial = { pre: text, slot: this.#window.slot };
   }
@@ -152,6 +157,7 @@ export class ProvenanceSession {
 
   freeze(buffer: string): ProvenanceFreeze {
     this.#materialize();
+    const { id: capture, turn } = this.#mintCapture();
     if (buffer !== this.#text) {
       this.#setText(buffer);
       this.#breakWhole("snapshotOnly", "freeze:unaligned");
@@ -161,7 +167,7 @@ export class ProvenanceSession {
     this.#window = openWindow(buffer, over ? { kind: "invalid" } : { kind: "pending" }, this.#cap);
     if (over) {
       this.#warn("provenance: too many unsettled saves; this one and the next window are snapshot-only");
-      return { touched: true, payload: async () => null, recorded: () => {}, invalidate: () => {} };
+      return { touched: true, capture, inTurn: turn.run, payload: async () => null, recorded: turn.settle, invalidate: turn.settle };
     }
     this.#frozen++;
     void this.#lease.ensure();
@@ -169,13 +175,15 @@ export class ProvenanceSession {
     let settled = false;
     const settle = (id: string | null) => {
       if (settled) return;
-      settled = true;
-      this.#frozen--;
+      [settled, this.#frozen] = [true, this.#frozen - 1];
+      turn.settle();
       settleSlot(next, id);
       this.#maybeClose();
     };
     return {
       touched: frozen.acc.transactions > 0,
+      capture,
+      inTurn: turn.run,
       payload: (expected) => this.#payload(frozen, buffer, expected, () => settled),
       recorded: (id) => settle(id),
       invalidate: () => settle(null),

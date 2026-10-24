@@ -9,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
+use crate::agent_journal::admission::receipt::RequestId;
+use crate::agent_journal::capture_seq::CaptureId;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance::Certificate;
@@ -43,10 +45,18 @@ pub struct ControlledPrepareRequest {
     /// apply and bound to the parent the writer mints (`certificate`).
     #[serde(default)]
     pub certificate: Option<Certificate>,
+    /// Window-minted once per logical prepare and reused on every retry:
+    /// an identical retry is answered from the journal's receipt.
+    #[serde(default)]
+    pub request_id: Option<RequestId>,
+    /// The provenance capture the window froze for this buffer; its seq
+    /// must extend the session's last recorded one (`capture_seq`).
+    #[serde(default)]
+    pub capture: Option<CaptureId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ControlledPrepared {
     pub doc: DocId,
     pub txn: TxnId,

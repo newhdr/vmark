@@ -139,7 +139,7 @@ describe("the tab changed while its provenance payload was awaited", () => {
     let invalidated = false;
     registerUnsavedProvenanceSource(TAB, {
       freeze: () => ({
-        touched: false,
+        touched: false, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
         payload: async () => {
           during();
           return null;

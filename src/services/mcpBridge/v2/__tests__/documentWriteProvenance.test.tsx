@@ -63,7 +63,7 @@ function collector(map: ProvenancePayload | null = MAP, touched = true) {
       at("freeze", buffer);
       const settle = once("freeze");
       return {
-        touched,
+        touched, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
         payload: async (expected) => {
           at("payload", expected);
           return map && { basis: expected ?? "genesis", payload: map };

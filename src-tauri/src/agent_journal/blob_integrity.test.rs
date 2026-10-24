@@ -144,6 +144,8 @@ fn a_missing_restore_source_text_is_corruption() {
         source: RestoreSource::Revision { revision: one },
         baseline_provenance: None,
         baseline_touched: false,
+        request_id: None,
+        capture: None,
     };
     lose_blobs_but(&w, &[BlobHash::of_text("two")]);
     corrupt(prepare_restore(&w, doc, req));

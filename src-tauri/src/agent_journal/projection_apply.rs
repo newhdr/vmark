@@ -14,8 +14,11 @@
 //! means the journal is corrupt. Review rules shared with validation come
 //! from `review_rules`, so the two cannot drift. Every check runs before
 //! the record changes anything (`projection_checks`), so an error leaves
-//! the projection as it was.
+//! the projection as it was. A receipt and an admission frame are checked
+//! whole first (`admission::reduce`); the frame's items then apply in order
+//! through this same `apply`, and a receipt is indexed by request id.
 
+use crate::agent_journal::admission::reduce::preflight;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::TxnId;
 use crate::agent_journal::projection::*;
@@ -51,7 +54,11 @@ impl Projection {
         }
         let (seq, txn) = (env.seq, env.txn);
         check_generation(env)?;
+        preflight(self, env)?;
         self.apply_record(env, seq, txn)?;
+        if let Some(r) = &env.receipt {
+            self.requests.insert(r.request_id, r.clone());
+        }
         if env.schema_version == SCHEMA_V1 {
             if let Some(doc) = self.revision_doc(&env.record, txn) {
                 let d = self
@@ -98,6 +105,11 @@ impl Projection {
             Record::EpochArmed { .. }
             | Record::EpochClosed { .. }
             | Record::EpochUnclosed { .. } => self.apply_epoch(&env.record)?,
+            Record::Admission { items } => {
+                for item in items {
+                    self.apply(item)?;
+                }
+            }
         }
         Ok(())
     }

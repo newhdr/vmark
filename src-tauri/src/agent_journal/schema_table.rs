@@ -39,6 +39,7 @@ pub(crate) fn min_schema(record: &Record) -> u32 {
         Record::EpochArmed { .. } | Record::EpochClosed { .. } | Record::EpochUnclosed { .. } => {
             SCHEMA_V2
         }
+        Record::Admission { .. } => SCHEMA_V3,
     }
 }
 
@@ -48,9 +49,15 @@ pub(crate) fn label(record: &Record) -> u32 {
     min_schema(record).max(SCHEMA_V2)
 }
 
-/// Refuse a record labelled below the version of its kind or fields.
+/// Refuse a record labelled below the version of its kind or fields (a
+/// receipt is a v3 field of any envelope that may carry one).
 pub(crate) fn check(env: &Envelope) -> Result<(), TxnError> {
-    let min = min_schema(&env.record);
+    let receipt = if env.receipt.is_some() {
+        SCHEMA_V3
+    } else {
+        SCHEMA_V1
+    };
+    let min = min_schema(&env.record).max(receipt);
     if env.schema_version < min {
         return Err(TxnError::Corrupt(format!(
             "a v{min} record kind or field is labelled schemaVersion {}",

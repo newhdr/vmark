@@ -7,6 +7,7 @@
  * @module services/agentJournal/provenance/sessionTypes
  */
 
+import type { CaptureId } from "./captureId";
 import type { ViewCertificate } from "./certificates";
 import type { ProvenancePayload } from "./payload";
 import type { Section } from "./pieces";
@@ -15,6 +16,8 @@ import type { DeferredOutcome } from "./window";
 export interface SessionOptions {
   cap?: number;
   maxFrozen?: number;
+  /** The view named in every capture id the session mints (the tab, `<window>/<tab>`). */
+  view?: string;
   warn: (...args: unknown[]) => void;
 }
 
@@ -40,6 +43,10 @@ export interface NamedPayload {
 export interface ProvenanceFreeze {
   /** A person (or a gap) changed the text in this window. */
   readonly touched: boolean;
+  /** This freeze's identity: its session's next seq, sent on a save or a controlled prepare. */
+  readonly capture: CaptureId;
+  /** Send what carries `capture` in seq order (`captureId.ts`): after every earlier freeze replied or settled unsent. Once, before settling. */
+  inTurn<T>(send: () => Promise<T>): Promise<T>;
   /** The certified map to the frozen buffer from `expected` (or the window's own basis), or `null`. */
   payload(expected: string | null): Promise<NamedPayload | null>;
   /** The journal holds the frozen buffer as `id`. Terminal; the first settlement wins. */

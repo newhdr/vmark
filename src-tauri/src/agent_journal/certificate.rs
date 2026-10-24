@@ -27,11 +27,11 @@
 //! with the barrier's effects. Either way `certified` is false, the reason
 //! is returned, a warning is logged and `uncertified_fallbacks` counts it.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId};
-use crate::agent_journal::projection::TxnEntry;
+use crate::agent_journal::projection::{Projection, TxnEntry};
 use crate::agent_journal::provenance::{Certificate, ChangedRun, Provenance, ProvenancePayload};
 use crate::agent_journal::review::{Hunk, HunkKind, Range, ReviewOp};
 use crate::agent_journal::review_slots::new_hunks_fit;
@@ -41,7 +41,7 @@ use crate::agent_journal::writer_epoch::basis_of;
 use rotation::{add_rotation_breaks, declares_script};
 
 /// Why a certificate was not used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FallbackReason {
     /// It does not map the minted parent's text (or names another basis).
@@ -110,15 +110,15 @@ fn range((start, end): (i64, i64)) -> Range {
     }
 }
 
-fn epoch_of(g: &Inner, doc: DocId) -> String {
-    let open = g.proj.docs.get(&doc).and_then(|d| d.epoch.open);
+fn epoch_of(p: &Projection, doc: DocId) -> String {
+    let open = p.docs.get(&doc).and_then(|d| d.epoch.open);
     open.unwrap_or(0).to_string()
 }
 
 /// Bind a prepare's certificate to `parent`, the revision the writer just
 /// minted (or the head), whose text is `preimage`.
 pub(crate) fn bind_to_parent(
-    g: &Inner,
+    p: &Projection,
     doc: DocId,
     parent: Option<RevisionId>,
     preimage: &str,
@@ -127,13 +127,13 @@ pub(crate) fn bind_to_parent(
     let Some(c) = certificate else {
         return Ok(Bound::Absent);
     };
-    let parent_hash = g.proj.postimage_of(parent);
+    let parent_hash = p.postimage_of(parent);
     let len_a = u64::try_from(units(preimage)?).unwrap_or(u64::MAX);
     if parent_hash.as_ref().map(BlobHash::digest_hex) != Some(c.pre_hash()) || c.len_a() != len_a {
         return Ok(Bound::Fallback(FallbackReason::NotTheParent));
     }
     let bound = c
-        .bind(&doc.to_string(), &epoch_of(g, doc), &basis_of(parent))
+        .bind(&doc.to_string(), &epoch_of(p, doc), &basis_of(parent))
         .map_err(TxnError::Invariant)?;
     let window = bound.accumulator().map_err(TxnError::Invariant)?;
     if window.whole_block().is_some() {
@@ -149,14 +149,14 @@ pub(crate) fn bind_to_parent(
 /// The certificate a commit is checked against: the one sent with the
 /// commit (bound here), else the one the prepare persisted.
 fn effective(
-    g: &Inner,
+    p: &Projection,
     t: &TxnEntry,
     sent: Option<&Certificate>,
 ) -> Result<Option<ProvenancePayload>, TxnError> {
     match sent {
         Some(c) => c
             .clone()
-            .bind(&t.doc.to_string(), &epoch_of(g, t.doc), &basis_of(t.parent))
+            .bind(&t.doc.to_string(), &epoch_of(p, t.doc), &basis_of(t.parent))
             .map(Some)
             .map_err(TxnError::Invariant),
         None => Ok(t.certificate.clone()),
@@ -173,7 +173,7 @@ pub(crate) fn certify_commit(
     postimage: &str,
     sent: Option<&Certificate>,
 ) -> Result<Option<Checked>, TxnError> {
-    match effective(g, t, sent)? {
+    match effective(&g.proj, t, sent)? {
         None => Ok(None),
         Some(c) => check_commit_certificate(g, t, preimage, postimage, &c).map(Some),
     }
@@ -294,4 +294,4 @@ mod parent_tests;
 mod remount_tests;
 #[cfg(test)]
 #[path = "certificate_support.test.rs"]
-mod support;
+pub(crate) mod support;

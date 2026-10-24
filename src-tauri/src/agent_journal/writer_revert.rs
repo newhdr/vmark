@@ -7,7 +7,7 @@
 //! is the only map a `hunkRevert` commit may carry: the worker sends no
 //! payload, and its postimage and spans must equal these.
 
-use crate::agent_journal::blob_store::BlobStore;
+use crate::agent_journal::admission::blobs::BlobRead;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, HunkId};
 use crate::agent_journal::projection::{DocState, HunkEntry, Projection};
@@ -30,7 +30,10 @@ pub struct RevertPlan {
 /// The text of a blob the journal references. The writer stores a blob
 /// before the record that names it, and the empty (genesis) text needs no
 /// blob, so an absent one is corruption, never a client's bad request.
-pub(crate) fn referenced_blob(blobs: &mut BlobStore, hash: &BlobHash) -> Result<String, TxnError> {
+pub(crate) fn referenced_blob(
+    blobs: &mut dyn BlobRead,
+    hash: &BlobHash,
+) -> Result<String, TxnError> {
     if *hash == BlobHash::of_text("") {
         return Ok(String::new());
     }
@@ -47,7 +50,7 @@ pub(crate) fn referenced_blob(blobs: &mut BlobStore, hash: &BlobHash) -> Result<
 /// revision and checked against its hashes. `Err` names what is broken.
 fn hunk_texts(
     p: &Projection,
-    blobs: &mut BlobStore,
+    blobs: &mut dyn BlobRead,
     h: &Hunk,
     broken: &dyn Fn(&str) -> TxnError,
 ) -> Result<(String, String), TxnError> {
@@ -93,7 +96,7 @@ fn revert_window(current: &str, from: u64, to: u64, restored: Range) -> Result<P
 /// spans an applied revert leaves.
 pub(crate) fn plan(
     p: &Projection,
-    blobs: &mut BlobStore,
+    blobs: &mut dyn BlobRead,
     doc: DocId,
     id: &HunkId,
     current: &str,
@@ -138,7 +141,7 @@ fn gated_hunk<'d>(d: &'d DocState, id: &HunkId) -> Result<&'d HunkEntry, TxnErro
 /// direction (a reverted hunk re-applies its target).
 fn decide_live(
     p: &Projection,
-    blobs: &mut BlobStore,
+    blobs: &mut dyn BlobRead,
     h: &HunkEntry,
     current: &str,
     broken: &dyn Fn(&str) -> TxnError,

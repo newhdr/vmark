@@ -3,13 +3,16 @@
 //! then commit or abort. The window re-verifies its editor between prepare
 //! and apply; this side only records what the window reports.
 //!
-//! Prepare, in order: actor is an MCP actor, writer healthy, document not
-//! degraded or reserved (nothing appended when refused), parent CAS against
-//! the revision the window last saw, linearize pending captures, record the
-//! buffer as a human baseline when it differs from the head, then the
-//! writer's own prepare (preimage = head text). All of it is one writer
-//! critical section, so a racing prepare cannot slip in after admission:
-//! the loser is refused with nothing appended (ADR-AL6). Abort records why
+//! Prepare, in order: actor is an MCP actor; a request id already
+//! receipted is answered from its receipt; parent CAS against the revision
+//! the window last saw; the capture seq; writer healthy, document not
+//! degraded or reserved (nothing appended when refused); then pending
+//! captures linearized, the buffer recorded as a human baseline when it
+//! differs from the head, and the `prepared` (preimage = head text) —
+//! written as one record, or as one admission frame when there is more
+//! than one (`admission::prepare`). All of it is one writer critical
+//! section, so a racing prepare cannot slip in after admission: the loser
+//! is refused with nothing appended (ADR-AL6). Abort records why
 //! re-verification failed.
 //!
 //! Review effects are derived by the writer, never sent by the window. A
@@ -23,18 +26,16 @@
 //! @module agent_journal/controlled
 
 use crate::agent_journal::actor::Actor;
+use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
+use crate::agent_journal::admission::receipt::{PayloadDigest, PreparedResponse};
+use crate::agent_journal::capture_seq::CaptureId;
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
+use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance::{Certificate, ProvenancePayload};
 use crate::agent_journal::provenance_field::decode_field;
-use crate::agent_journal::record::ObservedRef;
 use crate::agent_journal::review::ReviewOp;
-use crate::agent_journal::writer::certificate::{bind_to_parent, note_fallback};
-use crate::agent_journal::writer::{
-    CommitRequest, Durability, Inner, LinearizeRequest, ObserveRequest, PrepareRequest, Writer,
-};
+use crate::agent_journal::writer::{CommitRequest, Durability, Inner, LinearizeRequest, Writer};
 use crate::agent_journal::writer_derive::linearize_effects_in;
-use crate::agent_journal::writer_observe::Journaled;
 
 use crate::agent_journal::controlled_restore::restored_uncommitted;
 use crate::agent_journal::controlled_wire::{decode, ControlledCommitRequest};
@@ -43,30 +44,48 @@ pub use crate::agent_journal::controlled_wire::{
     TOOL_MAX_BYTES,
 };
 
-/// Prepare a controlled write of `doc`. See the module docs for the order.
+/// Prepare a controlled write of `doc` sent with no request id (or none
+/// that needs its digest). See the module docs for the order.
 pub fn prepare_controlled(
     w: &Writer,
     doc: DocId,
     req: ControlledPrepareRequest,
 ) -> Result<ControlledPrepared, TxnError> {
+    prepare_controlled_with(w, doc, req, None)
+}
+
+/// `prepare_controlled` with the digest of the raw payload, which a
+/// request id's receipt stores.
+pub fn prepare_controlled_with(
+    w: &Writer,
+    doc: DocId,
+    req: ControlledPrepareRequest,
+    digest: Option<PayloadDigest>,
+) -> Result<ControlledPrepared, TxnError> {
     req.actor.validate().map_err(TxnError::InvalidRequest)?;
     let baseline_provenance = decode_field(req.baseline_provenance.clone())?;
-    prepare_after_baseline(
-        w,
-        &mut w.lock(),
-        doc,
-        Prep {
-            parent: req.parent,
-            preimage: req.preimage,
-            actor: req.actor.clone(),
-            initiator: req.actor,
-            tool: req.tool,
-            review_op: ReviewOp::Review,
-            baseline_provenance,
-            baseline_touched: req.baseline_touched,
-            certificate: req.certificate,
-        },
-    )
+    let request = Request::from_parts(req.request_id, digest)?;
+    let prep = Prep {
+        parent: req.parent,
+        preimage: req.preimage,
+        actor: req.actor.clone(),
+        initiator: req.actor,
+        tool: req.tool,
+        review_op: ReviewOp::Review,
+        baseline_provenance,
+        baseline_touched: req.baseline_touched,
+        certificate: req.certificate,
+        capture: req.capture,
+    };
+    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
+        PreparedResponse::Controlled(p) => Ok(p),
+        PreparedResponse::Restore(_) => Err(reused_id()),
+    }
+}
+
+/// A request id whose receipt answers another kind of prepare.
+pub(crate) fn reused_id() -> TxnError {
+    TxnError::InvalidRequest("the request id answers another kind of prepare".into())
 }
 
 /// What a controlled prepare needs, whoever drives it.
@@ -80,105 +99,8 @@ pub(crate) struct Prep {
     pub(crate) baseline_provenance: Option<ProvenancePayload>,
     pub(crate) baseline_touched: bool,
     pub(crate) certificate: Option<Certificate>,
-}
-
-/// Admission, parent CAS, pending captures, the baseline, then the
-/// writer's prepare — the order the module docs give — in the caller's one
-/// critical section (`g` is the held writer lock). Nothing can interleave
-/// between admission and the reservation, so a prepare that loses a race
-/// is refused at admission or the CAS, before it appends anything.
-pub(crate) fn prepare_after_baseline(
-    w: &Writer,
-    g: &mut Inner,
-    doc: DocId,
-    prep: Prep,
-) -> Result<ControlledPrepared, TxnError> {
-    admit(g, doc)?;
-    let mut head = g.proj.head(doc);
-    if prep.parent.is_some_and(|p| Some(p) != head) {
-        return Err(TxnError::StaleParent { head });
-    }
-    while let Some(done) = linearize_one_in(w, g, doc, head)? {
-        head = Some(done);
-    }
-    let baseline = record_baseline(w, g, doc, head, &prep)?;
-    let parent = baseline.or(head);
-    let (certificate, fallback_reason) =
-        bind_to_parent(g, doc, parent, &prep.preimage, prep.certificate)?.split();
-    let certified = certificate.is_some();
-    let prepared = w.prepare_in(
-        g,
-        PrepareRequest {
-            doc,
-            parent,
-            preimage: prep.preimage,
-            actor: prep.actor,
-            initiator: prep.initiator,
-            tool: prep.tool,
-            review_op: prep.review_op,
-            certificate,
-        },
-    )?;
-    if let Some(r) = fallback_reason {
-        note_fallback(g, doc, r);
-    }
-    Ok(ControlledPrepared {
-        doc,
-        txn: prepared.txn,
-        revision: prepared.revision,
-        generation: prepared.generation,
-        baseline,
-        certified,
-        fallback_reason,
-    })
-}
-
-/// Healthy, not degraded or reserved, and room for a reservation; nothing
-/// is appended when refused.
-fn admit(g: &Inner, doc: DocId) -> Result<(), TxnError> {
-    g.healthy()?;
-    g.not_busy(doc)?;
-    g.admit_reservation()
-}
-
-/// Record the buffer as a human revision on the head, caused by the
-/// initiator's write. `None` when it equals the head's text and nothing says a
-/// person touched it: no map that deletes or breaks anything, and the
-/// window does not mark it touched. Text equality alone does not decide
-/// it: a deleted and retyped character is a person's, not the agent's.
-fn record_baseline(
-    w: &Writer,
-    g: &mut Inner,
-    doc: DocId,
-    head: Option<RevisionId>,
-    prep: &Prep,
-) -> Result<Option<RevisionId>, TxnError> {
-    let head_hash = g.proj.postimage_of(head);
-    let provenance = prep.baseline_provenance.clone();
-    let touched =
-        prep.baseline_touched || provenance.as_ref().is_some_and(|p| !p.touches_nothing());
-    if !touched && head_hash.as_ref() == Some(&BlobHash::of_text(&prep.preimage)) {
-        return Ok(None);
-    }
-    let observed_parent = head.map_or(ObservedRef::Genesis, |revision| ObservedRef::Revision {
-        revision,
-    });
-    let observed = w.observe_in(
-        g,
-        ObserveRequest {
-            doc,
-            actor: Actor::Human,
-            initiator: prep.initiator.clone(),
-            postimage: prep.preimage.clone(),
-            observed_parent,
-            provenance,
-        },
-        None,
-    )?;
-    if observed.journaled == Journaled::No {
-        return Err(TxnError::JournalDegraded);
-    }
-    linearize_one_in(w, g, doc, head)
+    /// The provenance capture the window froze for this prepare.
+    pub(crate) capture: Option<CaptureId>,
 }
 
 /// Linearize the oldest pending observation of `doc` with the effects the

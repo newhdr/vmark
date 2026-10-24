@@ -173,6 +173,7 @@ export async function runJournaledEdit<T>(
           baselineProvenance: baseline.baselineProvenance,
           baselineTouched: baseline.baselineTouched,
           ...(certificate ? { certificate } : {}),
+          ...(baseline.capture && { capture: baseline.capture }),
         },
         prepareControlledWrite,
       );

@@ -120,10 +120,20 @@ pub(crate) fn compact_unreached(g: &mut Inner) -> Result<Option<String>, TxnErro
 /// rewrite writes its own).
 type MapRecord<'a> = &'a dyn Fn(Envelope) -> Result<Option<Envelope>, TxnError>;
 
-fn kept(map: MapRecord<'_>, env: Envelope) -> Result<Option<Envelope>, TxnError> {
+/// The top-level records a live record becomes: none for the header, an
+/// `admission` frame's items each through `map` as top-level records with
+/// their seq and receipt unchanged, anything else through `map`.
+fn kept(map: MapRecord<'_>, env: Envelope) -> Result<Vec<Envelope>, TxnError> {
     match env.record {
-        Record::JournalHeader { .. } => Ok(None),
-        _ => map(env),
+        Record::JournalHeader { .. } => Ok(Vec::new()),
+        Record::Admission { items } => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.extend(map(item)?);
+            }
+            Ok(out)
+        }
+        _ => Ok(map(env)?.into_iter().collect()),
     }
 }
 
@@ -149,9 +159,8 @@ impl Writer {
         let cap = self.faults.replay_reserve_cap();
         let mut replay = Projection::default();
         replay.apply(&header(floor))?;
-        let positions = stream::each_record(g, cap, &mut |env| match kept(map, env)? {
-            Some(env) => replay.apply(&env),
-            None => Ok(()),
+        let positions = stream::each_record(g, cap, &mut |env| {
+            kept(map, env)?.iter().try_for_each(|e| replay.apply(e))
         })?;
         // A rewrite the collector built is whole, or the collector erred.
         replay
@@ -167,16 +176,20 @@ impl Writer {
         let mut old = g.journal.open_reader()?;
         let mut first = Some(header(floor));
         let mut positions = positions.into_iter();
+        let mut ready = std::collections::VecDeque::new();
         g.journal.rewrite_each(&mut || {
             if let Some(h) = first.take() {
                 return Ok(Some(codec::encode(&h)));
             }
-            for at in positions.by_ref() {
-                if let Some(env) = kept(map, stream::read_at(&mut old, at, cap)?)? {
+            loop {
+                if let Some(env) = ready.pop_front() {
                     return Ok(Some(codec::encode(&env)));
                 }
+                let Some(at) = positions.next() else {
+                    return Ok(None);
+                };
+                ready.extend(kept(map, stream::read_at(&mut old, at, cap)?)?);
             }
-            Ok(None)
         })?;
         g.proj = replay;
         self.broadcast(JournalEvent::Resync { generation: floor });

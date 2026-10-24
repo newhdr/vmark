@@ -28,6 +28,8 @@ fn req(w: &Writer, doc: DocId, buffer: &str, source: RestoreSource) -> RestorePr
         source,
         baseline_provenance: None,
         baseline_touched: false,
+        request_id: None,
+        capture: None,
     }
 }
 

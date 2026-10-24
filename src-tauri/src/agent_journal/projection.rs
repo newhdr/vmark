@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use crate::agent_journal::actor::Actor;
+use crate::agent_journal::admission::receipt::{Receipt, RequestId};
 use crate::agent_journal::ids::{BlobHash, DocId, HunkId, RevisionId, TxnId};
 use crate::agent_journal::provenance::ProvenancePayload;
 use crate::agent_journal::record::{LegacyAnchor, ObservedRef};
@@ -30,6 +31,9 @@ pub struct Projection {
     /// tombstone must match. Empty once a replay is whole
     /// (`finish_replay`); never filled by a live append.
     pub awaiting_tombstone: BTreeMap<TxnId, Vec<(DocId, BlobHash)>>,
+    /// Receipts of retained `prepared` records, by request id: a retried
+    /// request is answered from here (`admission::receipt`).
+    pub requests: BTreeMap<RequestId, Receipt>,
     /// Whether any record has applied. A leading `journalHeader` may leave
     /// every other field at its default (seq 0, floor 0), so "nothing
     /// applied yet" is its own state, never inferred from the others.

@@ -324,6 +324,7 @@ fn replay_refuses_an_epoch_armed_out_of_order_reused_or_closed_twice() {
         txn: TxnId::new(),
         at: 0,
         record,
+        receipt: None,
     };
     let armed = |epoch| Record::EpochArmed { doc, epoch };
     let corrupt = |p: &mut Projection, e: &Envelope| p.apply(e).unwrap_err().code();

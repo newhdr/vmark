@@ -14,12 +14,13 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::agent_journal::admission::receipt::PayloadDigest;
 use crate::agent_journal::capture::{
     capture_save, decode_capture, linearize_pending, CaptureReply, WINDOW_MAX_BYTES,
 };
 use crate::agent_journal::controlled::{
-    abort_controlled, commit_controlled, decode_prepare, prepare_controlled, txn_doc, AbortReason,
-    ControlledCommitted, ControlledPrepared,
+    abort_controlled, commit_controlled, decode_prepare, prepare_controlled_with, txn_doc,
+    AbortReason, ControlledCommitted, ControlledPrepared,
 };
 use crate::agent_journal::degraded_drain::DrainScheduler;
 use crate::agent_journal::doc_registry::DocRegistry;
@@ -57,11 +58,24 @@ impl Controller {
     /// # Errors
     /// The journal refusal, with `detail.journalCode`.
     pub fn prepare(&self, payload: &str) -> Result<ControlledPrepared, CommandError> {
+        let digest = PayloadDigest::of(payload);
         let req = decode_prepare(payload.as_bytes()).map_err(|e| refusal(&e))?;
         let doc = self.docs.resolve(&req.doc_key).map_err(|e| refusal(&e))?;
-        let out = prepare_controlled(&self.writer, doc, req);
-        self.settle(doc);
+        let out = prepare_controlled_with(&self.writer, doc, req, Some(digest));
+        self.settle_prepare(doc, out.is_ok());
         out.map_err(|e| refusal(&e))
+    }
+
+    /// After a prepare: a prepared document is settled as after any call;
+    /// a refused one is left exactly as it was (its pending captures stay
+    /// pending, for the retry's frame to linearize), with only the drainer
+    /// started if the document is degraded.
+    pub(crate) fn settle_prepare(&self, doc: DocId, prepared: bool) {
+        if prepared {
+            self.settle(doc);
+        } else if self.writer.is_degraded(doc) {
+            self.drains.ensure(self.writer.clone(), doc);
+        }
     }
 
     /// Commit an open transaction with the applied text.

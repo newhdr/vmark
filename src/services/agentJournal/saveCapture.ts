@@ -6,8 +6,11 @@
  * Key decisions:
  *   - A map the journal refuses (`field: provenance`) is resent once
  *     without it, so the save is still recorded, snapshot-only.
+ *   - A save names its freeze's capture id and is sent in that freeze's turn
+ *     (`provenance/captureId.ts`): frozen at submission but sent after the
+ *     disk write, it still reaches the journal's seq check in seq order.
  *   - Nothing is sent once the save is past its deadline, including after
- *     the map's hashing or before a snapshot-only resend.
+ *     the map's hashing, the wait for its turn, or before a snapshot-only resend.
  *   - The basis is committed only if no other write (a controlled edit
  *     during the disk write) changed it since submission; the next save in
  *     the chain is handed this one's result directly, not that newer basis.
@@ -65,23 +68,29 @@ const refName = (base: JournalObservedRef | null) =>
   base === null ? null : base.ref === "revision" ? base.revision : base.observation;
 
 /**
- * Send the capture with the window's map; a refused map is resent once
- * without it. `null`: the deadline passed before a send, so nothing was sent.
+ * Send the capture, bound to its freeze's capture id and in that freeze's
+ * turn, with the window's map; a refused map is resent once without it (the
+ * refusal recorded no seq). `null`: the deadline passed before a send, so
+ * nothing was sent.
  */
 async function send(input: Omit<CaptureInput, "provenance">, freeze: ProvenanceFreeze | null, live: () => boolean): Promise<CapturedSave | null> {
   const named = freeze ? await freeze.payload(refName(input.observedParent)) : null;
-  if (!live()) return null; // hashing the map can outlast the deadline
   const observedParent: JournalObservedRef | null =
     input.observedParent ?? (named && named.basis !== "genesis" ? { ref: "revision", revision: named.basis } : null);
-  try {
-    return await captureSaveToJournal({ ...input, observedParent, provenance: named?.payload ?? null });
-  } catch (error) {
-    const refusal = toJournalRefusal(error);
-    if (refusal.field !== "provenance" || named === null) throw refusal;
-    journalWarn("save provenance refused; recording the save snapshot-only:", refusal.message);
-    if (!live()) return null;
-    return captureSaveToJournal({ ...input, observedParent, provenance: null });
-  }
+  const bound = { ...input, observedParent, ...(freeze && { capture: freeze.capture }) };
+  const sendBoth = async (): Promise<CapturedSave | null> => {
+    if (!live()) return null; // hashing the map, or waiting for the turn, can outlast the deadline
+    try {
+      return await captureSaveToJournal({ ...bound, provenance: named?.payload ?? null });
+    } catch (error) {
+      const refusal = toJournalRefusal(error);
+      if (refusal.field !== "provenance" || named === null) throw refusal;
+      journalWarn("save provenance refused; recording the save snapshot-only:", refusal.message);
+      if (!live()) return null;
+      return captureSaveToJournal({ ...bound, provenance: null });
+    }
+  };
+  return freeze ? freeze.inTurn(sendBoth) : sendBoth();
 }
 
 /**

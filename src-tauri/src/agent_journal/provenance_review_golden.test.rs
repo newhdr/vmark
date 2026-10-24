@@ -432,6 +432,7 @@ fn every_restart_block_is_applied_like_the_reference() {
             txn: TxnId::new(),
             at: 0,
             record: Record::EpochUnclosed { doc, epoch: 1 },
+            receipt: None,
         };
         p.apply(&env).unwrap();
         let got: Vec<&MappedSpan> = p.docs[&doc].hunks.values().map(|h| &h.span).collect();

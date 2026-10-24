@@ -62,6 +62,7 @@ import { JournalRefusal } from "./journalRefusal";
 import { JOURNAL_PREAPPLY_BUDGET_MS, journalTimeout, settleWithin, startJournalBudget } from "./journalDeadline";
 import { forkUnsavedProvenance, freezeUnsavedProvenance, type JournalProvenancePayload } from "./unsavedProvenance";
 import type { ProvenanceFork } from "./provenance/session";
+import type { CaptureId } from "./provenance/captureId";
 import {
   forgetJournalBasis,
   isJournalBasisEvicted,
@@ -81,6 +82,8 @@ interface MutationBaseline {
   preimage: string;
   baselineProvenance: JournalProvenancePayload | null;
   baselineTouched: boolean;
+  /** The freeze's capture id; absent when the tab has no provenance source. */
+  capture?: CaptureId;
 }
 
 /** The settled result the outcome mapper turns into the caller's answer. */
@@ -175,12 +178,14 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
       preimage,
       baselineProvenance: named?.payload ?? null,
       baselineTouched: freeze?.touched ?? false,
+      ...(freeze && { capture: freeze.capture }),
     };
     const outcome = await runPreparedWrite({
       parent,
       preimage,
       docKey,
       prepare: () => m.prepare(baseline),
+      ...(freeze && { turn: (send) => freeze.inTurn(send) }),
       verify: m.verify,
       apply: (prepared) => {
         const applied = m.apply(prepared);

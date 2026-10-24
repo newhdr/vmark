@@ -28,13 +28,14 @@ function source(payload: ProvenancePayload | null = stubProvenancePayload()) {
       const f = { buffer, expected: [] as Array<string | null>, settled: [] as string[] };
       freezes.push(f);
       return {
-        touched: true,
+        touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
         payload: async (expected) => {
           f.expected.push(expected);
           return payload && { basis: expected ?? "genesis", payload };
         },
-        recorded: (id) => f.settled.push(`recorded:${id}`),
-        invalidate: () => f.settled.push("invalidated"),
+        // Terminal, the first settlement wins (`ProvenanceFreeze`): a later one is not recorded.
+        recorded: (id) => void (f.settled.length === 0 && f.settled.push(`recorded:${id}`)),
+        invalidate: () => void (f.settled.length === 0 && f.settled.push("invalidated")),
       };
     },
     fork: () => ({ recorded: () => {}, invalidate: () => {} }),
@@ -79,7 +80,7 @@ describe("a save's provenance", () => {
   it("the snapshot-only resend keeps the parent the map's basis named", async () => {
     registerUnsavedProvenanceSource(TAB, {
       freeze: (): ProvenanceFreeze => ({
-        touched: true,
+        touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
         // The session knows the window's basis though the tab's identity has none.
         payload: async () => ({ basis: "rev-window", payload: stubProvenancePayload() }),
         recorded: () => {},
@@ -153,7 +154,7 @@ describe("the save deadline", () => {
   it("a map still hashing when the deadline passes: the save is never sent", async () => {
     let hashed: (v: null) => void = () => {};
     registerUnsavedProvenanceSource(TAB, {
-      freeze: (): ProvenanceFreeze => ({ touched: true, payload: () => new Promise((r) => (hashed = r)), recorded: () => {}, invalidate: () => {} }),
+      freeze: (): ProvenanceFreeze => ({ touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(), payload: () => new Promise((r) => (hashed = r)), recorded: () => {}, invalidate: () => {} }),
       fork: () => ({ recorded: () => {}, invalidate: () => {} }),
     });
     const record = beginJournalSave(TAB, PATH, "a", MANUAL).record();

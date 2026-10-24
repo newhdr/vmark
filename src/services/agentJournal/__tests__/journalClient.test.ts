@@ -86,7 +86,9 @@ describe("prepareControlledWrite", () => {
     invokeMock.mockResolvedValueOnce({ doc: DOC, txn: TXN, revision: REV, generation: "18446744073709551615", baseline: null, certified: false, fallbackReason: null });
     const p = await prepareControlledWrite(input);
     expect(p.generation).toBe("18446744073709551615");
-    expect(invokeMock).toHaveBeenCalledWith("agent_journal_prepare", { payload: JSON.stringify(input) });
+    const { payload } = invokeMock.mock.calls[0][1] as { payload: string };
+    const { requestId } = JSON.parse(payload) as { requestId: string };
+    expect(invokeMock).toHaveBeenCalledWith("agent_journal_prepare", { payload: JSON.stringify({ ...input, requestId }) });
   });
 
   it("sends a flushed provenance map verbatim as baselineProvenance", async () => {

@@ -1,7 +1,8 @@
 /**
  * Journal IPC — the shared call and reply-shape helpers of the agent edit
- * journal's clients: every rejection is read as a `JournalRefusal`, and a
- * reply that is not the expected shape is refused as `JOURNAL_UNAVAILABLE`.
+ * journal's clients: every rejection is read as a `JournalRefusal`, a reply
+ * that is not the expected shape is refused as `JOURNAL_UNAVAILABLE`, and a
+ * prepare's payload is frozen once under its request id.
  *
  * @coordinates-with services/agentJournal/journalClient.ts — the controlled-write calls
  * @coordinates-with services/agentJournal/historyClient.ts — the history panel's calls
@@ -56,6 +57,20 @@ export function parsePreparedTxn(command: string, r: unknown): PreparedTxn {
     throw malformed(command);
   }
   return { doc: r.doc, txn: r.txn, revision: r.revision, generation: r.generation, baseline: r.baseline };
+}
+
+/** A fresh request id for one logical prepare: a UUID v4, lowercase, 36 ASCII bytes. */
+export function mintRequestId(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * A prepare's payload, serialized once: its fields, then `requestId`. The
+ * journal digests these exact bytes, so a retry of the same logical request
+ * must resend this string unchanged, never re-serialize the fields.
+ */
+export function freezePreparePayload(fields: object, requestId: string): string {
+  return JSON.stringify({ ...fields, requestId });
 }
 
 /** Invoke a journal command; a rejection is rethrown as a `JournalRefusal`. */

@@ -221,7 +221,11 @@ impl Writer {
 
 /// The record linearizing `ctx`'s observation as `revision`: on the head
 /// it observed, on unjournaled text, or concurrent with the head.
-fn linearized_record(ctx: LinearizeCtx, revision: RevisionId, effects: ReviewEffects) -> Record {
+pub(crate) fn linearized_record(
+    ctx: LinearizeCtx,
+    revision: RevisionId,
+    effects: ReviewEffects,
+) -> Record {
     let (parent, obs) = (ctx.head, ctx.entry);
     match (ctx.kind, obs.observed_parent) {
         (RevisionKind::Observed, _) => Record::ObservedRevision {

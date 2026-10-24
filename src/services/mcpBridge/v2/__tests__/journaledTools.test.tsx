@@ -408,7 +408,7 @@ describe("selection.set — an apply that throws before it changed the editor", 
           done = true;
         };
         return {
-          touched: true,
+          touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
           payload: async () => null,
           recorded: (id) => settle("recorded", id),
           invalidate: () => settle("invalidate", null),

@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL2.0j — every coordinator await is bounded: a commit acknowledgement that never settles is applied not durable at the per-call deadline with no abort and no retry, and a late one changes nothing; an abort that never settles keeps the original refusal; readiness, the freeze payload and the prepare share one pre-apply budget, each prepare attempt bounded by the smaller of the per-call deadline and what remains; a timed-out attempt never invokes late; a prepare reply that lands late is aborted once with reason timedOut; the worst case answers within 17 000 ms
+// WI-AL2.0j — every coordinator await is bounded: a prepare still waiting for its capture turn at the deadline refuses JOURNAL_TIMEOUT and never dispatches once the turn comes; a commit acknowledgement that never settles is applied not durable at the per-call deadline with no abort and no retry, and a late one changes nothing; an abort that never settles keeps the original refusal; readiness, the freeze payload and the prepare share one pre-apply budget, each prepare attempt bounded by the smaller of the per-call deadline and what remains; a timed-out attempt never invokes late; a prepare reply that lands late is aborted once with reason timedOut; the worst case answers within 17 000 ms
 // Driven through the real chain — raw `invoke` → `journalIpc` →
 // `journalClient` → `runPreparedWrite` → the coordinator — on fake timers.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -68,7 +68,7 @@ function track<T>(run: Promise<T>): { done: boolean; value?: T; error?: unknown 
 function slowPayload(ms: number | null): void {
   registerUnsavedProvenanceSource(TAB, {
     freeze: () => ({
-      touched: false,
+      touched: false, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
       payload: () =>
         ms === null ? never() : new Promise<NamedPayload | null>((resolve) => setTimeout(() => resolve(null), ms)),
       recorded: () => {},
@@ -123,6 +123,26 @@ describe("runJournaledMutation — the commit and the abort are bounded", () => 
 });
 
 describe("runJournaledMutation — the pre-apply budget", () => {
+  it("a prepare still waiting for its capture turn at the deadline refuses JOURNAL_TIMEOUT and never dispatches", async () => {
+    answer();
+    let openTurn: () => void = () => {};
+    const turn = new Promise<void>((resolve) => (openTurn = resolve));
+    registerUnsavedProvenanceSource(TAB, {
+      freeze: () => ({
+        touched: false, capture: { view: "v", session: "s", seq: "2" },
+        inTurn: (send) => turn.then(send),
+        payload: async () => null, recorded: () => {}, invalidate: () => {},
+      }),
+      fork: () => ({ recorded: () => {}, invalidate: () => {} }),
+    });
+    const run = track(runJournaledMutation(mutation()));
+    await vi.advanceTimersByTimeAsync(JOURNAL_DEADLINE_MS);
+    expect(run.value).toMatchObject(timedOut);
+    openTurn();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(commands()).toEqual([]);
+  });
+
   it("readiness that never settles refuses JOURNAL_TIMEOUT with no prepare and no apply; settling late invokes nothing", async () => {
     answer();
     const release = agentJournalEpochFake.holdNextBind();

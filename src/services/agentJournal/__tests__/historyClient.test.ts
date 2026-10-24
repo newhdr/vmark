@@ -28,7 +28,9 @@ describe("prepareRestore", () => {
   it("sends one JSON string and returns the text to apply, the baseline and what it resolves", async () => {
     invokeMock.mockResolvedValueOnce(prepared);
     const p = await prepareRestore(input);
-    expect(invokeMock).toHaveBeenCalledWith("agent_journal_restore_prepare", { payload: JSON.stringify(input) });
+    const { payload } = invokeMock.mock.calls[0][1] as { payload: string };
+    const { requestId } = JSON.parse(payload) as { requestId: string };
+    expect(invokeMock).toHaveBeenCalledWith("agent_journal_restore_prepare", { payload: JSON.stringify({ ...input, requestId }) });
     expect(p).toEqual(prepared);
   });
 

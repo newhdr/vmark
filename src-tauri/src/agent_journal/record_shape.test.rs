@@ -25,6 +25,7 @@ fn env(record: Record) -> Envelope {
         txn: TxnId::new(),
         at: 1,
         record,
+        receipt: None,
     }
 }
 

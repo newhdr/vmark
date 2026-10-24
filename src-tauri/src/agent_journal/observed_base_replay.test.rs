@@ -22,6 +22,7 @@ fn env(seq: u64, txn: TxnId, record: Record) -> Envelope {
         txn,
         at: 1,
         record,
+        receipt: None,
     }
 }
 
