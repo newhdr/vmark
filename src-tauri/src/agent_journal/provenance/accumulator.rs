@@ -158,6 +158,35 @@ impl Provenance {
         self.compose(&[section])
     }
 
+    /// A bounded break over original gaps `[g0, g1]` that maps nothing:
+    /// it blocks every span whose original gaps meet the region.
+    pub fn break_gaps(
+        &mut self,
+        g0: i64,
+        g1: i64,
+        reason: BreakReason,
+        origin: &str,
+    ) -> Result<&mut Self, String> {
+        if reason.is_whole() {
+            return Err(format!("a bounded break cannot be {reason:?}"));
+        }
+        let block = Block::new(reason, origin)?;
+        if !(0 <= g0 && g0 <= g1 && g1 <= self.len_a) {
+            return Err(format!(
+                "malformed gap region [{g0}, {g1}] (length {})",
+                self.len_a
+            ));
+        }
+        if self.whole.is_none() {
+            self.bounded.push(Bounded {
+                normal: (g1, g0),
+                growing: (g1, g0),
+                block,
+            });
+        }
+        Ok(self)
+    }
+
     /// The whole document was replaced with no certified mapping; the first reason is kept.
     pub fn break_whole(
         &mut self,

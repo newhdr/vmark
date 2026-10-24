@@ -30,7 +30,7 @@ const journal = vi.hoisted(() => ({
   health: { phase: "ready", generation: "1", readOnly: false, degraded: false, liveUpdates: "ready", error: null } as JournalHealth,
 }));
 vi.mock("@/services/agentJournal/docHistoryClient", () => ({
-  listDocumentHistory: vi.fn(async (key: string) => journal.docs.get(key) ?? { generation: "1", rows: [], truncated: false, blocked: [], degraded: false }),
+  listDocumentHistory: vi.fn(async (key: string) => journal.docs.get(key) ?? { generation: "1", rows: [], truncated: false, hunks: [], blocked: [], degraded: false }),
 }));
 vi.mock("@/services/agentJournal/journalStatusClient", () => ({
   readJournalHealth: vi.fn(async () => ({ ...journal.health })),
@@ -68,7 +68,7 @@ const agentRow = (revision: string, parent: string | null): HistoryRow => ({
   collected: false,
 });
 const humanRow = (revision: string, parent: string | null): HistoryRow => ({ ...agentRow(revision, parent), actor: { type: "human" }, kind: "observed", tool: null });
-const historyOf = (rows: HistoryRow[], over: Partial<DocumentHistory> = {}): DocumentHistory => ({ generation: "1", rows, truncated: false, blocked: [], degraded: false, ...over });
+const historyOf = (rows: HistoryRow[], over: Partial<DocumentHistory> = {}): DocumentHistory => ({ generation: "1", rows, truncated: false, hunks: [], blocked: [], degraded: false, ...over });
 
 function setup(filePath: string | null) {
   useTabStore.setState({

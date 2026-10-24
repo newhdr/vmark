@@ -14,14 +14,15 @@
  * Key decisions:
  *   - A commit is a whole-document barrier unless the edit certifies it:
  *     with its exact change (`change`, a Source `selection.set`, known before
- *     it applies), sent with the prepare; or after the apply (`certify`, a
- *     WYSIWYG `selection.set`, from what the editor's collector saw), sent
- *     with the commit through the coordinator's effects hook. The journal
- *     binds either to the parent it mints, checks it against the applied
- *     text, and falls back to the barrier when it does not hold.
- *     `document.write`, `document.transform` and `workflow.apply_patch` send
- *     none: the journal records the conservative barrier rather than a
- *     guessed mapping (fail closed).
+ *     it applies), sent with the prepare; with its declared script (`target`,
+ *     the whole text `document.write`, `document.transform` or
+ *     `workflow.apply_patch` will produce), also sent with the prepare; or
+ *     after the apply (`certify`, a WYSIWYG `selection.set`, from what the
+ *     editor's collector saw), sent with the commit through the
+ *     coordinator's effects hook. The journal binds each to the parent it
+ *     mints, checks it against the applied text, and falls back to the
+ *     barrier when it does not hold: a live editor that re-serializes the
+ *     target is such a fallback.
  *   - A certificate that cannot be built is logged and not sent: the write
  *     goes ahead as a barrier, never refused or degraded for it (the effects
  *     hook never throws).
@@ -45,6 +46,7 @@
  * @coordinates-with services/agentJournal/journaledMutation.ts — the coordinator
  * @coordinates-with services/agentJournal/controlledMutation.ts — the controlled prepare
  * @coordinates-with services/agentJournal/selectionCertificate.ts — the certificate of `change`
+ * @coordinates-with services/agentJournal/review/declaredScript.ts — the certificate of `target`
  * @coordinates-with writeTarget.ts — the re-verify
  * @coordinates-with journalV2Error.ts — refusal and abort answers
  * @module services/mcpBridge/v2/journaledEdit
@@ -58,6 +60,7 @@ import { runJournaledMutation, type JournaledOutcome } from "@/services/agentJou
 import { journalActorFor } from "@/services/agentJournal/journalActor";
 import { journalTabLife } from "@/services/agentJournal/documentIdentity";
 import { selectionCertificate, type ExactChange, type SelectionCertificate } from "@/services/agentJournal/selectionCertificate";
+import { declaredScriptCertificate } from "@/services/agentJournal/review/declaredScript";
 import { journalWarn } from "@/utils/debug";
 import { structuredError } from "./tabGuard";
 import { captureWriteTarget, recheckWriteTarget, reverifyWriteTarget } from "./writeTarget";
@@ -80,6 +83,11 @@ export interface JournaledEdit<T> {
    * certificate. Omitted when the edit cannot name one (a barrier).
    */
   change?: ExactChange;
+  /**
+   * The whole text `apply` will produce from `preimage`: its declared script
+   * is sent as a certificate. Omitted when the edit is not a whole-text write.
+   */
+  target?: string;
   /**
    * After a successful apply: the certificate of what it applied, `preimage`
    * → `postimage`, sent with the commit. Omitted, or answering `null`, the
@@ -106,11 +114,13 @@ function storeText(tabId: string): string {
   return text;
 }
 
-/** The certificate of `edit.change` against the prepare's `preimage`; `null` without one. */
+/** The certificate of `edit.change` or `edit.target` against the prepare's `preimage`; `null` without one. */
 async function certificateFor(edit: JournaledEdit<unknown>, preimage: string): Promise<SelectionCertificate | null> {
-  if (!edit.change || preimage !== edit.preimage) return null;
+  if (preimage !== edit.preimage) return null;
   try {
-    return await selectionCertificate(preimage, edit.change);
+    if (edit.change) return await selectionCertificate(preimage, edit.change);
+    if (edit.target !== undefined) return await declaredScriptCertificate(preimage, edit.target);
+    return null;
   } catch (error) {
     journalWarn(`${edit.tool}: no certificate for its change; recording a barrier:`, error);
     return null;

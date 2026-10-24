@@ -1,14 +1,18 @@
 /**
  * Document history client — the history panel's revision list over the
  * agent edit journal (`agent_journal_history`): a document's revisions with
- * who made each one, its live hunks whose automatic revert is blocked, and
- * whether a record of it is still queued.
+ * who made each one, every live hunk as the writer persisted it, the live
+ * hunks whose automatic revert is blocked, and whether a record of it is
+ * still queued.
  *
  * Key decisions:
  *   - Every reply is checked before it is trusted (`journalIpc.ts`): an
  *     unknown revision kind, break reason, hunk state or principal state is
  *     a malformed reply, refused as `JOURNAL_UNAVAILABLE`, never shown as
  *     some other state.
+ *   - Live hunks pass through one per persisted hunk, in the journal's
+ *     order, with its own geometry: the panel never regroups or re-diffs
+ *     them.
  *   - A blocked hunk's `lastCertified` stays `null` when the journal has
  *     none; the panel must not invent a location for it.
  *
@@ -25,6 +29,28 @@ export type RevisionKind = (typeof REVISION_KINDS)[number];
 
 const HUNK_STATES = ["pending", "kept", "reverted", "conflicted", "superseded", "resolvedByHumanEdit", "settled"] as const;
 type HunkState = (typeof HUNK_STATES)[number];
+
+const HUNK_KINDS = ["change", "largeChange", "tooComplex", "restore"] as const;
+export type HunkKind = (typeof HUNK_KINDS)[number];
+
+/** A UTF-16 span `[from, to)`. */
+interface HunkRange {
+  from: number;
+  to: number;
+}
+
+/** One live hunk, exactly as the journal persisted it. */
+export interface LiveHunk {
+  hunkId: string;
+  kind: HunkKind;
+  state: HunkState;
+  /** The revision that made it. */
+  target: string;
+  /** Its span in the target's parent. */
+  baseRange: HunkRange;
+  /** Its span in the target. */
+  targetRange: HunkRange;
+}
 
 export interface HistoryRow {
   revision: string;
@@ -58,6 +84,8 @@ export interface DocumentHistory {
   generation: string;
   rows: HistoryRow[];
   truncated: boolean;
+  /** Newest revision first, document order within a revision. */
+  hunks: LiveHunk[];
   blocked: BlockedHunk[];
   /** A record of this document is queued, not yet on disk. */
   degraded: boolean;
@@ -99,6 +127,27 @@ function rowOf(r: unknown): HistoryRow {
   };
 }
 
+const isOffset = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+
+function rangeOf(v: unknown): HunkRange {
+  if (!isObject(v) || !isOffset(v.from) || !isOffset(v.to) || v.from > v.to) throw malformed(COMMAND);
+  return { from: v.from, to: v.to };
+}
+
+function hunkOf(h: unknown): LiveHunk {
+  if (!isObject(h) || !isString(h.hunkId) || !oneOf(HUNK_KINDS, h.kind) || !oneOf(HUNK_STATES, h.state) || !isString(h.target)) {
+    throw malformed(COMMAND);
+  }
+  return {
+    hunkId: h.hunkId,
+    kind: h.kind,
+    state: h.state,
+    target: h.target,
+    baseRange: rangeOf(h.baseRange),
+    targetRange: rangeOf(h.targetRange),
+  };
+}
+
 function blockedOf(b: unknown): BlockedHunk {
   if (
     !isObject(b) ||
@@ -131,6 +180,7 @@ export async function listDocumentHistory(docKey: string): Promise<DocumentHisto
     !isDecimal(r.generation) ||
     !Array.isArray(r.rows) ||
     typeof r.truncated !== "boolean" ||
+    !Array.isArray(r.hunks) ||
     !Array.isArray(r.blocked) ||
     typeof r.degraded !== "boolean"
   ) {
@@ -140,6 +190,7 @@ export async function listDocumentHistory(docKey: string): Promise<DocumentHisto
     generation: r.generation,
     rows: r.rows.map(rowOf),
     truncated: r.truncated,
+    hunks: r.hunks.map(hunkOf),
     blocked: r.blocked.map(blockedOf),
     degraded: r.degraded,
   };

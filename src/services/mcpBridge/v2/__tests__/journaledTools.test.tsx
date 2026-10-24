@@ -1,4 +1,4 @@
-// WI-AL1.4 — document.transform, selection.set and workflow.apply_patch on the controlled-mutation protocol, like document.write: each prepares durably under its own tool name and the request's MCP actor before anything changes, re-verifies the tab after the ack (a user edit during a held prepare is ABORTED and nothing changes), commits the postimage it applied as a whole-document barrier (no operation provenance is claimed), answers applied + durable, refuses JOURNAL_BUSY / JOURNAL_DEGRADED with nothing changed, answers durable false on a failed commit, and journals nothing for a no-op. CJK content and lone surrogates covered.
+// WI-AL1.4 — document.transform, selection.set and workflow.apply_patch on the controlled-mutation protocol, like document.write: each prepares durably under its own tool name and the request's MCP actor before anything changes, re-verifies the tab after the ack (a user edit during a held prepare is ABORTED and nothing changes), commits the postimage it applied (document.transform and workflow.apply_patch send their declared script with the prepare, WI-AL2.1b; selection.set its change), answers applied + durable, refuses JOURNAL_BUSY / JOURNAL_DEGRADED with nothing changed, answers durable false on a failed commit, and journals nothing for a no-op. CJK content and lone surrogates covered.
 //
 // Real stores and real editors (Tiptap, CodeMirror); the journal IPC client is
 // the in-memory fake (src/test/agentJournalFake.ts) with the writer's semantics.
@@ -22,6 +22,7 @@ import { handleSelectionSet } from "@/services/mcpBridge/v2/selection";
 import { handleWorkflowApplyPatch } from "@/services/mcpBridge/v2/workflow";
 import { journalActorFor } from "@/services/agentJournal/journalActor";
 import { isWellFormedText } from "@/services/agentJournal/wellFormedText";
+import { declaredScriptCertificate } from "@/services/agentJournal/review/declaredScript";
 import { registerUnsavedProvenanceSource, resetUnsavedProvenanceSources } from "@/services/agentJournal/unsavedProvenance";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { contextFor, FIXTURE_ATTRIBUTIONS, TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
@@ -125,6 +126,7 @@ describe("document.transform — controlled mutation", () => {
       tool: "document.transform",
       baselineProvenance: null,
       baselineTouched: false,
+      certificate: await declaredScriptCertificate("测试ABC混合", "测试 ABC 混合"),
     });
     expect(fake.log.map((e) => e.op)).toEqual(["prepare", "commit"]);
     expect(fake.log[1].detail).toBe("测试 ABC 混合");

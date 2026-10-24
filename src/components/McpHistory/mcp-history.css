@@ -343,6 +343,23 @@
   color: var(--text-color);
 }
 
+.mcp-history-hunks {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.mcp-history-hunks-group {
+  margin: var(--space-1) 0;
+  font-size: var(--font-size-xs);
+}
+
+.mcp-history-hunks-group__title {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
 .mcp-history-blocked-group {
   margin: var(--space-1) 0;
   padding: var(--space-1) var(--space-2);

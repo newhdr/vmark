@@ -1,6 +1,7 @@
 /**
  * History labels — the words the history panel shows for who made a
- * revision, what kind it is, and why a change's automatic revert is blocked.
+ * revision, what kind it is, what each live hunk is, its state and where,
+ * and why a change's automatic revert is blocked.
  *
  * Key decisions:
  *   - The four principal states read differently and carry their own tone:
@@ -17,13 +18,13 @@
  *     out of the render and taking the panel down.
  *
  * @coordinates-with services/agentJournal/journalActor.ts — the actor shape
- * @coordinates-with services/agentJournal/docHistoryClient.ts — kinds and blocked hunks
+ * @coordinates-with services/agentJournal/docHistoryClient.ts — kinds, live and blocked hunks
  * @module components/McpHistory/historyLabels
  */
 
 import type { TFunction } from "i18next";
 import type { JournalActor } from "@/services/agentJournal/journalActor";
-import type { RevisionKind } from "@/services/agentJournal/docHistoryClient";
+import type { HunkKind, LiveHunk, RevisionKind } from "@/services/agentJournal/docHistoryClient";
 import type { BreakReason } from "@/services/agentJournal/provenance/accumulator";
 
 /** The real statusbar `t`; a structural stand-in is not satisfied by i18next's overloads. */
@@ -110,6 +111,37 @@ const KIND_KEYS: Record<RevisionKind, string> = {
 
 export function kindLabel(kind: RevisionKind, t: Translate): string {
   return t(KIND_KEYS[kind]);
+}
+
+const HUNK_KIND_KEYS: Record<HunkKind, string> = {
+  change: "mcpHistoryHunkKindChange",
+  largeChange: "mcpHistoryHunkKindLargeChange",
+  tooComplex: "mcpHistoryHunkKindTooComplex",
+  restore: "mcpHistoryHunkKindRestore",
+};
+
+const HUNK_STATE_KEYS: Record<LiveHunk["state"], string> = {
+  pending: "mcpHistoryHunkStatePending",
+  kept: "mcpHistoryHunkStateKept",
+  reverted: "mcpHistoryHunkStateReverted",
+  conflicted: "mcpHistoryHunkStateConflicted",
+  superseded: "mcpHistoryHunkStateSuperseded",
+  resolvedByHumanEdit: "mcpHistoryHunkStateResolvedByHumanEdit",
+  settled: "mcpHistoryHunkStateSettled",
+};
+
+/**
+ * A live hunk's kind, state and span in the revision that made it, as the
+ * journal persisted them. The span is in UTF-16 units, not characters, so
+ * it is worded as a neutral position.
+ */
+export function hunkLabel(hunk: LiveHunk, t: Translate): string {
+  return t("mcpHistoryHunk", {
+    kind: t(HUNK_KIND_KEYS[hunk.kind]),
+    state: t(HUNK_STATE_KEYS[hunk.state]),
+    from: hunk.targetRange.from,
+    to: hunk.targetRange.to,
+  });
 }
 
 /** The furthest a `Date` reaches either side of the epoch, in milliseconds (ECMA-262 TimeClip). */

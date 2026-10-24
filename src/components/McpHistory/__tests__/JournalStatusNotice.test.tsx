@@ -7,7 +7,7 @@ import type { JournalHealth } from "@/services/agentJournal/journalStatusClient"
 import type { DocumentHistory } from "@/services/agentJournal/docHistoryClient";
 
 const healthy: JournalHealth = { phase: "ready", generation: "4", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", error: null, identityError: null, retention: null, uncertifiedFallbacks: 0 };
-const doc = (over: Partial<DocumentHistory> = {}): DocumentHistory => ({ generation: "4", rows: [], truncated: false, blocked: [], degraded: false, ...over });
+const doc = (over: Partial<DocumentHistory> = {}): DocumentHistory => ({ generation: "4", rows: [], truncated: false, hunks: [], blocked: [], degraded: false, ...over });
 const hunk = (id: string) => ({ hunkId: id, state: "pending" as const, reason: "restore" as const, origin: "restore", lastCertified: null, blockedAt: null, target: "r1" });
 
 const base = { health: healthy, healthFailed: false, history: doc(), problem: null, unbound: false };

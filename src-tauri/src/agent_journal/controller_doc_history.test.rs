@@ -4,6 +4,8 @@
 // initiator, the tool, the revision time; blocked live hunks as
 // "Blocked: reason (origin)" anchored on their lastCertified revision; a
 // bounded list; a key the journal never saw is not minted by a read.
+// WI-AL2.1b — every live hunk as the writer persisted it: one row per hunk,
+// with its geometry, never regrouped.
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -376,5 +378,86 @@ fn a_document_with_a_queued_record_reads_degraded() {
         history(&c, "path:/other.md")["degraded"],
         false,
         "only that document"
+    );
+}
+
+#[test]
+fn every_live_hunk_is_listed_as_the_writer_persisted_it() {
+    let (_dir, c, w, docs) = controller();
+    let doc = docs.resolve(KEY).unwrap();
+    // Three touching one-unit hunks of one revision: a client that grouped
+    // hunks would show one row.
+    seed_hunks(&w, doc, 3);
+    let s = w.snapshot().state;
+    let mut persisted: Vec<_> = s.docs[&doc]
+        .hunks
+        .values()
+        .map(|h| {
+            (
+                h.hunk.id.0.clone(),
+                h.hunk.target.to_string(),
+                h.hunk.target_range.start,
+                h.hunk.target_range.end,
+            )
+        })
+        .collect();
+    persisted.sort_by_key(|p| p.2);
+    assert_eq!(persisted.len(), 3);
+    let h = history(&c, KEY);
+    let listed: Vec<_> = h["hunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            assert_eq!(r["state"], "pending");
+            assert_eq!(r["kind"], "change");
+            assert_eq!(r["baseRange"], r["targetRange"]);
+            (
+                r["hunkId"].as_str().unwrap().to_owned(),
+                r["target"].as_str().unwrap().to_owned(),
+                r["targetRange"]["from"].as_u64().unwrap(),
+                r["targetRange"]["to"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed, persisted,
+        "one row per persisted hunk, in document order"
+    );
+}
+
+#[test]
+fn hunks_list_newest_revision_first_and_omit_settled_ones() {
+    let (_dir, c, w, docs) = controller();
+    let doc = docs.resolve(KEY).unwrap();
+    human_save(&w, doc, "abc");
+    let edit = Edit {
+        at: 2,
+        delete: 0,
+        insert: 1,
+    };
+    let (_, older) = agent_change(&w, doc, "abc", "abXc", edit);
+    let edit = Edit {
+        at: 0,
+        delete: 0,
+        insert: 1,
+    };
+    let (_, newer) = agent_change(&w, doc, "abXc", "YabXc", edit);
+    let h = history(&c, KEY);
+    let targets: Vec<_> = h["hunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["target"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(targets, [newer.to_string(), older.to_string()]);
+}
+
+#[test]
+fn an_unknown_key_lists_no_hunks() {
+    let (_dir, c, _w, _docs) = controller();
+    assert_eq!(
+        history(&c, "path:/never.md")["hunks"],
+        serde_json::json!([])
     );
 }

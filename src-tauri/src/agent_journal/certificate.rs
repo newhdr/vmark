@@ -14,8 +14,10 @@
 //! `check_commit_certificate` checks either one against the commit: basis
 //! = parent, preimage and postimage hashes, the map reproduces the
 //! postimage in O(n), the changed runs fall on character boundaries and
-//! their hunks fit the free slots. It does not apply the editing-epoch
-//! rule: a certificate is a consistency check, never trusted input. The
+//! their hunks fit the free slots; a whole-text write's declared script
+//! then gains its rotation breaks within the cap (`rotation`). It does
+//! not apply the editing-epoch rule: a certificate is a consistency
+//! check, never trusted input. The
 //! writer derives one `change` hunk per maximal changed run; the window
 //! never sends hunks.
 //!
@@ -36,6 +38,7 @@ use crate::agent_journal::review_slots::new_hunks_fit;
 use crate::agent_journal::text::{utf16_len, utf16_slices};
 use crate::agent_journal::writer::{Inner, Writer};
 use crate::agent_journal::writer_epoch::basis_of;
+use rotation::{add_rotation_breaks, declares_script};
 
 /// Why a certificate was not used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -51,6 +54,8 @@ pub enum FallbackReason {
     SplitsACharacter,
     /// Its hunks do not fit the document's free slots.
     NoFreeSlots,
+    /// Its rotation breaks take the window over its entry cap.
+    OverCap,
 }
 
 /// A prepare's certificate once the parent is minted.
@@ -186,18 +191,24 @@ pub(crate) fn check_commit_certificate(
     if c.basis() != basis_of(t.parent) {
         return Ok(Err(NotTheParent));
     }
-    let Ok(window) = c.checked_accumulator(preimage, postimage) else {
+    let Ok(mut window) = c.checked_accumulator(preimage, postimage) else {
         return Ok(Err(NotThePostimage));
     };
     if window.whole_block().is_some() {
         return Ok(Err(WholeBreak));
     }
-    let Some(hunks) = hunks_of(t, preimage, postimage, &window.changed_runs())? else {
+    let runs = window.changed_runs();
+    let Some(hunks) = hunks_of(t, preimage, postimage, &runs)? else {
         return Ok(Err(SplitsACharacter));
     };
     let non_settled = g.proj.docs.get(&t.doc).map_or(0, |d| d.non_settled());
     if !new_hunks_fit(&ReviewOp::Review, non_settled, &hunks) {
         return Ok(Err(NoFreeSlots));
+    }
+    if declares_script(&t.tool) {
+        if let Err(r) = add_rotation_breaks(&mut window, preimage, postimage, &runs)? {
+            return Ok(Err(r));
+        }
     }
     Ok(Ok((window, hunks)))
 }
@@ -246,9 +257,7 @@ fn hunks_of(
 /// Count and log one uncertified fallback.
 pub(crate) fn note_fallback(g: &mut Inner, doc: DocId, reason: FallbackReason) {
     g.uncertified_fallbacks += 1;
-    log::warn!(
-        "agent journal: selection certificate for {doc} not used ({reason:?}); recorded as a barrier"
-    );
+    log::warn!("agent journal: certificate for {doc} not used ({reason:?}); recorded as a barrier");
 }
 
 impl Writer {
@@ -270,6 +279,9 @@ impl Writer {
         outcome
     }
 }
+
+#[path = "rotation.rs"]
+mod rotation;
 
 #[cfg(test)]
 #[path = "certificate_fallback.test.rs"]

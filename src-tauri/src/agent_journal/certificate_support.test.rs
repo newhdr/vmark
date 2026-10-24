@@ -59,6 +59,8 @@ pub struct Req<'a> {
     pub flushed: Option<&'a ProvenancePayload>,
     pub touched: bool,
     pub certificate: Option<serde_json::Value>,
+    /// The MCP tool: a whole-text write (`document.write`, …) declares its script.
+    pub tool: &'a str,
 }
 
 impl<'a> Req<'a> {
@@ -69,6 +71,7 @@ impl<'a> Req<'a> {
             flushed: None,
             touched: false,
             certificate: None,
+            tool: "selection.set",
         }
     }
 }
@@ -79,7 +82,7 @@ pub fn prepare(w: &Writer, docs: &DocRegistry, r: Req<'_>) -> Result<ControlledP
         "parent": r.parent,
         "preimage": r.preimage,
         "actor": mcp_actor(),
-        "tool": "selection.set",
+        "tool": r.tool,
         "baselineProvenance": r.flushed,
         "baselineTouched": r.touched,
     });

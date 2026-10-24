@@ -182,6 +182,7 @@ export async function handleWorkflowApplyPatch(
       preimage: tab.content,
       requireFocus: !wire.tabId,
       tool: "workflow.apply_patch",
+      target: nextContent,
       context,
       apply: () => {
         useDocumentStore.getState().setEditorContent(tab.tabId, nextContent);

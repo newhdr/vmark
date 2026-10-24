@@ -1,9 +1,10 @@
 // @vitest-environment node
 // WI-AL1.7 — the history panel's labels: every principal state reads differently (a provider by name, anonymous, unrecognized and ambiguous each with their own words), the connection id and the client's session label are shown apart, every break reason has its own words, a known origin prefix is named and an unknown one falls back with the raw origin kept, and every revision kind has a label
+// WI-AL2.1b — a live hunk reads as its kind, its state in words and its span as a neutral position, every state with its own words
 import { describe, it, expect } from "vitest";
-import { actorParts, breakReasonLabel, historyTime, kindLabel, originLabel, type Translate } from "../historyLabels";
+import { actorParts, breakReasonLabel, historyTime, hunkLabel, kindLabel, originLabel, type Translate } from "../historyLabels";
 import { BREAK_REASONS } from "@/services/agentJournal/provenance/accumulator";
-import { REVISION_KINDS } from "@/services/agentJournal/docHistoryClient";
+import { REVISION_KINDS, type LiveHunk } from "@/services/agentJournal/docHistoryClient";
 import type { JournalActor } from "@/services/agentJournal/journalActor";
 
 /** A translator that shows which key and values it was given. */
@@ -102,6 +103,27 @@ describe("kindLabel", () => {
   it("labels every revision kind differently", () => {
     const labels = REVISION_KINDS.map((k) => kindLabel(k, t));
     expect(new Set(labels).size).toBe(REVISION_KINDS.length);
+  });
+});
+
+describe("hunkLabel", () => {
+  const STATES: LiveHunk["state"][] = ["pending", "kept", "reverted", "conflicted", "superseded", "resolvedByHumanEdit", "settled"];
+  const hunk = (state: LiveHunk["state"]): LiveHunk => ({
+    hunkId: "h-1",
+    kind: "change",
+    state,
+    target: "r2",
+    baseRange: { from: 0, to: 1 },
+    targetRange: { from: 0, to: 1 },
+  });
+
+  it("names the kind, the state and the span", () => {
+    expect(hunkLabel(hunk("pending"), t)).toBe("mcpHistoryHunk(kind=mcpHistoryHunkKindChange,state=mcpHistoryHunkStatePending,from=0,to=1)");
+  });
+
+  it("labels every hunk state differently", () => {
+    const labels = STATES.map((s) => hunkLabel(hunk(s), t));
+    expect(new Set(labels).size).toBe(STATES.length);
   });
 });
 

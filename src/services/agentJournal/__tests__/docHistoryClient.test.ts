@@ -1,5 +1,6 @@
 // @vitest-environment node
 // WI-AL1.7 — the history panel's revision list client (`agent_journal_history`): rows newest first with the full actor (the four principal states, the connection id and the untrusted session label kept apart; human, system and legacy authors), the save's initiator, kind, tool, time and parent; blocked live hunks with reason, origin and lastCertified; the document's degraded flag; a malformed reply, an unknown reason, kind or principal state is refused as JOURNAL_UNAVAILABLE, never shown as something else
+// WI-AL2.1b — every live hunk as the writer persisted it (id, kind, state, target revision, base and target ranges), passed through in the journal's order and never regrouped; a malformed hunk row is refused
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
@@ -38,10 +39,20 @@ const blocked = {
   blockedAt: R2,
   target: R2,
 };
+const hunk = (over: Record<string, unknown> = {}) => ({
+  hunkId: "h:2",
+  kind: "change",
+  state: "pending",
+  target: R2,
+  baseRange: { from: 2, to: 2 },
+  targetRange: { from: 2, to: 3 },
+  ...over,
+});
 const reply = (over: Record<string, unknown> = {}) => ({
   generation: "42",
   rows: [row(), row({ revision: R1, kind: "observed", parent: null, actor: { type: "human" }, initiator: { type: "human" }, tool: null })],
   truncated: false,
+  hunks: [hunk()],
   blocked: [blocked],
   degraded: false,
   ...over,
@@ -79,12 +90,30 @@ describe("listDocumentHistory", () => {
   });
 
   it("returns an empty list for a document the journal never saw", async () => {
-    invokeMock.mockResolvedValueOnce({ generation: "0", rows: [], truncated: false, blocked: [], degraded: false });
+    invokeMock.mockResolvedValueOnce({ generation: "0", rows: [], truncated: false, hunks: [], blocked: [], degraded: false });
     expect((await listDocumentHistory("tab:main/t1")).rows).toEqual([]);
+  });
+
+  it("passes every persisted hunk through in the journal's order, touching ones included, never merged", async () => {
+    const hunks = [
+      hunk({ hunkId: "h:a", targetRange: { from: 0, to: 1 }, baseRange: { from: 0, to: 1 } }),
+      hunk({ hunkId: "h:b", targetRange: { from: 1, to: 2 }, baseRange: { from: 1, to: 2 }, kind: "largeChange", state: "conflicted" }),
+      hunk({ hunkId: "h:c", target: R1, kind: "restore" }),
+    ];
+    invokeMock.mockResolvedValueOnce(reply({ hunks }));
+    expect((await listDocumentHistory("path:/a.md")).hunks).toEqual(hunks);
   });
 
   it.each([
     ["not an object", []],
+    ["a missing hunk list", reply({ hunks: undefined })],
+    ["an unknown hunk kind", reply({ hunks: [hunk({ kind: "merged" })] })],
+    ["an unknown hunk state", reply({ hunks: [hunk({ state: "maybe" })] })],
+    ["a hunk with no target", reply({ hunks: [hunk({ target: "" })] })],
+    ["a fractional range", reply({ hunks: [hunk({ targetRange: { from: 0.5, to: 1 } })] })],
+    ["a negative range", reply({ hunks: [hunk({ baseRange: { from: -1, to: 1 } })] })],
+    ["an inverted range", reply({ hunks: [hunk({ targetRange: { from: 3, to: 2 } })] })],
+    ["a range with no end", reply({ hunks: [hunk({ baseRange: { from: 1 } })] })],
     ["a numeric generation", reply({ generation: 42 })],
     ["a numeric seq", reply({ rows: [row({ seq: 7 })] })],
     ["an unknown kind", reply({ rows: [row({ kind: "merged" })] })],

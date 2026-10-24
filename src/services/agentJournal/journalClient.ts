@@ -127,8 +127,8 @@ export interface CapturedSave {
   revision: string | null;
 }
 
-/** Why the journal did not use a selection certificate (`FallbackReason` in Rust). */
-const FALLBACK_REASONS = ["notTheParent", "notThePostimage", "wholeBreak", "splitsACharacter", "noFreeSlots"] as const;
+/** Why the journal did not use a certificate (`FallbackReason` in Rust). */
+const FALLBACK_REASONS = ["notTheParent", "notThePostimage", "wholeBreak", "splitsACharacter", "noFreeSlots", "overCap"] as const;
 
 /**
  * Check a reply's `certified` and `fallbackReason` (a certified reply has no
@@ -138,7 +138,7 @@ function checkCertification(command: string, r: Record<string, unknown>, doc: st
   const reason = r.fallbackReason;
   const known = reason === null || FALLBACK_REASONS.some((f) => f === reason);
   if (typeof r.certified !== "boolean" || !known || (r.certified && reason !== null)) throw malformed(command);
-  if (reason !== null) journalWarn(`${command}: the selection certificate for ${doc} was not used (${String(reason)}); recorded as a barrier`);
+  if (reason !== null) journalWarn(`${command}: the certificate for ${doc} was not used (${String(reason)}); recorded as a barrier`);
 }
 
 /** Prepare a controlled write. Rejects with a `JournalRefusal`. */

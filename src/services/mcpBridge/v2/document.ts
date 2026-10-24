@@ -174,6 +174,7 @@ export async function handleDocumentTransform(
       preimage: tab.content,
       requireFocus: !wire.tabId,
       tool: "document.transform",
+      target: transformed,
       context,
       apply: () => {
         const result = writeContent(tab.tabId, transformed, tab.kind);

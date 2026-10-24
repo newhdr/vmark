@@ -1,6 +1,7 @@
 //! The history panel's document list on the `Controller`: a document's
-//! revisions, newest first, with who made each one, and its live hunks
-//! whose automatic revert a provenance break has blocked.
+//! revisions, newest first, with who made each one, its live hunks as the
+//! writer persisted them, and those whose automatic revert a provenance
+//! break has blocked.
 //!
 //! Key decisions:
 //!   - A row carries the full `Actor` (the four principal states, the
@@ -9,6 +10,9 @@
 //!   - A blocked hunk names its `lastCertified` revision (where its span was
 //!     last certified, display only) so the panel can highlight it there,
 //!     plus the revision that blocked it and the one that made it.
+//!   - Live hunks are listed one row per persisted hunk, newest revision
+//!     first and in document order within it: the panel renders the
+//!     writer's geometry and never regroups or re-diffs it.
 //!   - The list is bounded (`HISTORY_ROWS`, newest kept) and says when it
 //!     was cut; a revision a blocked hunk names rides past the cap, so its
 //!     highlight is never cut off. A key the journal has never seen lists
@@ -30,7 +34,7 @@ use crate::agent_journal::ids::{HunkId, RevisionId};
 use crate::agent_journal::projection::{Projection, RevisionKind};
 use crate::agent_journal::provenance::BreakReason;
 use crate::agent_journal::refusal::refusal;
-use crate::agent_journal::review::{HunkState, ReviewOp};
+use crate::agent_journal::review::{HunkKind, HunkState, Range, ReviewOp};
 use crate::command_error::CommandError;
 
 /// Most rows one history reply carries (the newest are kept).
@@ -76,6 +80,19 @@ pub struct BlockedRow {
     pub target: RevisionId,
 }
 
+/// A live hunk as the writer persisted it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HunkRow {
+    pub hunk_id: HunkId,
+    pub kind: HunkKind,
+    pub state: HunkState,
+    /// The revision that made the hunk.
+    pub target: RevisionId,
+    pub base_range: Range,
+    pub target_range: Range,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocHistory {
@@ -84,6 +101,7 @@ pub struct DocHistory {
     pub rows: Vec<HistoryRow>,
     /// Older revisions exist beyond `rows`.
     pub truncated: bool,
+    pub hunks: Vec<HunkRow>,
     pub blocked: Vec<BlockedRow>,
     /// A record of this document is queued, not yet durable.
     pub degraded: bool,
@@ -155,6 +173,28 @@ fn blocked_of(p: &Projection, doc: DocId) -> Vec<BlockedRow> {
         .collect()
 }
 
+fn hunks_of(p: &Projection, doc: DocId) -> Vec<HunkRow> {
+    let Some(d) = p.docs.get(&doc) else {
+        return Vec::new();
+    };
+    let seq = |r: &RevisionId| p.revisions.get(r).map_or(0, |m| m.seq);
+    let mut rows: Vec<HunkRow> = d
+        .hunks
+        .values()
+        .filter(|h| h.state != HunkState::Settled)
+        .map(|h| HunkRow {
+            hunk_id: h.hunk.id.clone(),
+            kind: h.hunk.kind,
+            state: h.state,
+            target: h.hunk.target,
+            base_range: h.hunk.base_range,
+            target_range: h.hunk.target_range,
+        })
+        .collect();
+    rows.sort_by_key(|r| (std::cmp::Reverse(seq(&r.target)), r.target_range.start));
+    rows
+}
+
 impl Controller {
     /// A document's history (`{docKey}`); see the module docs.
     ///
@@ -165,19 +205,20 @@ impl Controller {
         let doc = self.docs.find(&req.doc_key).map_err(|e| refusal(&e))?;
         let g = self.writer.lock();
         let p = &g.proj;
-        let (rows, truncated, blocked, degraded) = match doc {
+        let (rows, truncated, hunks, blocked, degraded) = match doc {
             Some(doc) => {
                 let blocked = blocked_of(p, doc);
                 let (rows, truncated) = rows_of(p, doc, &blocked);
                 let degraded = g.degraded.get(&doc).is_some_and(|q| !q.is_empty());
-                (rows, truncated, blocked, degraded)
+                (rows, truncated, hunks_of(p, doc), blocked, degraded)
             }
-            None => (Vec::new(), false, Vec::new(), false),
+            None => (Vec::new(), false, Vec::new(), Vec::new(), false),
         };
         Ok(DocHistory {
             generation: p.generation,
             rows,
             truncated,
+            hunks,
             blocked,
             degraded,
         })

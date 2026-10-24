@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL1.3 — the IPC client for the controlled-mutation protocol: payloads cross as JSON strings so a lone surrogate reaches Rust escaped (INVALID_TEXT, never replaced), generations are decimal strings, malformed replies and refusals become JournalRefusal, abort reasons are the closed set; a selection certificate crosses verbatim, the certified flag and fallback reason of each reply are checked, and a fallback is logged (WI-AL2.1c)
+// WI-AL1.3 — the IPC client for the controlled-mutation protocol: payloads cross as JSON strings so a lone surrogate reaches Rust escaped (INVALID_TEXT, never replaced), generations are decimal strings, malformed replies and refusals become JournalRefusal, abort reasons are the closed set; a selection certificate crosses verbatim, the certified flag and fallback reason of each reply are checked, and a fallback is logged (WI-AL2.1c), including a declared script whose rotation breaks went over its cap (WI-AL2.1b)
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 vi.mock("@/utils/debug", () => ({ journalWarn: vi.fn() }));
 import { stubProvenancePayload } from "@/test/provenancePayloadFixture";
@@ -58,6 +58,12 @@ describe("selection certificates", () => {
     invokeMock.mockResolvedValueOnce({ doc: DOC, revision: REV, applied: true, durable: true, certified: false, fallbackReason: "notThePostimage" });
     expect(await commitControlledWrite(TXN, "after")).toEqual({ doc: DOC, revision: REV, applied: true, durable: true });
     expect(journalWarn).toHaveBeenCalledWith(expect.stringContaining("notThePostimage"));
+  });
+
+  it("accepts a commit whose declared script's rotation breaks went over the cap", async () => {
+    invokeMock.mockResolvedValueOnce({ doc: DOC, revision: REV, applied: true, durable: true, certified: false, fallbackReason: "overCap" });
+    expect(await commitControlledWrite(TXN, "after")).toEqual({ doc: DOC, revision: REV, applied: true, durable: true });
+    expect(journalWarn).toHaveBeenCalledWith(expect.stringContaining("overCap"));
   });
 
   it.each([

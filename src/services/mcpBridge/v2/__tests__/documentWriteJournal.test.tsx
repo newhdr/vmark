@@ -1,4 +1,4 @@
-// WI-AL1.3 — vmark.document.write on the controlled-mutation protocol, end to end against a real editor. While prepare is held: a user edit, closing the tab, starting an IME composition, moving the selection, or switching the focused tab under an implicit-target write each end ABORTED with nothing mutated (store, editor, revision, journal commits). Two windows on one file: exactly one is applied, the other JOURNAL_BUSY; a window that missed a commit is STALE_PARENT and rebases on retry. A commit failure answers applied with durable false; the degraded queue refuses JOURNAL_DEGRADED until drained; a failed aborted append keeps the reservation and recovers once its retry lands. Lone surrogates are INVALID_TEXT before any prepare; the revision actor is the request's MCP context.
+// WI-AL1.3 — vmark.document.write on the controlled-mutation protocol, end to end against a real editor. While prepare is held: a user edit, closing the tab, starting an IME composition, moving the selection, or switching the focused tab under an implicit-target write each end ABORTED with nothing mutated (store, editor, revision, journal commits). Two windows on one file: exactly one is applied, the other JOURNAL_BUSY; a window that missed a commit is STALE_PARENT and rebases on retry. A commit failure answers applied with durable false; the degraded queue refuses JOURNAL_DEGRADED until drained; a failed aborted append keeps the reservation and recovers once its retry lands. Lone surrogates are INVALID_TEXT before any prepare; the revision actor is the request's MCP context; the prepare carries the declared script of the buffer and the written content (WI-AL2.1b).
 //
 // A real Tiptap editor and the real stores; the journal IPC client is the
 // in-memory fake (src/test/agentJournalFake.ts) with the writer's semantics.
@@ -22,6 +22,7 @@ import { respond } from "@/services/mcpBridge/utils";
 import { handleDocumentWrite } from "@/services/mcpBridge/v2/document";
 import { journalActorFor } from "@/services/agentJournal/journalActor";
 import { resetJournalBases } from "@/services/agentJournal/documentIdentity";
+import { declaredScriptCertificate } from "@/services/agentJournal/review/declaredScript";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { contextFor, FIXTURE_ATTRIBUTIONS, TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
 
@@ -111,6 +112,7 @@ describe("document.write — happy path", () => {
       tool: "document.write",
       baselineProvenance: null,
       baselineTouched: false,
+      certificate: await declaredScriptCertificate("old document\n", "new\n"),
     });
   });
 });

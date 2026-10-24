@@ -1,8 +1,11 @@
 // WI-AL1.7 — the document's revision list: each row shows who made it (provider, connection and session label; the four principal states distinct), its kind and tool; "Restore this version" restores the row's revision and "Restore to before this change" its parent, neither offered when that text was collected, there is no parent, or the parent row is not listed; a save another actor asked for names that initiator; blocked hunks read "Blocked: reason (origin)" under their last certified revision, which is highlighted, or say the location is unavailable when the journal has none; an unreadable history says so; a truncated list says older revisions are not shown; one restore at a time
+// WI-AL2.1b — every live hunk is listed as the writer persisted it: one row per hunk under the revision that made it, with its kind, its state in words and its target range as a neutral position, touching hunks never merged; hunks of revisions the list does not show are listed apart; the writer's own doc-history reply for ab12cd → aX12Yd and a human insert (the golden fixture the Rust controller test checks) renders its two runs as two rows
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { BlockedHunk, DocumentHistory, HistoryRow } from "@/services/agentJournal/docHistoryClient";
+import { invoke } from "@tauri-apps/api/core";
+import { listDocumentHistory, type BlockedHunk, type DocumentHistory, type HistoryRow, type LiveHunk } from "@/services/agentJournal/docHistoryClient";
+import writerReply from "@/test/fixtures/agentJournal/docHistoryAb12cd.json";
 
 const restore = vi.hoisted(() => ({
   restoreFromHistory: vi.fn(async () => ({ status: "applied", durable: true, changed: true, resolves: null }) as const),
@@ -39,6 +42,16 @@ const blocked = (over: Partial<BlockedHunk> = {}): BlockedHunk => ({
   ...over,
 });
 
+const live = (hunkId: string, from: number, to: number, over: Partial<LiveHunk> = {}): LiveHunk => ({
+  hunkId,
+  kind: "change",
+  state: "pending",
+  target: "r2",
+  baseRange: { from, to },
+  targetRange: { from, to },
+  ...over,
+});
+
 const history = (over: Partial<DocumentHistory> = {}): DocumentHistory => ({
   generation: "1",
   rows: [
@@ -47,6 +60,7 @@ const history = (over: Partial<DocumentHistory> = {}): DocumentHistory => ({
     row("r1", { parent: null }),
   ],
   truncated: false,
+  hunks: [],
   blocked: [],
   degraded: false,
   ...over,
@@ -231,6 +245,36 @@ describe("DocumentHistoryList", () => {
     expect(within(orphans).getAllByRole("listitem")).toHaveLength(2);
     expect(within(orphans).getByText(/too many edits to trace/i)).toBeInTheDocument();
     for (const r of ["r1", "r2", "r3"]) expect(rowOf(r)).not.toHaveAttribute("data-blocked");
+  });
+
+  it("lists each persisted hunk under the revision that made it, touching hunks as separate rows", () => {
+    const hunks = [live("h-a", 0, 1), live("h-b", 1, 2, { kind: "largeChange", state: "reverted" }), live("h-c", 4, 9, { target: "r3", kind: "restore" })];
+    render(<DocumentHistoryList tabId="t-1" history={history({ hunks })} failed={false} />);
+    const r2 = within(rowOf("r2")).getByRole("list", { name: /changes/i });
+    const items = within(r2).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(["Change (pending), position 0–1", "Large change (reverted), position 1–2"]);
+    expect(items.map((li) => li.getAttribute("data-hunk-id"))).toEqual(["h-a", "h-b"]);
+    expect(within(rowOf("r3")).getByText("Restore (pending), position 4–9")).toBeInTheDocument();
+    expect(within(rowOf("r1")).queryByRole("list", { name: /changes/i })).toBeNull();
+  });
+
+  it("renders the writer's reply for two runs and a human insert as two hunk rows", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(writerReply);
+    const reply = await listDocumentHistory("doc");
+    expect(invoke).toHaveBeenCalledWith("agent_journal_history", { payload: JSON.stringify({ docKey: "doc" }) });
+    render(<DocumentHistoryList tabId="t-1" history={reply} failed={false} />);
+    const runs = within(rowOf("rev-2")).getByRole("list", { name: /changes/i });
+    const items = within(runs).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(["Change (pending), position 1–2", "Change (pending), position 4–5"]);
+    expect(items.map((li) => li.getAttribute("data-hunk-id"))).toEqual(["hunk-1", "hunk-2"]);
+    for (const r of ["rev-1", "rev-3"]) expect(within(rowOf(r)).queryByRole("list", { name: /changes/i })).toBeNull();
+  });
+
+  it("lists hunks of revisions the list does not show apart, never dropped", () => {
+    const hunks = [live("h-old", 3, 3, { target: "r0", kind: "tooComplex" })];
+    render(<DocumentHistoryList tabId="t-1" history={history({ hunks, truncated: true })} failed={false} />);
+    const older = screen.getByRole("list", { name: /changes in revisions not shown/i });
+    expect(within(older).getByText("Too complex to split (pending), position 3–3")).toBeInTheDocument();
   });
 
   it("says when older revisions are not shown", () => {

@@ -1,8 +1,8 @@
 /**
  * Document history list — the focused document's revisions, newest first:
- * who made each one, its kind and tool, the two restore actions, and the
- * changes whose automatic revert is blocked, shown under the revision they
- * were last certified at.
+ * who made each one, its kind and tool, the two restore actions, the live
+ * hunks each one made, and the changes whose automatic revert is blocked,
+ * shown under the revision they were last certified at.
  *
  * Key decisions:
  *   - "Restore this version" restores the row's own revision; "Restore to
@@ -18,6 +18,11 @@
  *     row, which is highlighted. With no `lastCertified`, or one older than
  *     the rows shown, the panel says the location is unavailable rather than
  *     guessing one.
+ *   - Live hunks are listed one row per persisted hunk under the revision
+ *     that made it, in the journal's order, with the journal's kind and
+ *     range: touching hunks stay separate rows, nothing is regrouped or
+ *     re-diffed. Hunks of a revision the list does not show are listed
+ *     apart rather than dropped.
  *   - Restores go through `restoreFromHistory`, one at a time; a second
  *     click while one is in flight is ignored. A restore the editor failed
  *     after applying warns (restored, check the document); one that could
@@ -36,12 +41,12 @@ import { RotateCcw, Undo2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ICON_SM } from "@/utils/iconSizes";
 import { imeToast as toast } from "@/services/ime/imeToast";
-import type { BlockedHunk, DocumentHistory, HistoryRow } from "@/services/agentJournal/docHistoryClient";
+import type { BlockedHunk, DocumentHistory, HistoryRow, LiveHunk } from "@/services/agentJournal/docHistoryClient";
 import { restoreFromHistory } from "@/services/agentJournal/historyRestore";
 import type { JournalActor } from "@/services/agentJournal/journalActor";
 import { journalWarn } from "@/utils/debug";
 import { ActorLabel } from "./ActorLabel";
-import { breakReasonLabel, historyTime, kindLabel, originLabel } from "./historyLabels";
+import { breakReasonLabel, historyTime, hunkLabel, kindLabel, originLabel } from "./historyLabels";
 import { classifyRestore } from "./restoreVerdict";
 
 interface Props {
@@ -57,6 +62,31 @@ function BlockedLine({ hunk }: { hunk: BlockedHunk }): React.ReactElement {
       {t("mcpHistoryBlocked", { reason: breakReasonLabel(hunk.reason, t), origin: originLabel(hunk.origin, t) })}
     </span>
   );
+}
+
+/** One row per persisted hunk, exactly as the journal listed them. */
+function HunkList({ hunks, label }: { hunks: readonly LiveHunk[]; label: string }): React.ReactElement {
+  const { t } = useTranslation("statusbar");
+  return (
+    <ul className="mcp-history-hunks" aria-label={label}>
+      {hunks.map((hunk) => (
+        <li key={hunk.hunkId} data-hunk-id={hunk.hunkId} data-state={hunk.state}>
+          {hunkLabel(hunk, t)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Live hunks by the revision that made them, keeping the journal's order; those of unshown revisions apart. */
+function placeHunks(hunks: readonly LiveHunk[], shown: ReadonlySet<string>): { byTarget: Map<string, LiveHunk[]>; elsewhere: LiveHunk[] } {
+  const byTarget = new Map<string, LiveHunk[]>();
+  const elsewhere: LiveHunk[] = [];
+  for (const hunk of hunks) {
+    if (shown.has(hunk.target)) byTarget.set(hunk.target, [...(byTarget.get(hunk.target) ?? []), hunk]);
+    else elsewhere.push(hunk);
+  }
+  return { byTarget, elsewhere };
 }
 
 /** Blocked hunks under the shown revision they were last certified at, and those with no shown location. */
@@ -107,10 +137,11 @@ interface RowProps {
   /** The parent "Restore to before" puts back, or null when none can be. */
   before: string | null;
   hunks: BlockedHunk[] | undefined;
+  live: LiveHunk[] | undefined;
   onRestore: (revision: string) => Promise<void>;
 }
 
-function RevisionRow({ row: r, before, hunks, onRestore }: RowProps): React.ReactElement {
+function RevisionRow({ row: r, before, hunks, live, onRestore }: RowProps): React.ReactElement {
   const { t } = useTranslation("statusbar");
   const time = historyTime(r.at);
   return (
@@ -135,6 +166,7 @@ function RevisionRow({ row: r, before, hunks, onRestore }: RowProps): React.Reac
           {t("mcpHistoryRequestedBy")} <ActorLabel actor={r.initiator} />
         </div>
       )}
+      {live && <HunkList hunks={live} label={t("mcpHistoryHunks")} />}
       {hunks?.map((hunk) => <BlockedLine key={hunk.hunkId} hunk={hunk} />)}
       <div className="mcp-history-popover__actions">
         {r.collected ? (
@@ -175,7 +207,9 @@ export function DocumentHistoryList({ tabId, history, failed }: Props): React.Re
   }
 
   const byRevision = new Map(history.rows.map((r) => [r.revision, r]));
-  const { anchored, orphans } = placeBlocked(history.blocked, new Set(byRevision.keys()));
+  const shown = new Set(byRevision.keys());
+  const { anchored, orphans } = placeBlocked(history.blocked, shown);
+  const { byTarget, elsewhere } = placeHunks(history.hunks, shown);
   /** The parent "Restore to before" puts back, when its row is listed and its text still kept.
    *  @edge-case A parent beyond a truncated list is not offered: whether it was collected is unknown. */
   const restorableParent = (r: HistoryRow): string | null =>
@@ -207,10 +241,17 @@ export function DocumentHistoryList({ tabId, history, failed }: Props): React.Re
               row={r}
               before={restorableParent(r)}
               hunks={anchored.get(r.revision)}
+              live={byTarget.get(r.revision)}
               onRestore={onRestore}
             />
           ))}
         </ol>
+      )}
+      {elsewhere.length > 0 && (
+        <div className="mcp-history-hunks-group">
+          <div className="mcp-history-hunks-group__title">{t("mcpHistoryHunksElsewhere")}</div>
+          <HunkList hunks={elsewhere} label={t("mcpHistoryHunksElsewhere")} />
+        </div>
       )}
       {history.truncated && <p className="mcp-history-popover__note">{t("mcpHistoryTruncated")}</p>}
     </section>

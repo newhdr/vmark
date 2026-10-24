@@ -142,6 +142,7 @@ export async function handleDocumentWrite(
       preimage: contentBefore,
       requireFocus: !wire.tabId,
       tool: "document.write",
+      target: content,
       context,
       apply: () => {
         const result = writeContent(tab.tabId, content, writeKind);
