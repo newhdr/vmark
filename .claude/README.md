@@ -50,7 +50,6 @@ A rule with `paths:` frontmatter loads only when Claude Code touches a matching 
 |------|-------|
 | `00-engineering-principles.md` | Core working agreement |
 | `10-tdd.md` | TDD workflow, where tests are required, test patterns |
-| `20-logging-and-docs.md` | Dev docs update policy |
 | `21-website-docs.md` | Which code changes require a website docs change |
 | `22-comment-maintenance.md` | Keep header and doc comments in sync with the code |
 | `30-ui-consistency.md` | UI design principles |
