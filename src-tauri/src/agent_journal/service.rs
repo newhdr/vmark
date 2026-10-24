@@ -1,0 +1,299 @@
+//! The app's one journal: opened at startup, shared by every window.
+//!
+//! Purpose: own where the journal lives and how it starts. Startup runs on
+//! its own thread — recovery replays the whole journal and the legacy import
+//! fsyncs once per new checkpoint, and neither may hold up the first window.
+//!
+//! Key decisions:
+//!   - `<appData>/agent-journal/`, owner-only. Under the app-data directory
+//!     of the running identifier, so a dev build (`app.vmark.dev`) has its
+//!     own journal; never beside a user's document.
+//!   - The outcome is set once. A failed open leaves no writer at all — the
+//!     journal is off for the session and the status says why — rather than
+//!     a writer over a history it could not read.
+//!   - A failed legacy import does not stop the journal: the original log is
+//!     untouched, the next start retries, and the status carries the error.
+//!   - A verified import retires the log (`retire_legacy`): moved aside, never
+//!     rewritten; unverified or failed, it stays where it is.
+//!   - Startup then runs one retention pass (`service_gc`); its summary,
+//!     warnings included, is in the status. A pass that cannot run is
+//!     reported there and does not stop the journal.
+//!   - Document identity becomes durable when startup finishes: the
+//!     registry attaches its index in the journal's directory
+//!     (`service_identity`). An index that cannot be used (incompatible,
+//!     unreadable, or failing to open) disables identity (its operations
+//!     refuse; saving continues). The status says so, and why.
+//!
+//! @module agent_journal/service
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use serde::Serialize;
+
+use crate::agent_journal::capture::{docs_with_pending, linearize_all_pending};
+use crate::agent_journal::controller::Controller;
+use crate::agent_journal::degraded_drain::DrainScheduler;
+use crate::agent_journal::doc_registry::DocRegistry;
+use crate::agent_journal::errors::TxnError;
+use crate::agent_journal::generation_events::{LiveUpdates, LiveUpdatesCell};
+use crate::agent_journal::journal_file::{create_dir_durable, SyncPolicy};
+use crate::agent_journal::legacy_import::{
+    import_legacy_file, LegacyImportReport, LEGACY_CHECKPOINT_FILE,
+};
+use crate::agent_journal::service_gc::{startup_gc, GcSummary};
+use crate::agent_journal::service_identity::IdentityMode;
+pub use crate::agent_journal::service_legacy::{retire_legacy, LegacyRetirement};
+use crate::agent_journal::writer::{OpenReport, Writer, WriterConfig};
+use crate::agent_journal::writer_gc::GcPolicy;
+
+/// The journal's directory under the app-data directory.
+pub const JOURNAL_DIR: &str = "agent-journal";
+
+/// A journal that opened, with what its startup found.
+pub struct Started {
+    pub writer: Arc<Writer>,
+    /// Where the journal lives; the identity index sits beside it.
+    pub journal_dir: PathBuf,
+    pub open: OpenReport,
+    /// The legacy import's report, or its error as `CODE: message`.
+    pub legacy: Result<LegacyImportReport, String>,
+    /// What became of the legacy log after the import.
+    pub retirement: LegacyRetirement,
+    /// The startup retention pass (`service_gc`).
+    pub gc: GcSummary,
+}
+
+fn describe(e: &TxnError) -> String {
+    format!("{}: {e}", e.code())
+}
+
+/// Open (creating) the journal under `app_data`, then import the legacy
+/// checkpoint log beside it.
+///
+/// # Errors
+/// `CODE: message` when the directory cannot be prepared or the journal
+/// cannot be recovered.
+pub fn start(app_data: &Path) -> Result<Started, String> {
+    let dir = app_data.join(JOURNAL_DIR);
+    private_dir(&dir).map_err(|e| describe(&e.into()))?;
+    let cfg = WriterConfig {
+        dir: dir.clone(),
+        sync: SyncPolicy::Full,
+        faults: Arc::default(),
+    };
+    let (writer, open) = Writer::open(cfg).map_err(|e| describe(&e))?;
+    // Saves captured before a crash, still pending, land in order now.
+    let linearized = linearize_all_pending(&writer);
+    if linearized > 0 {
+        log::info!("agent journal: linearized {linearized} pending save(s) at startup");
+    }
+    let legacy_path = app_data.join(LEGACY_CHECKPOINT_FILE);
+    let legacy = import_legacy_file(&writer, &legacy_path).map_err(|e| describe(&e));
+    // No frontend writes the log any more (checkpoints go to the journal),
+    // so a verified import is the whole file.
+    let retirement = retire_legacy(&legacy_path, &legacy);
+    let gc = startup_gc(&writer, &GcPolicy::default());
+    Ok(Started {
+        writer: Arc::new(writer),
+        journal_dir: dir,
+        open,
+        legacy,
+        retirement,
+        gc,
+    })
+}
+
+/// Create `dir` if needed, its new names fsynced, and make it `0700` on
+/// Unix (also when an earlier run left it wider). On Windows the app-data
+/// directory's ACL is the boundary.
+fn private_dir(dir: &Path) -> std::io::Result<()> {
+    create_dir_durable(dir, true)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Phase {
+    Starting,
+    Ready,
+    Failed,
+}
+
+/// What the journal is doing, for the webview and for diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentJournalStatus {
+    pub phase: Phase,
+    /// Decimal string: generations cross into JavaScript as strings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
+    /// Written by a newer build; nothing will be appended.
+    pub read_only: bool,
+    /// An ambiguous write failure stopped controlled mutations until
+    /// restart, or a document's degraded queue holds a record not yet durable.
+    pub degraded: bool,
+    /// Whether changes reach the windows as events (`generation_events`);
+    /// independent of the writer's health.
+    pub live_updates: LiveUpdates,
+    pub truncated_tail_bytes: u64,
+    pub uncommitted_at_start: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy: Option<LegacyImportReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retirement: Option<LegacyRetirement>,
+    /// How document identity is held (`service_identity`).
+    pub identity: IdentityMode,
+    /// Why identity is disabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gc: Option<GcSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Managed state: empty until the startup thread finishes. The document
+/// registry and the drainers live as long as the app, beside the writer.
+#[derive(Default)]
+pub struct AgentJournalState {
+    /// Taken by the first `finish`, before the outcome is published.
+    finishing: OnceLock<()>,
+    outcome: OnceLock<Result<Started, String>>,
+    pub(super) docs: Arc<DocRegistry>,
+    /// The identity index's attach: `Err` (why) when identity is disabled.
+    pub(super) identity: OnceLock<Result<(), String>>,
+    drains: Arc<DrainScheduler>,
+    /// Held for the whole of a Git export: its record of exported tips is
+    /// read, then rewritten, around the ref swap.
+    pub(super) git_exports: Arc<Mutex<()>>,
+    /// Set by the generation-event forwarder (`generation_events`).
+    live_updates: Arc<LiveUpdatesCell>,
+}
+
+impl AgentJournalState {
+    /// Record the startup outcome. Only the first call counts. The identity
+    /// index attaches before the outcome is visible: a key resolved the
+    /// moment the controller exists must get its durable document, never a
+    /// session one the attach then discards. Documents whose pending saves
+    /// startup could not linearize go to the background retry.
+    pub fn finish(&self, outcome: Result<Started, String>) {
+        if self.finishing.set(()).is_err() {
+            return;
+        }
+        if let Ok(started) = &outcome {
+            self.attach_identity(&started.journal_dir);
+        }
+        if self.outcome.set(outcome).is_err() {
+            return;
+        }
+        if let Some(writer) = self.writer() {
+            for doc in docs_with_pending(&writer) {
+                self.drains.ensure(writer.clone(), doc);
+            }
+        }
+    }
+
+    /// The shared writer, once the journal is ready.
+    pub fn writer(&self) -> Option<Arc<Writer>> {
+        match self.outcome.get() {
+            Some(Ok(started)) => Some(started.writer.clone()),
+            _ => None,
+        }
+    }
+
+    /// The journal's directory, once the journal is ready (the Git export
+    /// keeps its record of exported branch tips beside the journal).
+    pub fn journal_dir(&self) -> Option<PathBuf> {
+        match self.outcome.get() {
+            Some(Ok(started)) => Some(started.journal_dir.clone()),
+            _ => None,
+        }
+    }
+
+    /// The controlled-write entry, once the journal is ready.
+    pub fn controller(&self) -> Option<Controller> {
+        self.writer()
+            .map(|w| Controller::new(w, self.docs.clone(), self.drains.clone()))
+    }
+
+    /// The forwarder's live-update state, which it marks itself.
+    pub fn live_updates(&self) -> &Arc<LiveUpdatesCell> {
+        &self.live_updates
+    }
+
+    pub fn status(&self) -> AgentJournalStatus {
+        let (identity, identity_error) = self.identity_status();
+        let mut status = AgentJournalStatus {
+            phase: Phase::Starting,
+            generation: None,
+            read_only: false,
+            degraded: false,
+            live_updates: self.live_updates.get(),
+            truncated_tail_bytes: 0,
+            uncommitted_at_start: 0,
+            legacy: None,
+            retirement: None,
+            identity,
+            identity_error,
+            gc: None,
+            error: None,
+        };
+        match self.outcome.get() {
+            None => {}
+            Some(Err(e)) => {
+                status.phase = Phase::Failed;
+                // No writer, so no forwarder: nothing will ever be live.
+                status.live_updates = LiveUpdates::Failed;
+                status.error = Some(e.clone());
+            }
+            Some(Ok(s)) => {
+                status.phase = Phase::Ready;
+                status.generation = Some(s.writer.generation().to_string());
+                match s.writer.health() {
+                    Err(TxnError::FutureFormat { .. }) => status.read_only = true,
+                    Err(_) => status.degraded = true,
+                    Ok(()) => status.degraded = s.writer.any_degraded_queue(),
+                }
+                status.truncated_tail_bytes = s.open.truncated_tail_bytes;
+                status.uncommitted_at_start = s.open.uncommitted.len();
+                status.retirement = Some(s.retirement.clone());
+                status.gc = Some(s.gc.clone());
+                match &s.legacy {
+                    Ok(report) => status.legacy = Some(report.clone()),
+                    Err(e) => status.error = Some(e.clone()),
+                }
+            }
+        }
+        status
+    }
+}
+
+/// The app window `label` was destroyed: release the journal base roots
+/// its documents held (`Writer::release_window_label`), then attribute any
+/// unpinned overflow to the windows still open
+/// (`Writer::reconcile_live_windows`). No-op until ready.
+pub fn release_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>, label: &str) {
+    use tauri::Manager;
+    if let Some(writer) = app
+        .try_state::<AgentJournalState>()
+        .and_then(|s| s.writer())
+    {
+        writer.release_window_label(label);
+        let live = app
+            .webview_windows()
+            .into_keys()
+            .filter(|l| l != label)
+            .collect();
+        writer.reconcile_live_windows(&live);
+    }
+}
+
+#[path = "service_startup.rs"]
+mod startup;
+pub use startup::spawn_startup;

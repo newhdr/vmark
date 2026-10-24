@@ -5,6 +5,7 @@ import {
   registerWysiwygFlusher,
   flushActiveWysiwygNow,
   flushAllWysiwygNow,
+  flushWysiwygNow,
 } from "./wysiwygFlush";
 
 describe("wysiwygFlush", () => {
@@ -95,5 +96,46 @@ describe("flushAllWysiwygNow", () => {
 
   it("does nothing when no keyed flushers are registered", () => {
     expect(() => flushAllWysiwygNow()).not.toThrow();
+  });
+
+  describe("flushWysiwygNow — one editor, failures reported", () => {
+    it("runs only the named editor's flusher", () => {
+      const a = vi.fn();
+      const b = vi.fn();
+      registerWysiwygFlusher("a", a);
+      registerWysiwygFlusher("b", b);
+
+      flushWysiwygNow("a");
+
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).not.toHaveBeenCalled();
+    });
+
+    it("rethrows the flusher's error instead of swallowing it", () => {
+      registerWysiwygFlusher("a", () => {
+        throw new Error("serializer crashed");
+      });
+
+      expect(() => flushWysiwygNow("a")).toThrow("serializer crashed");
+    });
+
+    it.each([
+      ["never registered", () => {}],
+      ["unregistered", () => {
+        registerWysiwygFlusher("a", vi.fn());
+        registerWysiwygFlusher("a", null);
+      }],
+    ])("throws when the editor's flusher is %s: nothing brought the store up to date", (_label, arrange) => {
+      arrange();
+      expect(() => flushWysiwygNow("a")).toThrow(/no WYSIWYG flusher/);
+    });
+
+    it("does not consult the active flusher", () => {
+      const active = vi.fn();
+      registerActiveWysiwygFlusher(active);
+
+      expect(() => flushWysiwygNow("a")).toThrow();
+      expect(active).not.toHaveBeenCalled();
+    });
   });
 });

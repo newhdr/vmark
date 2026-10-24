@@ -12,11 +12,13 @@
 //! unrelated jobs, so the routed request's ordering (register, route, emit,
 //! wait, deliver) was buried inside the parse that precedes it.
 //!
+//! @coordinates-with mcp_bridge/connection_closed.rs — announces each drained connection
 //! @coordinates-with mcp_bridge/identify.rs — the `identify` envelope
 //! @coordinates-with mcp_bridge/routed_request.rs — the request that reaches a window
 //! @coordinates-with peer_text.rs — how client text may be logged
 //! @module mcp_bridge::server
 
+use super::connection_closed::announce_connection_closed;
 use super::delivery::{deliver_response, send_error_response};
 use super::identify::handle_identify;
 use super::managed::{bridge, McpBridgeState};
@@ -31,7 +33,8 @@ use tokio::sync::mpsc;
 ///
 /// Generic over the runtime so the teardown — the loop signalled, every
 /// client's shutdown fired, every pending request answered, the admission
-/// generation bumped — is pinned on a mock app (`server.test.rs`).
+/// generation bumped, every admitted Rust-side operation finished — is
+/// pinned on a mock app (`server.test.rs`, `operation_lease.test.rs`).
 pub async fn stop_bridge<R: tauri::Runtime>(app: &AppHandle<R>) {
     // Remove port file so MCP sidecar knows bridge is stopped
     remove_port_file(app);
@@ -50,11 +53,14 @@ pub async fn stop_bridge<R: tauri::Runtime>(app: &AppHandle<R>) {
     // generation and refuses to register — it must not survive shutdown.
     bridge.bump_connection_generation();
 
-    // Shutdown all clients
+    // Shutdown all clients. Each connection's own teardown will find its
+    // record gone, so the close is announced here, once per record.
+    let mut closed = Vec::with_capacity(guard.clients.len());
     for (_, mut client) in guard.clients.drain() {
         if let Some(shutdown_tx) = client.shutdown.take() {
             let _ = shutdown_tx.send(());
         }
+        closed.push(client.connection_id);
     }
 
     // Reject all pending requests
@@ -65,6 +71,13 @@ pub async fn stop_bridge<R: tauri::Runtime>(app: &AppHandle<R>) {
             error: Some("Bridge stopped".to_string()),
         });
     }
+    drop(guard);
+    // Rust-answered operations admitted before the drain finish first; none
+    // can be admitted after it (`McpBridgeState::admit_operation`).
+    bridge.await_operations().await;
+    for connection_id in closed {
+        announce_connection_closed(app, connection_id);
+    }
 }
 
 /// The channel that writes back to `client_id`, if it is still connected.
@@ -74,8 +87,12 @@ pub async fn stop_bridge<R: tauri::Runtime>(app: &AppHandle<R>) {
 /// missing-client policies that a reader had to diff to compare. The policies
 /// still differ, and deliberately: an envelope nobody can be answered on is
 /// dropped, while a request whose client has gone is reported. What they no
-/// longer differ in is how the channel is FOUND.
-async fn client_sender(bridge: &McpBridgeState, client_id: u64) -> Option<mpsc::Sender<String>> {
+/// longer differ in is how the channel is FOUND; `identify`'s refusal reply
+/// finds it here too.
+pub(super) async fn client_sender(
+    bridge: &McpBridgeState,
+    client_id: u64,
+) -> Option<mpsc::Sender<String>> {
     bridge
         .lock()
         .await
@@ -133,7 +150,7 @@ pub(super) async fn handle_message<R: tauri::Runtime>(
     );
 
     if msg.msg_type == "identify" {
-        handle_identify(msg.payload, client_id, app).await;
+        handle_identify(&msg.id, msg.payload, client_id, app).await;
         return Ok(());
     }
 
@@ -186,7 +203,7 @@ pub(super) async fn handle_message<R: tauri::Runtime>(
     // the name the client asserts in `identify`, which it may send and re-send.
     // See `principal.rs`.
     let principal = bridge.connection_principal(client_id).await;
-    if let Some(response) = answer_rust_side(&request, app, principal).await {
+    if let Some(response) = answer_rust_side(&request, app, principal, client_id).await {
         return deliver_response(
             bridge,
             client_id,

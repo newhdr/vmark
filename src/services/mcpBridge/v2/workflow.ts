@@ -25,7 +25,7 @@
  *     keystrokes included.
  *
  * @coordinates-with tabGuard.ts — tab resolution, the flush, INVALID_TAB and STALE
- * @coordinates-with checkpoint.ts — the checkpoint a patch batch leaves behind
+ * @coordinates-with journaledEdit.ts — the journal protocol `apply_patch` runs (a whole-document barrier)
  * @coordinates-with lib/ghaWorkflow/save/cstParser.ts — parseAsCst / stringifyCst
  * @coordinates-with lib/ghaWorkflow/save/mutators.ts — applyPatch + IRPatch types
  * @coordinates-with lib/ghaWorkflow/lint/actionlint.ts — lintWithActionlint
@@ -33,6 +33,7 @@
  * @module services/mcpBridge/v2/workflow
  */
 
+import type { McpWriteContext } from "@/services/mcpBridge/writeContext";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
 import {
   parseAsCst,
@@ -43,7 +44,6 @@ import { lintWithActionlint } from "@/lib/ghaWorkflow/lint/actionlint";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { respond } from "@/services/mcpBridge/utils";
 import { wrapHandler } from "./wrapHandler";
-import { recordBridgeCheckpoint } from "./checkpoint";
 import { readOperationArgs } from "./readOperationArgs";
 import {
   requireCurrentRevision,
@@ -52,6 +52,9 @@ import {
   type GuardedTab,
 } from "./tabGuard";
 import type { V2Error } from "./types";
+import { runJournaledEdit } from "./journaledEdit";
+import { invalidTextError } from "./journalV2Error";
+import { isWellFormedText } from "@/services/agentJournal/wellFormedText";
 import { errorMessage } from "@/utils/errorMessage";
 
 const VALID_PATCH_KINDS: ReadonlySet<string> = new Set([
@@ -64,34 +67,6 @@ const VALID_PATCH_KINDS: ReadonlySet<string> = new Set([
   "needs.remove",
   "trigger.setFilters",
 ]);
-
-/** Compose a one-line summary of a patch batch for the checkpoint panel. */
-function describePatchBatch(patches: IRPatch[]): string {
-  if (patches.length === 0) return "Apply 0 patches";
-  if (patches.length === 1) {
-    const p = patches[0];
-    switch (p.kind) {
-      case "workflow.set":
-        return `Set workflow ${p.path}`;
-      case "job.set":
-        return `Set ${p.jobId}.${p.path}`;
-      case "step.set":
-        return `Set ${p.jobId}.steps[${p.stepIndex}].${p.path}`;
-      case "with.set":
-        return `Set ${p.jobId}.steps[${p.stepIndex}].with.${p.key}`;
-      case "with.remove":
-        return `Remove ${p.jobId}.steps[${p.stepIndex}].with.${p.key}`;
-      case "needs.add":
-        return `Add ${p.ref} to ${p.jobId}.needs`;
-      case "needs.remove":
-        return `Remove ${p.ref} from ${p.jobId}.needs`;
-      case "trigger.setFilters":
-        return `Set on.${p.event}.${p.filter}`;
-    }
-  }
-  const kinds = new Set(patches.map((p) => p.kind));
-  return `Apply ${patches.length} patches (${[...kinds].join(", ")})`;
-}
 
 /**
  * Validate that `value` looks like an `IRPatch[]` we can dispatch.
@@ -148,10 +123,15 @@ async function requireWorkflowTab(
  * Handle `vmark.workflow.apply_patch`.
  *
  * Args: `{tabId?, patches: IRPatch[], expected_revision?}`.
+ *
+ * Runs through the edit journal's controlled-mutation protocol
+ * (`journaledEdit.ts`) and answers `applied` + `durable`; `context` is the
+ * revision's actor. A no-op patch batch journals nothing.
  */
 export async function handleWorkflowApplyPatch(
   id: string,
   args: Record<string, unknown>,
+  context: McpWriteContext,
 ): Promise<void> {
   return wrapHandler(id, async () => {
     const wire = readOperationArgs("vmark.workflow.apply_patch", args);
@@ -187,29 +167,37 @@ export async function handleWorkflowApplyPatch(
     const revisionStore = useRevisionStore.getState();
     const revisionBefore = revisionStore.getRevision(tab.tabId);
     if (nextContent === tab.content) {
-      // No-op patch batch — don't bump revision, don't checkpoint.
+      // No-op patch batch — don't bump revision.
       await respond({ id, success: true, data: { revision: revisionBefore } });
       return;
     }
 
-    useDocumentStore.getState().setEditorContent(tab.tabId, nextContent);
-    // Bumped here, last, so the token returned is the document's newest.
-    const revisionAfter = revisionStore.updateRevision(tab.tabId);
+    if (!isWellFormedText(nextContent)) {
+      await structuredError(id, invalidTextError());
+      return;
+    }
 
-    recordBridgeCheckpoint({
-      tabId: tab.tabId,
-      filePath: tab.filePath,
+    const outcome = await runJournaledEdit(id, {
+      tab,
+      preimage: tab.content,
+      requireFocus: !wire.tabId,
       tool: "workflow.apply_patch",
-      description: describePatchBatch(patches),
-      contentBefore: tab.content,
-      revisionBefore,
-      revisionAfter,
+      context,
+      apply: () => {
+        useDocumentStore.getState().setEditorContent(tab.tabId, nextContent);
+        // Bumped here, last, so the token returned is the document's newest.
+        const revisionAfter = revisionStore.updateRevision(tab.tabId);
+        const postimage = useDocumentStore.getState().documents[tab.tabId]?.content ?? nextContent;
+        return { postimage, value: revisionAfter };
+      },
     });
+    if (!outcome) return;
+    const revisionAfter = outcome.value;
 
     await respond({
       id,
       success: true,
-      data: { revision: revisionAfter },
+      data: { revision: revisionAfter, applied: true, durable: outcome.durable },
     });
   });
 }

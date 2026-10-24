@@ -137,7 +137,7 @@ VMark 對 AI 助理開放**九個複合 MCP 工具**：`session`、`workspace`�
 |------|------|------|
 | `tabId` | string | 否（預設為聚焦中的分頁） |
 
-回傳 `{filePath, revision}`。
+回傳 `{filePath, revision, journaled}`。
 
 ### `save_as`
 
@@ -148,9 +148,13 @@ VMark 對 AI 助理開放**九個複合 MCP 工具**：`session`、`workspace`�
 | `tabId` | string | 否 |
 | `filePath` | string | 是 |
 
-回傳 `{revision}`。
+回傳 `{revision, journaled}`。
 
 存到分頁自身目前檔案以外的路徑，會被視為一次新的寫入。當**自動核准儲存至新位置與精靈結果**（設定 → 整合）關閉時（預設值），這類請求會以 `APPROVAL_REQUIRED` 拒絕，並以浮動通知告訴你什麼被阻擋了。存回分頁自身的路徑則一律允許。
+
+當該儲存在此檔案的儲存佇列中輪到執行時，會再次檢查路徑。屆時已超出範圍的路徑（例如儲存等待期間工作區被關閉）會以 `INVALID_PATH` 被拒絕，且不會寫入任何內容。
+
+`save_as` 絕不會取代不屬於該分頁本身的檔案。目標位置已有檔案時，請求會以 `APPROVAL_REQUIRED` 拒絕——包括在請求檢查之後、儲存進行期間才建立的檔案：只有在檔案放到位的那一刻該路徑上沒有任何東西時才會寫入，原有檔案保留其內容。如果磁碟無法以這種方式寫入，儲存會被拒絕，而不是覆寫。
 
 ### `close`
 
@@ -216,19 +220,25 @@ VMark 對 AI 助理開放**九個複合 MCP 工具**：`session`、`workspace`�
 
 預設情況下，寫入會被儲存：回應會帶有 `saved: true`，或是 `saved: false` 並附上 `save_skipped`（`"untitled"`——分頁還沒有檔案，請使用 `save_as`；`"opt_out"`——你傳入了 `save: false`）或 `save_error`（磁碟寫入失敗）。當目標是 Markdown 文件中使用中的 WYSIWYG 分頁時，文字會被載入即時編輯器（作為一個可復原的步驟），而儲存的是編輯器對它的序列化結果——同樣的 Markdown，可能經過正規化，不一定是送出的確切字元。其他分頁則照送出的文字儲存，並正規化行尾字元。
 
+如果寫入已修改分頁、但儲存尚未執行時分頁被關閉，回應為 `saved: false`，並附上說明分頁已關閉的 `save_error`。不會向該分頁原本的路徑寫入任何內容。
+
 AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` 或 `workspace.save_as`——都會以 `mcp` 快照的形式記入文件的歷史記錄（在歷史記錄側邊欄中標示為 *(mcp)*），讓 AI 寫入的版本與你自己的版本有所區別。與手動儲存一樣，它絕不會併入相鄰的自動儲存，也不會因檔案大小而被略過。
+
+每個儲存回應也帶有 `journaled`（`write` 僅在實際儲存時帶有）。`"yes"`：VMark 的代理編輯日誌已記錄所儲存的文字。`"pending"`：已記錄，待一個仍在記錄中的寫入完成後，在文件歷史中就位。`"no"`：檔案已儲存，但日誌未記錄它。儲存絕不會因為日誌而成為錯誤。
 
 如果有提供 `expected_revision`，但文件自上次讀取後已變動，回應會是 `STALE` 結構化錯誤封包，並附上目前的 revision；此時請重新讀取後再嘗試。
 
 ```json
 // 成功
-{ "revision": "rev-newAfterWrite", "saved": true }
+{ "revision": "rev-newAfterWrite", "applied": true, "durable": true, "saved": true }
 
 // 過期
 { "error": "STALE", "message": "Document has changed since the last read", "current_revision": "rev-currentNow" }
 ```
 
 當使用者在顯示該分頁的 WYSIWYG 編輯器中以輸入法（IME）組字時，寫入會以 `BUSY` 被拒絕，且不做任何變更：組字中的文字在確認之前屬於輸入法。請稍後再試。在原始碼模式下，寫入會被接受，並在組字結束後顯示於編輯器中。
+
+每次寫入在任何變更發生之前，都會先記入 VMark 的代理程式編輯日誌。成功回應包含 `applied: true` 與 `durable`：`durable: false` 表示內容已寫入，但其日誌記錄尚未能儲存——VMark 會在背景重試，在此之前對該文件的下一次寫入會以 `JOURNAL_DEGRADED` 被拒絕。如果日誌直接拒絕該記錄，寫入仍保持已套用，並作為未記錄的寫入記入日誌，下一次寫入照常進行。以下情況寫入會被拒絕且不做任何變更：同一文件的另一次寫入正在記錄時傳回 `JOURNAL_BUSY`（顯示同一檔案的兩個視窗共用一份文件）；另一個視窗在本分頁上次寫入之後寫過該文件時傳回 `STALE_PARENT`（請重新讀取後再試）；日誌未執行時傳回 `JOURNAL_UNAVAILABLE`；`content` 含有孤立的 UTF-16 代理字元時傳回 `INVALID_TEXT`。若在記錄寫入期間使用者編輯了文件、關閉了分頁、開始以輸入法組字，或移動了選取範圍（未指定 `tabId` 時則是切換了分頁），寫入會以 `ABORTED` 及 `reason`（`edited`、`closed`、`composing`、`selection`）被拒絕，且不做任何變更；請重新讀取後再試。帶有 `applied: true` 的 `INTERNAL` 錯誤則不同：寫入已變更文件之後編輯器出錯，此時文件中的文字已被記錄（`durable` 含義同上，`current_revision` 為文件的修訂版本）；再次寫入前請重新讀取。寫入失敗後不帶 `applied` 的 `INTERNAL` 錯誤表示文件可能已被部分變更，同樣請重新讀取。
 
 ### `transform`
 
@@ -242,7 +252,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 
 `cjk-format` 會套用使用者目前的 CJK 排版設定，從頭執行一遍。`cjk-spacing` 會在 CJK 字元與相鄰的拉丁字母或數字之間補上單一空格。`cjk-punctuation` 會把緊鄰 CJK 字元的 ASCII 標點轉換成對應的全形形式。
 
-回傳 `{revision}`。與 `write` 一樣，當使用者在顯示該分頁的 WYSIWYG 編輯器中以輸入法組字時，它會以 `BUSY` 被拒絕，不做任何變更。
+回傳 `{revision, applied, durable}`。與 `write` 一樣，當使用者在顯示該分頁的 WYSIWYG 編輯器中以輸入法組字時，它會以 `BUSY` 被拒絕，不做任何變更。 與 `write` 一樣，它會在任何變更發生之前先記入 VMark 的代理程式編輯日誌：`applied`、`durable` 及日誌拒絕（`JOURNAL_BUSY`、`STALE_PARENT`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`、`ABORTED`）的含義相同；未做任何變更的呼叫不會被記錄。
 
 ---
 
@@ -282,7 +292,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 | `needs.add` / `needs.remove` | 在 `needs:` 中新增或移除一個 job ID |
 | `trigger.setFilters` | 替換觸發器的篩選陣列——branches、paths、types 等（`{event, filter, value: string[]}`） |
 
-成功時回傳 `{revision}`；失敗時回傳結構化的 `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW` 錯誤封包。
+成功時回傳 `{revision, applied, durable}`；失敗時回傳結構化的 `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW` 錯誤封包。 與 `write` 一樣，它會在任何變更發生之前先記入 VMark 的代理程式編輯日誌：`applied`、`durable` 及日誌拒絕（`JOURNAL_BUSY`、`STALE_PARENT`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`、`ABORTED`）的含義相同；未做任何變更的呼叫不會被記錄。
 
 ### `validate`
 
@@ -332,7 +342,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 
 替換編輯器回報為目前選取範圍的任何內容。**在 WYSIWYG 模式下**，純內嵌文字會以字面文字節點插入，因此前後的空白能精確地來回保留；帶有 markdown 標記的內容（`**bold**`、`*italic*`、`` `code` ``、圍欄程式碼、引用區塊、清單等）會被解析為 markdown 並插入為對應的節點。**在原始碼模式下**，`content` 一律以原始文字接合——原始碼介面本身就已經是 markdown 位元組。空的 `content` 會刪除選取範圍。當選取範圍折疊時，`content` 會插入在游標處。
 
-成功時回傳 `{revision, replaced_chars}`。`replaced_chars` 是呼叫之前被選取文字的長度——有助於 AI 確認它所編輯的正是預期的內容。
+成功時回傳 `{revision, replaced_chars, applied, durable}`。`replaced_chars` 是呼叫之前被選取文字的長度——有助於 AI 確認它所編輯的正是預期的內容。 與 `write` 一樣，它會在任何變更發生之前先記入 VMark 的代理程式編輯日誌：`applied`、`durable` 及日誌拒絕（`JOURNAL_BUSY`、`STALE_PARENT`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`、`ABORTED`）的含義相同；未做任何變更的呼叫不會被記錄。
 
 `STALE` 會回傳 `{error: "STALE", message, current_revision}`，與 `document.write` 完全相同。文件層級的 revision 能攔截 `get` 與 `set` 之間的按鍵輸入。純粹的游標移動（沒有按鍵輸入）不由伺服器仲裁——如果使用者在 `get` 與 `set` 之間移動了游標，這次編輯就會落在新的位置。
 
@@ -573,8 +583,15 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 | `INVALID_PATCH` | 結構化封包 | `workflow.apply_patch` 收到格式錯誤的 `patches` 陣列 |
 | `INVALID_TAB` | 結構化封包 | 無法解析 `tabId` |
 | `INVALID_PATH` | 結構化封包 | 無法讀取某個 `filePath`，或它位於已開啟的工作區／文件範圍之外 |
-| `APPROVAL_REQUIRED` | 結構化封包 | 在**自動核准儲存至新位置與精靈結果**關閉時，`save_as` 至新位置；或 `open_workspace` 正在等待使用者核准，或等待使用者在 VMark 的資料夾選擇器中選擇該資料夾 |
+| `APPROVAL_REQUIRED` | 結構化封包 | 在**自動核准儲存至新位置與精靈結果**關閉時，`save_as` 至新位置；`save_as` 至已有其他檔案（非該分頁本身檔案）的路徑；或 `open_workspace` 正在等待使用者核准，或等待使用者在 VMark 的資料夾選擇器中選擇該資料夾 |
 | `BUSY` | 結構化封包 | `open_workspace` 無法繼續：另一個資料夾對話框已開啟，或該視窗中正在切換工作區；核准仍保留——請重試。或是 `document.write`、`document.transform` 或 `selection.set` 在使用者以輸入法組字時送達；未做任何變更——請稍後再試 |
+| `JOURNAL_BUSY` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` 在同一文件的另一次寫入正在記錄時送達；未做任何變更——請稍後再試 |
+| `STALE_PARENT` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：另一個視窗在本分頁上次寫入之後寫過該文件；未做任何變更——請重新讀取後再試 |
+| `JOURNAL_DEGRADED` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：該文件較早的一筆日誌記錄仍在等待儲存；未做任何變更——請幾秒後再試 |
+| `JOURNAL_UNAVAILABLE` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：代理程式編輯日誌未執行或無法記錄；未做任何變更 |
+| `INVALID_TEXT` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：`content` 含有孤立的 UTF-16 代理字元；未做任何變更 |
+| `REVIEW_BACKLOG_FULL` | 結構化封包 | `document.write`：該文件未審閱的 AI 變更過多；未做任何變更 |
+| `ABORTED` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：記錄寫入期間使用者編輯、關閉了文件，在其中組字，或移動了選取範圍；具體由 `reason` 說明；未做任何變更——請重新讀取後再試 |
 | `NOT_WORKFLOW` | 結構化封包 | 在非 yaml-workflow 分頁上呼叫 `workflow.*` |
 | `READ_ONLY` | 結構化封包 | 對唯讀文件嘗試進行變更操作 |
 | `NO_EDITOR` | 結構化封包 | 呼叫了 `selection.*`，但聚焦中的分頁沒有實際運作的編輯器 |

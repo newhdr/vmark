@@ -159,7 +159,7 @@ Save a tab to its existing path.
 |-----------|------|----------|
 | `tabId` | string | No (defaults to focused) |
 
-Returns `{filePath, revision}`.
+Returns `{filePath, revision, journaled}`.
 
 ### `save_as`
 
@@ -170,12 +170,16 @@ Save a tab to a new path.
 | `tabId` | string | No |
 | `filePath` | string | Yes |
 
-Returns `{revision}`.
+Returns `{revision, journaled}`.
 
 Saving to a path other than the tab's own current file is treated as a new
 write. When **Auto-approve saves to a new location and genie results** (Settings → Integrations) is off (the
 default), such a request is refused with `APPROVAL_REQUIRED` and a toast tells
 you what was blocked. Saving back to the tab's own path is always allowed.
+
+The path check runs again when the save's turn comes in the queue of saves to that file. A path that has left the scope by then (for example, the workspace was closed while the save waited) is refused with `INVALID_PATH`, and nothing is written.
+
+`save_as` never replaces a file that is not the tab's own. A destination that already holds a file is refused with `APPROVAL_REQUIRED` — including a file created after the request was checked, while the save was in flight: the file is written only if nothing is at that path at the moment it is put in place, and the file found there keeps its contents. If the disk cannot write that way, the save is refused rather than overwriting.
 
 ### `close`
 
@@ -244,19 +248,25 @@ Replace full document content.
 
 By default the write is saved: the response carries `saved: true`, or `saved: false` with `save_skipped` (`"untitled"` — the tab has no file yet, use `save_as`; `"opt_out"` — you passed `save: false`) or `save_error` (the disk write failed). When the target is the active WYSIWYG tab of a Markdown document, the text is loaded into the live editor (as one undoable step), and what is saved is the editor's serialization of it — the same Markdown, possibly normalized, not necessarily the exact characters sent. Other tabs save the text as sent, line endings normalized.
 
+If the tab is closed after the write changed it but before the save ran, the reply is `saved: false` with a `save_error` saying the tab was closed. Nothing is written to the path the tab held.
+
 Every save an AI client makes — through `write`, `workspace.save` or `workspace.save_as` — is filed in the document's history as an `mcp` snapshot (labelled *(mcp)* in the History sidebar), so the versions an AI wrote stand apart from yours. Like a manual save, it is never merged into a neighbouring autosave or skipped for its size.
+
+Each save reply also carries `journaled` — on `write` only when a save ran. `"yes"`: VMark's agent edit journal recorded the saved text. `"pending"`: it is recorded, and takes its place in the document's history once a write still being recorded finishes. `"no"`: the file is saved, but the journal did not record it. A save is never an error because of the journal.
 
 If `expected_revision` is supplied and the document has changed since that read, the response is a `STALE` structured-error envelope with the current revision; re-read and retry.
 
 ```json
 // success
-{ "revision": "rev-newAfterWrite", "saved": true }
+{ "revision": "rev-newAfterWrite", "applied": true, "durable": true, "saved": true }
 
 // stale
 { "error": "STALE", "message": "Document has changed since the last read", "current_revision": "rev-currentNow" }
 ```
 
 While the user is composing text with an input method (IME) in the WYSIWYG editor showing the tab, the write is refused with `BUSY` and nothing changes: the text being composed belongs to the input method until it is committed. Retry shortly. In Source mode the write is accepted, and the editor shows it once the composition ends.
+
+Every write is recorded in VMark's agent edit journal before anything changes. The success response carries `applied: true` and `durable`: `durable: false` means the content was written but its journal record could not be stored yet — VMark retries it in the background, and until it lands the next write to that document is refused with `JOURNAL_DEGRADED`. If the journal refuses the record outright, the write stays applied, it is logged as unrecorded, and the next write goes ahead. A write is refused, changing nothing, with `JOURNAL_BUSY` while another write to the same document is being recorded (two windows showing one file share one document), with `STALE_PARENT` when another window wrote the document after this tab last did (re-read and retry), with `JOURNAL_UNAVAILABLE` when the journal is not running, and with `INVALID_TEXT` when `content` holds a lone UTF-16 surrogate. If the user edits the document, closes the tab, starts composing with an input method, or moves the selection (or switches tabs, when no `tabId` was given) while the write is being recorded, the write is refused with `ABORTED` and a `reason` (`edited`, `closed`, `composing`, `selection`) and nothing changes; re-read and retry. An `INTERNAL` error that carries `applied: true` is different: the editor failed after the write had changed the document, and the text it then held was recorded (`durable` as above, `current_revision` the document's revision) — re-read before writing again. An `INTERNAL` error without `applied` after a failed write means the document may be partly changed; re-read it too.
 
 ### `transform`
 
@@ -270,7 +280,7 @@ Apply a deterministic rewrite. Currently supports CJK-specific transforms (full-
 
 `cjk-format` applies the user's CJK formatting settings end-to-end. `cjk-spacing` inserts single spaces between CJK characters and adjacent Latin/digits. `cjk-punctuation` converts ASCII punctuation that sits beside CJK characters to its full-width form.
 
-Returns `{revision}`. Like `write`, it is refused with `BUSY`, changing nothing, while the user is composing with an input method in the WYSIWYG editor showing the tab.
+Returns `{revision, applied, durable}`. Like `write`, it is refused with `BUSY`, changing nothing, while the user is composing with an input method in the WYSIWYG editor showing the tab. Like `write`, it is recorded in VMark's agent edit journal before anything changes: `applied`, `durable` and the journal refusals (`JOURNAL_BUSY`, `STALE_PARENT`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`, `ABORTED`) mean the same; a call that changes nothing is not recorded.
 
 ---
 
@@ -310,7 +320,7 @@ Apply an array of `IRPatch` objects. Patches are dispatched through VMark's CST-
 | `needs.add` / `needs.remove` | Add or remove a job ID from `needs:` |
 | `trigger.setFilters` | Replace a trigger filter array — branches, paths, types, etc. (`{event, filter, value: string[]}`) |
 
-Returns `{revision}` on success or a structured `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW` error envelope.
+Returns `{revision, applied, durable}` on success or a structured `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW` error envelope. Like `write`, it is recorded in VMark's agent edit journal before anything changes: `applied`, `durable` and the journal refusals (`JOURNAL_BUSY`, `STALE_PARENT`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`, `ABORTED`) mean the same; a call that changes nothing is not recorded.
 
 ### `validate`
 
@@ -360,7 +370,7 @@ Returns:
 
 Replaces whatever the editor reports as the current selection. **In WYSIWYG mode**, plain inline text inserts as a literal text node so leading/trailing whitespace round-trips exactly; content carrying markdown markers (`**bold**`, `*italic*`, `` `code` ``, fenced code, blockquotes, lists, etc.) is parsed as markdown and inserted as the corresponding nodes. **In source mode**, `content` is always spliced as raw text — the source surface is already markdown bytes. Empty `content` deletes the selection. When the selection is collapsed, `content` is inserted at the cursor.
 
-Returns `{revision, replaced_chars}` on success. `replaced_chars` is the length of the text that was selected before the call — useful for the AI to confirm it edited what it expected.
+Returns `{revision, replaced_chars, applied, durable}` on success. `replaced_chars` is the length of the text that was selected before the call — useful for the AI to confirm it edited what it expected. Like `write`, it is recorded in VMark's agent edit journal before anything changes: `applied`, `durable` and the journal refusals (`JOURNAL_BUSY`, `STALE_PARENT`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`, `ABORTED`) mean the same; a call that changes nothing is not recorded.
 
 `STALE` returns `{error: "STALE", message, current_revision}` exactly like `document.write`. The doc-level revision catches keystrokes between `get` and `set`. Pure cursor movement (without a keystroke) is not arbitrated by the server — if the user moved the cursor between `get` and `set`, the edit lands at the new position.
 
@@ -793,8 +803,15 @@ Two error shapes appear:
 | `INVALID_PATCH` | envelope | `workflow.apply_patch` received a malformed `patches` array |
 | `INVALID_TAB` | envelope | `tabId` could not be resolved |
 | `INVALID_PATH` | envelope | A `filePath` could not be read, or is outside the open workspace / document scope |
-| `APPROVAL_REQUIRED` | envelope | `save_as` to a new location while **Auto-approve saves to a new location and genie results** is off; or `open_workspace` waiting for the user's approval, or for them to choose the folder in VMark's folder dialog |
+| `APPROVAL_REQUIRED` | envelope | `save_as` to a new location while **Auto-approve saves to a new location and genie results** is off; `save_as` to a path that already holds a file other than the tab's own; or `open_workspace` waiting for the user's approval, or for them to choose the folder in VMark's folder dialog |
 | `BUSY` | envelope | `open_workspace` could not proceed: another folder dialog is open, or a workspace switch is running in that window; the approval is kept — retry. Or `document.write`, `document.transform` or `selection.set` arrived while the user was composing text with an input method; nothing was changed — retry shortly |
+| `JOURNAL_BUSY` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` arrived while another write to the same document was being recorded; nothing was changed — retry shortly |
+| `STALE_PARENT` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: another window wrote the document after this tab last did; nothing was changed — re-read and retry |
+| `JOURNAL_DEGRADED` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: an earlier journal record for this document is still waiting to be stored; nothing was changed — retry in a few seconds |
+| `JOURNAL_UNAVAILABLE` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: the agent edit journal is not running or cannot record; nothing was changed |
+| `INVALID_TEXT` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: `content` contains a lone UTF-16 surrogate; nothing was changed |
+| `REVIEW_BACKLOG_FULL` | envelope | `document.write`: the document has too many unreviewed AI changes; nothing was changed |
+| `ABORTED` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: the user edited, closed, composed in or moved the selection of the document while the write was being recorded; `reason` says which; nothing was changed — re-read and retry |
 | `NOT_WORKFLOW` | envelope | `workflow.*` was called on a non-YAML-workflow tab |
 | `READ_ONLY` | envelope | A mutation was attempted on a read-only document |
 | `NO_EDITOR` | envelope | `selection.*` was called but the focused tab has no live editor |

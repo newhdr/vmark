@@ -28,6 +28,7 @@ fn client() -> (
             shutdown: Some(shutdown_tx),
             identity: None,
             principal: BridgePrincipal::Anonymous,
+            connection_id: uuid::Uuid::new_v4(),
         },
         rx,
         shutdown_rx,

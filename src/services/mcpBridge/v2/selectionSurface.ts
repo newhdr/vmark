@@ -19,7 +19,17 @@
  *     replacement is parsed as Markdown unless it is plain inline text.
  *   - The editor must belong to the focused tab. An editor still registered
  *     for a previously focused tab is treated as absent: acting on it would
- *     edit a document the request did not name.
+ *     edit a document the request did not name. The surface is whichever
+ *     editor is registered for the tab, not what the window's `sourceMode`
+ *     says: a YAML SourcePane and a split's source pane register a source
+ *     view while `sourceMode` is false.
+ *   - `wouldChange` proves a no-op without dispatching anything. Source
+ *     compares the replacement with the selected characters exactly.
+ *     WYSIWYG builds the very transaction `replaceSelection` would dispatch
+ *     and compares its document with the editor's, node for node, marks and
+ *     attributes included: equal selected Markdown is not enough, since the
+ *     Markdown may not carry a mark (`++underline++` comes back as literal
+ *     text) and a block-spanning slice re-inserted splits its paragraphs.
  *   - While an IME composition is in progress in the editor (or has just
  *     ended and is not yet cleaned up), `writeRefusal` answers BUSY and
  *     `replaceSelection` throws: a replacement dispatched under the preedit
@@ -27,13 +37,14 @@
  *
  * @coordinates-with selection.ts — the handlers
  * @coordinates-with stores/editorStore.ts — focused editor instances
- * @coordinates-with stores/uiStore.ts — sourceMode picks the editor
+ * @coordinates-with stores/uiStore.ts — sourceMode breaks a tie between registrations
  * @coordinates-with utils/markdownPipeline/index.ts — parseMarkdown / serializeMarkdown
  * @coordinates-with services/ime/compositionWriteGate.ts — WYSIWYG composition state
  * @coordinates-with utils/imeGuard.ts — Source composition state
  * @module services/mcpBridge/v2/selectionSurface
  */
 import type { Editor as TiptapEditor } from "@tiptap/core";
+import type { Transaction } from "@tiptap/pm/state";
 import type { EditorView as CMView } from "@codemirror/view";
 import { useUIStore } from "@/stores/uiStore";
 import { useEditorStore } from "@/stores/editorStore";
@@ -63,6 +74,8 @@ export interface SelectionSurface {
    * Throws when `writeRefusal()` would refuse.
    */
   replaceSelection(content: string): void;
+  /** Whether `replaceSelection(content)` would change the document; `false` only when provably not. */
+  wouldChange(content: string): boolean;
 }
 
 /** Fail loudly if a caller replaces without asking `writeRefusal` first. */
@@ -113,40 +126,49 @@ function tiptapSelectionText(editor: TiptapEditor): string {
   return out.endsWith("\n") ? out.slice(0, -1) : out;
 }
 
-/** Replace the current PM selection with parsed markdown. */
-function replaceTiptapSelection(editor: TiptapEditor, content: string): void {
-  assertNotComposing(isCompositionInProgress(editor.view));
+/** The transaction that replaces the current PM selection with parsed markdown; not dispatched. */
+function tiptapReplacement(editor: TiptapEditor, content: string): Transaction {
   const { from, to } = editor.state.selection;
   const schema = editor.state.schema;
   const $from = editor.state.doc.resolve(from);
   const $to = editor.state.doc.resolve(to);
   const sameTextblock = $from.sameParent($to) && $from.parent.isTextblock;
+  const tr = editor.state.tr;
 
-  let tr = editor.state.tr;
-
-  if (content.length === 0) {
-    tr = tr.deleteRange(from, to);
-  } else if (sameTextblock && !looksLikeMarkdown(content)) {
+  if (content.length === 0) return tr.deleteRange(from, to);
+  if (sameTextblock && !looksLikeMarkdown(content)) {
     // Plain inline text: insert as a literal text node so trailing /
     // leading whitespace and naked characters round-trip exactly.
-    tr = tr.replaceWith(from, to, schema.text(content));
-  } else {
-    const parsed = parseMarkdown(schema, content, {
-      preserveLineBreaks: getSerializeOptions().preserveLineBreaks,
-    });
-    // parseMarkdown wraps inline content in a paragraph. When the
-    // selection is within a single textblock, that wrapper would split
-    // the host paragraph — strip it. For block-spanning ranges, keep
-    // the block structure.
-    const onlyChild = parsed.content.firstChild;
-    const insertion =
-      sameTextblock && parsed.content.childCount === 1 && onlyChild?.isTextblock
-        ? onlyChild.content
-        : parsed.content;
-    tr = tr.replaceWith(from, to, insertion);
+    return tr.replaceWith(from, to, schema.text(content));
   }
+  const parsed = parseMarkdown(schema, content, {
+    preserveLineBreaks: getSerializeOptions().preserveLineBreaks,
+  });
+  // parseMarkdown wraps inline content in a paragraph. When the
+  // selection is within a single textblock, that wrapper would split
+  // the host paragraph — strip it. For block-spanning ranges, keep
+  // the block structure.
+  const onlyChild = parsed.content.firstChild;
+  const insertion =
+    sameTextblock && parsed.content.childCount === 1 && onlyChild?.isTextblock
+      ? onlyChild.content
+      : parsed.content;
+  return tr.replaceWith(from, to, insertion);
+}
 
-  editor.view.dispatch(tr.setMeta("addToHistory", true));
+/** Replace the current PM selection with parsed markdown. */
+function replaceTiptapSelection(editor: TiptapEditor, content: string): void {
+  assertNotComposing(isCompositionInProgress(editor.view));
+  editor.view.dispatch(tiptapReplacement(editor, content).setMeta("addToHistory", true));
+}
+
+/** Whether replacing the PM selection with `content` would change the document; a build that throws is a change. */
+function tiptapWouldChange(editor: TiptapEditor, content: string): boolean {
+  try {
+    return !tiptapReplacement(editor, content).doc.eq(editor.state.doc);
+  } catch {
+    return true;
+  }
 }
 
 function wysiwygSurface(editor: TiptapEditor): SelectionSurface {
@@ -161,6 +183,7 @@ function wysiwygSurface(editor: TiptapEditor): SelectionSurface {
       serializeMarkdown(editor.state.schema, editor.state.doc, getSerializeOptions()),
     writeRefusal: () => (isCompositionInProgress(editor.view) ? composingRefusal() : null),
     replaceSelection: (content) => replaceTiptapSelection(editor, content),
+    wouldChange: (content) => tiptapWouldChange(editor, content),
   };
 }
 
@@ -170,13 +193,14 @@ function sourceSurface(view: CMView): SelectionSurface {
     return { from, to };
   };
   const composing = () => isCodeMirrorComposing(view) || isCodeMirrorInCompositionGrace(view);
+  const selectedText = () => {
+    const { from, to } = range();
+    return from === to ? "" : view.state.sliceDoc(from, to);
+  };
   return {
     mode: "source",
     range,
-    selectedText: () => {
-      const { from, to } = range();
-      return from === to ? "" : view.state.sliceDoc(from, to);
-    },
+    selectedText,
     documentText: () => view.state.doc.toString(),
     writeRefusal: () => (composing() ? composingRefusal() : null),
     replaceSelection: (content) => {
@@ -187,24 +211,24 @@ function sourceSurface(view: CMView): SelectionSurface {
         selection: { anchor: from + content.length },
       });
     },
+    wouldChange: (content) => content !== selectedText(),
   };
 }
 
 /**
- * The live editing surface of the focused tab, or the `NO_EDITOR` refusal.
- * Source mode picks the CodeMirror view, otherwise the WYSIWYG editor; either
- * must be bound to `focusedTabId` and still alive.
+ * The live editing surface of the focused tab, or the `NO_EDITOR` refusal:
+ * the editor registered for `focusedTabId` (a destroyed WYSIWYG editor does
+ * not count). An editor registers only while its pane is focused and
+ * visible, so this finds a YAML SourcePane or either pane of a split, which
+ * the window's `sourceMode` does not describe. Both registered for the tab
+ * (a pane hand-over in progress): `sourceMode` decides.
  */
 export function resolveSelectionSurface(focusedTabId: string): SelectionSurface | V2Error {
   const { active } = useEditorStore.getState();
-  if (useUIStore.getState().sourceMode) {
-    const view = active.activeSourceTabId === focusedTabId ? active.activeSourceView : null;
-    return view
-      ? sourceSurface(view)
-      : { error: "NO_EDITOR", message: "No active source editor for the focused tab" };
-  }
-  const editor = active.activeWysiwygTabId === focusedTabId ? active.activeWysiwygEditor : null;
-  return editor && !editor.isDestroyed
-    ? wysiwygSurface(editor)
-    : { error: "NO_EDITOR", message: "No active WYSIWYG editor for the focused tab" };
+  const view = active.activeSourceTabId === focusedTabId ? active.activeSourceView : null;
+  const wysiwyg = active.activeWysiwygTabId === focusedTabId ? active.activeWysiwygEditor : null;
+  const editor = wysiwyg && !wysiwyg.isDestroyed ? wysiwyg : null;
+  if (view && (!editor || useUIStore.getState().sourceMode)) return sourceSurface(view);
+  if (editor) return wysiwygSurface(editor);
+  return { error: "NO_EDITOR", message: "No active editor for the focused tab" };
 }

@@ -19,6 +19,7 @@ import {
   TRUNCATION_OUTPUT_SHAPE,
   structuredJsonResult,
 } from '../utils/toolOutput.js';
+import { JOURNAL_REFUSALS } from './journalRefusals.js';
 import { bridgeErrorResult } from './staleError.js';
 import {
   optionalIdSchema,
@@ -48,7 +49,8 @@ export function registerSelectionTool(server: VMarkMcpServer): void {
         "Read or replace the user's current editor selection. Cheap targeted edits on large documents — avoids the full-doc round-trip required by `document.read`/`document.write`.\n\n" +
         'Actions:\n' +
         '- get: Return {text, isEmpty, range, mode, kind, tabId, revision} for the current selection. Pass `tabId` to target a specific tab; omit to use the focused tab. When nothing is selected, `text` is "" and `isEmpty` is true. `text` is the markdown serialization of the selected slice (in WYSIWYG mode) or the raw selected text (in source mode). `mode` is "wysiwyg" or "source" — `range.{from,to}` lives in PM positions or character offsets respectively. The `revision` token must be passed back in `set`.\n' +
-        '- set: Replace the current selection with new content. Args: {tabId?, content, expected_revision?}. Returns {revision, replaced_chars} — carry the new `revision` into your next call. In WYSIWYG mode, `content` is parsed as markdown when it carries markdown structure, otherwise inserted as a literal text node so leading/trailing whitespace round-trips exactly. In source mode, `content` is always inserted as raw text — the source surface is already markdown bytes. If `expected_revision` does not match the current revision, returns a STALE error carrying the up-to-date `current_revision` BOTH in the message and in the error\'s `structuredContent` (so you can branch on it without parsing prose); re-read with `selection.get` and retry rather than writing the stale content back. Operates on the editor selection at call time — if the user moved the cursor between get and set, the edit lands at the new position.',
+        '- set: Replace the current selection with new content. Args: {tabId?, content, expected_revision?}. Returns {revision, replaced_chars} — carry the new `revision` into your next call. In WYSIWYG mode, `content` is parsed as markdown when it carries markdown structure, otherwise inserted as a literal text node so leading/trailing whitespace round-trips exactly. In source mode, `content` is always inserted as raw text — the source surface is already markdown bytes. If `expected_revision` does not match the current revision, returns a STALE error carrying the up-to-date `current_revision` BOTH in the message and in the error\'s `structuredContent` (so you can branch on it without parsing prose); re-read with `selection.get` and retry rather than writing the stale content back. Operates on the editor selection at call time — if the user moved the cursor between get and set, the edit lands at the new position. Every set is recorded in VMark\'s agent edit journal first, like document.write: success also carries `applied: true` and `durable`. ' +
+        JOURNAL_REFUSALS,
       inputSchema: {
         action: z.enum(SELECTION_ACTIONS).describe('The action to perform'),
         tabId: optionalIdSchema(
@@ -98,6 +100,11 @@ export function registerSelectionTool(server: VMarkMcpServer): void {
           .number()
           .optional()
           .describe('Length of the text that was replaced (set).'),
+        applied: z.boolean().optional().describe('true = the replacement was written (set).'),
+        durable: z
+          .boolean()
+          .optional()
+          .describe('false = written, but its journal record is still queued for a retry (set).'),
         // STALE rejection — an isError result that still carries structured
         // detail, so the retry token never has to be scraped out of prose.
         error: z.string().optional().describe('Refusal code, e.g. "STALE" (error results only).'),

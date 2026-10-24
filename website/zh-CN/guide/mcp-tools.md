@@ -137,7 +137,7 @@ VMark 向 AI 助手暴露 **九个复合 MCP 工具**：`session`、`workspace`�
 |------|------|------|
 | `tabId` | string | 否（默认是当前聚焦的标签页） |
 
-返回 `{filePath, revision}`。
+返回 `{filePath, revision, journaled}`。
 
 ### `save_as`
 
@@ -148,9 +148,13 @@ VMark 向 AI 助手暴露 **九个复合 MCP 工具**：`session`、`workspace`�
 | `tabId` | string | 否 |
 | `filePath` | string | 是 |
 
-返回 `{revision}`。
+返回 `{revision, journaled}`。
 
 保存到标签页自身当前文件以外的路径，会被视为一次全新的写入。当 **自动批准保存到新位置和精灵结果**（设置 → 集成）关闭时（默认如此），这类请求会以 `APPROVAL_REQUIRED` 拒绝，并弹出一条提示告诉你什么被拦下了。保存回标签页自身的路径则始终被允许。
+
+当该保存在此文件的保存队列中轮到执行时，会再次检查路径。届时已超出范围的路径（例如保存等待期间工作区被关闭）会以 `INVALID_PATH` 被拒绝，且不会写入任何内容。
+
+`save_as` 绝不会替换不属于该标签页自身的文件。目标位置已有文件时，请求会以 `APPROVAL_REQUIRED` 拒绝——包括在请求检查之后、保存进行期间才创建的文件：只有在文件放到位的那一刻该路径上没有任何东西时才会写入，原有文件保留其内容。如果磁盘无法以这种方式写入，保存会被拒绝，而不是覆盖。
 
 ### `close`
 
@@ -216,19 +220,25 @@ VMark 向 AI 助手暴露 **九个复合 MCP 工具**：`session`、`workspace`�
 
 默认情况下，写入会被保存：响应中带有 `saved: true`，或者带有 `saved: false` 以及 `save_skipped`（`"untitled"`——标签页尚无文件，请使用 `save_as`；`"opt_out"`——你传入了 `save: false`）或 `save_error`（磁盘写入失败）。当目标是 Markdown 文档的活动所见即所得标签页时，文本会被加载进实时编辑器（作为一个可撤销的步骤），保存的是编辑器对它的序列化结果——同样的 Markdown，可能经过规范化，不一定与发送的字符完全一致。其他标签页按发送的文本原样保存，仅规范化换行符。
 
+如果写入已修改标签页、但保存尚未执行时标签页被关闭，响应为 `saved: false`，并带有说明标签页已关闭的 `save_error`。不会向该标签页原来的路径写入任何内容。
+
 AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还是 `workspace.save_as`——都会以 `mcp` 快照的形式记入文档历史（在历史侧边栏中标为 *(mcp)*），让 AI 写入的版本与你自己的版本区分开来。与手动保存一样，它从不会被并入相邻的自动保存，也不会因体积过大而被跳过。
+
+每个保存响应还带有 `journaled`（`write` 仅在实际保存时带有）。`"yes"`：VMark 的代理编辑日志已记录所保存的文本。`"pending"`：已记录，待一个仍在记录中的写入完成后，在文档历史中就位。`"no"`：文件已保存，但日志未记录它。保存绝不会因为日志而成为错误。
 
 如果传入了 `expected_revision`，而文档自那次读取后已经发生变化，响应将是带 `STALE` 的结构化错误信封，并附上当前的 revision；请重新读取后再试。
 
 ```json
 // 成功
-{ "revision": "rev-newAfterWrite", "saved": true }
+{ "revision": "rev-newAfterWrite", "applied": true, "durable": true, "saved": true }
 
 // 过期
 { "error": "STALE", "message": "Document has changed since the last read", "current_revision": "rev-currentNow" }
 ```
 
 当用户在显示该标签页的所见即所得编辑器中用输入法（IME）组字时，写入会以 `BUSY` 被拒绝，且不做任何改动：正在组字的文本在确认之前归输入法所有。请稍后重试。在源码模式下写入会被接受，并在组字结束后显示在编辑器中。
+
+每次写入在任何改动发生之前，都会先记入 VMark 的智能体编辑日志。成功响应包含 `applied: true` 和 `durable`：`durable: false` 表示内容已写入，但其日志记录尚未能保存——VMark 会在后台重试，在此之前对该文档的下一次写入会以 `JOURNAL_DEGRADED` 被拒绝。如果日志直接拒绝该记录，写入仍保持已应用，并作为未记录写入记入日志，下一次写入照常进行。以下情况写入会被拒绝且不做任何改动：同一文档的另一次写入正在记录时返回 `JOURNAL_BUSY`（显示同一文件的两个窗口共享一个文档）；另一个窗口在本标签页上次写入之后写过该文档时返回 `STALE_PARENT`（请重新读取后重试）；日志未运行时返回 `JOURNAL_UNAVAILABLE`；`content` 含有孤立的 UTF-16 代理项时返回 `INVALID_TEXT`。如果在记录写入期间用户编辑了文档、关闭了标签页、开始用输入法组字，或移动了选区（未指定 `tabId` 时则是切换了标签页），写入会以 `ABORTED` 及 `reason`（`edited`、`closed`、`composing`、`selection`）被拒绝，且不做任何改动；请重新读取后重试。带有 `applied: true` 的 `INTERNAL` 错误则不同：写入已改动文档之后编辑器出错，此时文档中的文本已被记录（`durable` 含义同上，`current_revision` 为文档的修订版本）；再次写入前请重新读取。写入失败后不带 `applied` 的 `INTERNAL` 错误表示文档可能已被部分改动，同样请重新读取。
 
 ### `transform`
 
@@ -242,7 +252,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 
 `cjk-format` 会按用户的 CJK 排版设置整篇执行一遍。`cjk-spacing` 在 CJK 字符与相邻拉丁字母 / 数字之间插入单个空格。`cjk-punctuation` 把贴在 CJK 字符旁边的 ASCII 标点转换为对应的全角形式。
 
-返回 `{revision}`。与 `write` 一样，当用户在显示该标签页的所见即所得编辑器中用输入法组字时，它会以 `BUSY` 被拒绝，不做任何改动。
+返回 `{revision, applied, durable}`。与 `write` 一样，当用户在显示该标签页的所见即所得编辑器中用输入法组字时，它会以 `BUSY` 被拒绝，不做任何改动。 与 `write` 一样，它会在任何改动发生之前先记入 VMark 的智能体编辑日志：`applied`、`durable` 及日志拒绝（`JOURNAL_BUSY`、`STALE_PARENT`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`、`ABORTED`）的含义相同；未做任何改动的调用不会被记录。
 
 ---
 
@@ -282,7 +292,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 | `needs.add` / `needs.remove` | 向 `needs:` 中加入或移除一个 job ID |
 | `trigger.setFilters` | 替换某个触发器的过滤数组——branches、paths、types 等（`{event, filter, value: string[]}`） |
 
-成功时返回 `{revision}`，否则返回结构化的 `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW` 错误信封。
+成功时返回 `{revision, applied, durable}`，否则返回结构化的 `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW` 错误信封。 与 `write` 一样，它会在任何改动发生之前先记入 VMark 的智能体编辑日志：`applied`、`durable` 及日志拒绝（`JOURNAL_BUSY`、`STALE_PARENT`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`、`ABORTED`）的含义相同；未做任何改动的调用不会被记录。
 
 ### `validate`
 
@@ -332,7 +342,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 
 替换编辑器报告的当前选区中的任何内容。**在所见即所得模式下**，纯行内文本会作为字面文本节点插入，因此前导 / 尾随空白能精确往返；带有 markdown 标记的内容（`**bold**`、`*italic*`、`` `code` ``、围栏代码、引用块、列表等）会被解析为 markdown 并作为对应的节点插入。**在源码模式下**，`content` 始终作为原始文本拼接进去——源码界面本身就是 markdown 字节。`content` 为空则删除选区。当选区折叠时，`content` 会插入到光标处。
 
-成功时返回 `{revision, replaced_chars}`。`replaced_chars` 是调用前被选中文本的长度——便于 AI 确认它编辑的正是自己预期的内容。
+成功时返回 `{revision, replaced_chars, applied, durable}`。`replaced_chars` 是调用前被选中文本的长度——便于 AI 确认它编辑的正是自己预期的内容。 与 `write` 一样，它会在任何改动发生之前先记入 VMark 的智能体编辑日志：`applied`、`durable` 及日志拒绝（`JOURNAL_BUSY`、`STALE_PARENT`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`、`ABORTED`）的含义相同；未做任何改动的调用不会被记录。
 
 `STALE` 返回 `{error: "STALE", message, current_revision}`，与 `document.write` 完全一致。文档级 revision 会捕捉 `get` 与 `set` 之间发生的按键。纯粹的光标移动（不含按键）不由服务器仲裁——如果用户在 `get` 与 `set` 之间移动了光标，编辑就会落在新位置上。
 
@@ -573,8 +583,15 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 | `INVALID_PATCH` | 信封 | `workflow.apply_patch` 收到了格式错误的 `patches` 数组 |
 | `INVALID_TAB` | 信封 | `tabId` 无法解析 |
 | `INVALID_PATH` | 信封 | `filePath` 无法读取，或位于已打开的工作区 / 文档范围之外 |
-| `APPROVAL_REQUIRED` | 信封 | 在**自动批准保存到新位置和精灵结果**关闭时用 `save_as` 保存到新位置；或 `open_workspace` 正在等待用户批准，或等待用户在 VMark 的文件夹选择器中选择该文件夹 |
+| `APPROVAL_REQUIRED` | 信封 | 在**自动批准保存到新位置和精灵结果**关闭时用 `save_as` 保存到新位置；用 `save_as` 保存到已有其他文件（非该标签页自身文件）的路径；或 `open_workspace` 正在等待用户批准，或等待用户在 VMark 的文件夹选择器中选择该文件夹 |
 | `BUSY` | 信封 | `open_workspace` 无法继续：另一个文件夹对话框已打开，或该窗口中正在切换工作区；批准仍保留——请重试。或者 `document.write`、`document.transform` 或 `selection.set` 在用户用输入法组字时到达；未做任何改动——请稍后重试 |
+| `JOURNAL_BUSY` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` 在同一文档的另一次写入正在记录时到达；未做任何改动——请稍后重试 |
+| `STALE_PARENT` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：另一个窗口在本标签页上次写入之后写过该文档；未做任何改动——请重新读取后重试 |
+| `JOURNAL_DEGRADED` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：该文档较早的一条日志记录仍在等待保存；未做任何改动——请几秒后重试 |
+| `JOURNAL_UNAVAILABLE` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：智能体编辑日志未运行或无法记录；未做任何改动 |
+| `INVALID_TEXT` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：`content` 含有孤立的 UTF-16 代理项；未做任何改动 |
+| `REVIEW_BACKLOG_FULL` | 信封 | `document.write`：该文档未审阅的 AI 改动过多；未做任何改动 |
+| `ABORTED` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：记录写入期间用户编辑、关闭了文档，在其中组字，或移动了选区；具体由 `reason` 说明；未做任何改动——请重新读取后重试 |
 | `NOT_WORKFLOW` | 信封 | 在非 yaml-workflow 标签页上调用了 `workflow.*` |
 | `READ_ONLY` | 信封 | 试图对只读文档进行变更 |
 | `NO_EDITOR` | 信封 | 调用了 `selection.*`，但聚焦的标签页没有活动编辑器 |

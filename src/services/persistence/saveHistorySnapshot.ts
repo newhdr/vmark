@@ -15,7 +15,9 @@
  *   - An MCP write is filed as its own kind, `mcp`, so history shows which
  *     versions an AI client wrote. Only `auto` snapshots are merged into their
  *     predecessor or skipped above the size limit, so an `mcp` snapshot is
- *     kept exactly as a manual one is.
+ *     kept exactly as a manual one is. It is linked to the agent edit
+ *     journal by the revision id holding its text, when the save was
+ *     journaled; a pending or unrecorded save has no link to give.
  *
  * @coordinates-with services/persistence/saveToPath.ts — the caller
  * @coordinates-with services/history/historyOperations.ts — createSnapshot
@@ -46,11 +48,16 @@ export function __resetSnapshotFlags(): void {
   snapshotWarningShown = false;
 }
 
-/** Record a snapshot if history is enabled. Never throws. */
+/**
+ * Record a snapshot if history is enabled. Never throws. `journalRevision`
+ * is the agent edit journal's revision holding the saved text; an `mcp`
+ * snapshot stores it as its link, the other kinds store none.
+ */
 export async function recordHistorySnapshot(
   path: string,
   output: string,
-  saveType: SaveType
+  saveType: SaveType,
+  journalRevision: string | null = null
 ): Promise<void> {
   const { general } = useSettingsStore.getState();
   if (!general.historyEnabled) return;
@@ -59,7 +66,8 @@ export async function recordHistorySnapshot(
   // an "mcp" one is not, so the version a user most wants back after an AI
   // client rewrote the file is always kept.
   try {
-    await createSnapshot(path, output, saveType, buildHistorySettings(general));
+    const link = saveType === "mcp" ? journalRevision : null;
+    await createSnapshot(path, output, saveType, buildHistorySettings(general), link);
   } catch (historyError) {
     historyWarn("Failed to create snapshot:", historyError);
     if (!snapshotWarningShown) {

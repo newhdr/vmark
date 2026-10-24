@@ -41,6 +41,7 @@ menu:
   file.docHistory: "Histórico do documento"
   file.docHistory.clearWorkspace: "Limpar histórico do espaço de trabalho..."
   file.docHistory.clearAll: "Limpar todo o histórico..."
+  file.docHistory.exportToGit: "Exportar histórico de edições para o Git..."
   file.print: "Imprimir..."
 
   # File menu — Windows/Linux extras
@@ -311,6 +312,8 @@ errors:
   save.parentMissing: "A pasta deste arquivo não existe mais: %{dir}"
   save.noParentDirectory: "O caminho do arquivo não tem pasta superior"
   save.symlinkLoop: "O atalho deste arquivo aponta em círculo, então o arquivo real não foi encontrado"
+  save.targetExists: "Já existe um arquivo em %{path}, então ele não foi substituído"
+  save.noReplaceUnsupported: "Este disco não consegue salvar sem substituir um arquivo existente, então %{path} não foi salvo"
   save.writeFailed: "Não foi possível salvar o arquivo: %{detail}"
   window.pdfExportMenu: "Não foi possível dar uma barra de menus vazia à janela Exportar PDF: %{detail}"
   window.pdfExportCreate: "Não foi possível abrir a janela Exportar PDF: %{detail}"

@@ -57,6 +57,9 @@ pub(crate) struct ClientConnection {
     /// per-client credential it presented. Immutable for the life of the
     /// connection — nothing the client sends afterwards can change it.
     pub principal: BridgePrincipal,
+    /// Minted when the connection authenticated; unlike the client id, it
+    /// does not restart with the process. Carried on every routed request.
+    pub connection_id: uuid::Uuid,
 }
 
 /// Bridge state shared across connections.
@@ -256,7 +259,7 @@ pub(crate) fn is_read_only_operation(request_type: &str) -> bool {
                                               // `routing::answer_coherence_async` applies its own lock policy
                                               // (edges/resolve take the write lock; status/claims/contexts do not).
                                               // An entry here would be unreachable dead weight (manifest
-                                              // parity: src/hooks/mcpBridge/v2/operationManifest.ts).
+                                              // parity: src/services/mcpBridge/v2/__tests__/operationManifest.ts).
     )
 }
 

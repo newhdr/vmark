@@ -10,6 +10,8 @@
  * @module services/mcpBridge/v2/types
  */
 
+import type { AbortReason } from "@/services/agentJournal/journalClient";
+
 /** Document kind discriminator. Drives which mutation tool applies. */
 export type DocumentKind = "markdown" | "yaml-workflow";
 
@@ -120,14 +122,39 @@ export type V2ErrorCode =
   // Too many pending approvals queued (untrusted-client flooding). The agent
   // should wait for the user to resolve them before retrying.
   | "RESOURCE_EXHAUSTED"
+  // The agent edit journal refused the write before anything changed
+  // (document.write). JOURNAL_BUSY: another write to the same document is in
+  // flight — retry shortly. STALE_PARENT: another window changed the
+  // document since this tab last wrote — re-read and retry. JOURNAL_DEGRADED:
+  // an earlier record is still waiting to be written — retry later.
+  // JOURNAL_UNAVAILABLE: the journal is not running. INVALID_TEXT: the
+  // content holds a lone UTF-16 surrogate. REVIEW_BACKLOG_FULL: too many
+  // unreviewed agent changes on the document.
+  | "JOURNAL_BUSY"
+  | "STALE_PARENT"
+  | "JOURNAL_DEGRADED"
+  | "JOURNAL_UNAVAILABLE"
+  | "INVALID_TEXT"
+  | "REVIEW_BACKLOG_FULL"
+  // The journal accepted the write, but the document changed under it before
+  // it applied (`reason` says how); nothing was written. Re-read and retry.
+  | "ABORTED"
   | "INTERNAL";
 
-export interface V2Error {
-  error: V2ErrorCode;
+interface V2ErrorBase {
   message: string;
   /** Optional payload — populated by STALE responses with the up-to-date revision. */
   current_revision?: string;
+  /** INTERNAL only: the edit changed the document before the failure (re-read it). */
+  applied?: true;
+  /** With `applied`: whether the journal durably recorded the changed text. */
+  durable?: boolean;
 }
+
+/** A V2 error envelope; only ABORTED carries a `reason`, and it always does. */
+export type V2Error =
+  | (V2ErrorBase & { error: "ABORTED"; reason: AbortReason })
+  | (V2ErrorBase & { error: Exclude<V2ErrorCode, "ABORTED">; reason?: never });
 
 /**
  * Construct a V2 error envelope.

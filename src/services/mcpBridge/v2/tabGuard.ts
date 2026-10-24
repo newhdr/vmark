@@ -43,6 +43,8 @@ export interface GuardedTab {
   filePath: string | null;
   content: string;
   dirty: boolean;
+  /** The tab's revision when it was resolved. */
+  revision: string;
   kind: DocumentKind;
 }
 
@@ -96,6 +98,7 @@ export function resolveTab(tabIdArg: string | undefined, scope: TabScope = "any"
     filePath: doc.filePath,
     content: doc.content,
     dirty: doc.isDirty,
+    revision: useRevisionStore.getState().getRevision(tabId),
     kind: resolveKind(doc.filePath, doc.content),
   };
 }

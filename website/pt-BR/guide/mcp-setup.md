@@ -229,6 +229,8 @@ vmark-mcp-server --version
 vmark-mcp-server --port 9223   # legado / manual
 ```
 
+Qualquer outro argumento — uma flag digitada errado, `--port=9223` ou uma palavra solta — é recusado: o programa exibe um erro de uso e sai com o código 64 em vez de recorrer à detecção automática.
+
 ## Como Funciona
 
 ```text
@@ -325,9 +327,21 @@ Não há etapa de prévia para `document.write`, `selection.set` ou `workflow.ap
 
 ## Pontos de Verificação de Edição
 
-Toda mutação de documento feita pela IA — `document.write`, `document.transform`, `selection.set` e `workflow.apply_patch` — primeiro tira um snapshot do conteúdo que está prestes a substituir. O botão de **histórico** na barra de status abre um popover que lista, para a aba em foco, quando cada escrita da IA aconteceu e qual ferramenta a fez, com um **Restaurar ao estado anterior a esta escrita** de um clique em cada linha e uma ação **Limpar o histórico desta aba**. Restaurar coloca o conteúdo anterior de volta e avança a revisão do documento, então um cliente de IA que ainda tenha a revisão antiga recebe `STALE` na próxima escrita em vez de sobrescrever a sua restauração.
+Cada modificação de documento feita pela IA — `document.write`, `document.transform`, `selection.set` e `workflow.apply_patch` — é registrada no histórico de edição do VMark antes de alterar qualquer coisa. O botão **histórico** na barra de status abre um painel para o documento em foco. Seu contador mostra as versões do documento feitas pela IA, e o botão assume uma cor de aviso quando as alterações não estão sendo registradas. O painel se atualiza ao vivo, em todas as janelas, à medida que versões são registradas.
 
-Os pontos de verificação são mantidos por arquivo — 50 por arquivo e 5 MiB no total — e persistidos em `mcp-checkpoints.jsonl` no diretório de dados do aplicativo VMark, então sobrevivem a uma reinicialização. O arquivo contém o texto anterior completo de cada edição registrada e é criado acessível apenas ao proprietário (`0600` no macOS e no Linux). O rodapé do painel mostra quanto o arquivo ocupa no disco e limpa todo o armazenamento — todos os arquivos e todas as janelas — em uma única ação. Documentos sem título têm pontos de verificação por aba.
+O painel lista as versões do documento, da mais recente para a mais antiga. Cada linha mostra quando aconteceu, que tipo de alteração foi, a ferramenta e quem a fez: o provedor do cliente de IA (por exemplo `claude` ou `codex`), sua conexão e seu rótulo de sessão. Um cliente sem token aparece como **Cliente não identificado**, um token desconhecido como **Credencial não reconhecida** e um token compartilhado por vários clientes como **Credencial compartilhada por vários provedores** — nunca como um provedor, seja qual for o nome que o cliente se dê. **Restaurar esta versão** devolve o texto daquela versão; **Restaurar o estado anterior a esta alteração** devolve o texto anterior. Restaurar incrementa a revisão do documento, então um cliente de IA que ainda tenha a revisão antiga recebe `STALE` na próxima escrita em vez de sobrescrever sua restauração. A própria restauração é registrada: o texto que ela substitui é guardado primeiro, e um documento editado enquanto a restauração estava em andamento não é alterado.
+
+O topo do painel informa quando as alterações não estão sendo registradas: o histórico não conseguiu iniciar ou é somente leitura, está atrasado (registros na fila, ainda não no disco), o último salvamento deste documento foi recusado ou o histórico não respondeu a tempo, ou algumas alterações da IA não podem mais ser revertidas automaticamente. Uma alteração assim aparece como **Bloqueado: motivo (origem)** sob a última versão em que sua posição foi certificada, que fica destacada; quando não há nenhuma, o painel informa que a posição não está disponível. Gravações aplicadas mas nunca registradas aparecem em **Gravações não registradas**, cada uma com restaurar e descartar.
+
+Para distinguir várias sessões de um mesmo cliente, defina `VMARK_SESSION_LABEL` na configuração MCP do cliente, ao lado de `VMARK_MCP_TOKEN`:
+
+```json
+"env": { "VMARK_MCP_TOKEN": "…", "VMARK_SESSION_LABEL": "docs refactor" }
+```
+
+O rótulo tem no máximo 128 bytes UTF-8, sem caracteres de controle; um rótulo que viola a regra é descartado com um aviso e o cliente se conecta sem ele. Ele é escolhido pela configuração do cliente, então serve apenas para exibição e não decide nada.
+
+O histórico fica na pasta `agent-journal` do diretório de dados do VMark, então sobrevive a uma reinicialização. A pasta contém o texto anterior completo de cada edição registrada e só é acessível ao proprietário (`0700` no macOS e no Linux). Pontos de verificação de uma versão anterior do VMark (um `mcp-checkpoints.jsonl`, importado na primeira inicialização e depois renomeado) aparecem em **Pontos de verificação anteriores**, uma única lista para todos os documentos e janelas. Restaurar um abre o arquivo dele; um sem título, ou um cujo arquivo não pode mais ser aberto, é restaurado em um novo documento. A seção mostra quanto texto de pontos de verificação é mantido e limpa tudo — cada arquivo e cada janela — em uma única ação, apagando os textos do disco.
 
 ## Notas de Segurança
 

@@ -243,7 +243,11 @@ module.exports = [
     // The limit is the new size plus this file's usual 5%, which is what a
     // budget needs in order to catch a regression of that kind — classic zod
     // coming back is +64 kB — without tripping on the next ordinary feature.
-    limit: "731 kB",
+    // 731 → 735 kB (#1591): the agent-edit ledger's eager capture path — the
+    // journal status, document-identity and save-capture clients, which must
+    // be loaded before the first edit so no edit goes unrecorded — landed the
+    // chunk at 734.6 kB. Smallest raise that fits, as above.
+    limit: "735 kB",
     brotli: false,
   },
   {
@@ -259,9 +263,36 @@ module.exports = [
     // the markdownSurface headroom ratio (285,000 / 267,339 = 1.0661), so the
     // 22.7 kB that left cannot come back silently.
     name: "EAGER: popupComponents (shared side chunk)",
-    path: "dist/assets/popupComponents-*.js",
+    // Rolldown names this chunk after one of its modules. When
+    // contentApplied moved to services/editor (services may not import
+    // components) it became the chunk's name; the members and the budget
+    // are unchanged (267,772 bytes).
+    path: "dist/assets/contentApplied-*.js",
     // Ratcheted 283 kB -> 280 kB (re-measured to its size plus 5%): actual 265.8 kB.
+    // The agent-edit ledger's provenance core then landed here and took the
+    // chunk to 284,325 bytes. It now has its own chunk and budget (below), so
+    // this one is back to 267,270. Its size plus 5% rounds to 281 kB, which
+    // would RAISE the limit, so it stays at 280 kB (4.8% headroom).
     limit: "280 kB",
+    brotli: false,
+  },
+  {
+    // The agent-edit provenance core (src/services/agentJournal/provenance:
+    // session, pieces, accumulator, payload, codec, window, epochLease,
+    // certificates, intervals), pinned by scripts/manualChunks.ts. Still
+    // eager — App and popupComponents import it statically, and index.html
+    // modulepreloads it. These bytes were MOVED out of popupComponents
+    // (284,325 -> 267,270 there; 16,976 here), not added. A budget of its own
+    // keeps them from hiding in, or excusing growth of, the shared side chunk.
+    // Both budgets together allow 298 kB, under 5% over their combined
+    // 284,246 bytes; `pnpm lint:eager` still caps the cold-start total.
+    name: "EAGER: agentJournalProvenance (provenance core)",
+    path: "dist/assets/agentJournalProvenance-*.js",
+    // Size plus 5%, rounded up to 0.5 kB: actual 17.0 kB.
+    // 18 → 19.5 kB: the decoder's hostile-input checks (exact keys at every
+    // level, safe integers, the piece cap enforced during expansion) took it
+    // to 19,040 bytes. Smallest raise that fits.
+    limit: "19.5 kB",
     brotli: false,
   },
 

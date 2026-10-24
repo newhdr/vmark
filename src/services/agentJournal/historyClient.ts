@@ -1,0 +1,101 @@
+/**
+ * History client — the IPC calls of the history panel over the agent edit
+ * journal: prepare a restore (`agent_journal_restore_prepare`; its commit
+ * and abort are the controlled write's), and list or discard a document's
+ * uncommitted entries.
+ *
+ * Key decisions:
+ *   - Same wire rules as `journalClient.ts`: one JSON string payload,
+ *     decimal-string generations and sequence numbers, a malformed reply
+ *     refused as `JOURNAL_UNAVAILABLE`.
+ *   - An entry's actor is reduced to the label the panel shows (the
+ *     session label, else the client's declared name); the journal keeps
+ *     the full attribution.
+ *
+ * @coordinates-with src-tauri/src/agent_journal/commands_history.rs — the commands
+ * @module services/agentJournal/historyClient
+ */
+
+import type { PreparedTxn } from "./journalClient";
+import { parseJournalActor, type JournalActor } from "./journalActor";
+import type { JournalProvenancePayload } from "./unsavedProvenance";
+import { callJournal, isDecimal, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
+
+/** What a restore puts back: a revision, an uncommitted entry's preimage, or a pre-journal checkpoint. */
+export type RestoreSource =
+  | { from: "revision"; revision: string }
+  | { from: "uncommittedPreimage"; txn: string }
+  | { from: "legacyCheckpoint"; legacyId: string };
+
+export interface RestorePrepareInput {
+  /** `path:<file>` or `tab:<window>/<tab>` (see `documentIdentity.ts`). */
+  docKey: string;
+  /** The revision the tab last learned from the journal, or `null`. */
+  parent: string | null;
+  /** The buffer the restore overwrites; recorded first when unjournaled. */
+  preimage: string;
+  source: RestoreSource;
+  baselineProvenance: JournalProvenancePayload | null;
+  baselineTouched: boolean;
+}
+
+export interface PreparedRestore extends PreparedTxn {
+  /** The text to apply. */
+  text: string;
+  /** The uncommitted transaction the restore resolves, if any. */
+  resolves: string | null;
+}
+
+export interface UncommittedEntry {
+  txn: string;
+  /** Who made the write, in full: the panel shows every part apart. */
+  actor: JournalActor;
+  tool: string;
+  /** Journal order, decimal string. */
+  seq: string;
+  /** The start of the text the write found. */
+  preview: string;
+  /** Whether `preview` is the whole text. */
+  complete: boolean;
+}
+
+/** Prepare a restore. Rejects with a `JournalRefusal`. */
+export async function prepareRestore(input: RestorePrepareInput): Promise<PreparedRestore> {
+  const command = "agent_journal_restore_prepare";
+  const r = await callJournal(command, { payload: JSON.stringify(input) });
+  const prepared = parsePreparedTxn(command, r);
+  if (!isObject(r) || typeof r.text !== "string" || !isNullableString(r.resolves)) throw malformed(command);
+  return { ...prepared, text: r.text, resolves: r.resolves };
+}
+
+function entryOf(command: string, row: unknown): UncommittedEntry {
+  if (!isObject(row)) throw malformed(command);
+  const actor = parseJournalActor(row.actor);
+  if (
+    !isString(row.txn) ||
+    actor === undefined ||
+    !isString(row.tool) ||
+    !isDecimal(row.seq) ||
+    typeof row.preview !== "string" ||
+    typeof row.complete !== "boolean"
+  ) {
+    throw malformed(command);
+  }
+  return { txn: row.txn, actor, tool: row.tool, seq: row.seq, preview: row.preview, complete: row.complete };
+}
+
+/** A document's uncommitted entries, oldest first. Rejects with a `JournalRefusal`. */
+export async function listUncommitted(docKey: string): Promise<UncommittedEntry[]> {
+  const command = "agent_journal_uncommitted";
+  const r = await callJournal(command, { payload: JSON.stringify({ docKey }) });
+  if (!Array.isArray(r)) throw malformed(command);
+  return r.map((row) => entryOf(command, row));
+}
+
+/** Discard one uncommitted entry. `durable: false` = queued. Rejects with a `JournalRefusal`. */
+export async function discardUncommitted(docKey: string, txn: string): Promise<{ durable: boolean }> {
+  const command = "agent_journal_discard";
+  const r = await callJournal(command, { payload: JSON.stringify({ docKey, txn }) });
+  if (!isObject(r) || typeof r.durable !== "boolean") throw malformed(command);
+  return { durable: r.durable };
+}

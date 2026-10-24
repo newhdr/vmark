@@ -113,6 +113,11 @@ vmark-mcp-server --version      # print version, exit 0
 vmark-mcp-server --health-check # self-test without VMark, print JSON, exit 0/1
 ```
 
+Any other argument (a misspelled flag, `--port=9223`, a stray word) is a usage
+error: the binary exits 64 instead of falling back to port discovery. Every
+argument is checked before any mode runs, so `--version --prot 9223` exits 64
+too rather than printing the version.
+
 `--health-check` builds the server against a stub bridge and verifies the tool
 count matches `EXPECTED_TOOL_COUNT`, so a stale build is caught before a user
 reports missing tools:
@@ -138,14 +143,14 @@ reports missing tools:
 | `portResolver` | *(none)* | Called on each connect attempt to resolve the port. |
 | `authTokenResolver` | *(none)* | Called on each connect attempt for the handshake token. |
 | `timeout` | `10000` | **Connect and auth-handshake** timeout in ms — not the request timeout. |
-| `requestTimeout` | `25000` | Per-request timeout in ms. Must exceed the Rust bridge's 20 s wake-and-retry worst case, or a recovered write is reported to the client as a timeout. |
+| `requestTimeout` | `25000` | Per-request timeout in ms. Must exceed the Rust bridge's 20 s wake-and-retry worst case, or a recovered write is reported to the client as a timeout. That 20 s bounds the two window-response waits, not time queued behind another write: a timeout does not cancel a mutation, which may already have succeeded or may succeed later. Re-read before retrying; an immediate re-read does not establish that queued work has finished. |
 | `autoReconnect` | `true` | Reconnect on disconnect. |
 | `maxReconnectAttempts` | `10` | Attempt budget; a `send()` arriving on a fully idle loop resets it. |
 | `reconnectDelay` | `1000` | Base backoff in ms. |
 | `maxReconnectDelay` | `30000` | Backoff ceiling in ms. |
 | `maxRequestsPerSecond` | `100` | Token-bucket rate limit. `0` disables it. |
 | `queueWhileDisconnected` | `false` | Buffer requests while reconnecting. |
-| `maxQueueSize` | `100` | Queue capacity (floored at 1). |
+| `maxQueueSize` | `100` | Queue capacity. Must be a positive integer: `0`, negatives, fractions and `NaN` throw a `RangeError` from `resolveBridgeConfig` rather than being clamped. |
 | `clientIdentity` | *(none)* | `{name, version, pid, parentProcess}` sent to VMark after connect. |
 | `logger` | silent | `{debug, info, warn, error}`. |
 
@@ -204,14 +209,19 @@ including its ADR-7, which is why `selection` came back.
 | `new` | Create an untitled tab. Args `{kind?, windowLabel?}` → `{tabId}`. |
 | `open` | Open a **file** from disk. Args `{filePath, windowLabel?}` → `{tabId}`. |
 | `open_workspace` | Open a **folder** as the active workspace. Args `{folderPath}`. Requires user approval: the first call fails with an "approval required to open workspace" error; ask the user, then retry the same call. |
-| `save` | Save a tab to its existing path. Args `{tabId?}` → `{filePath, revision}`. |
-| `save_as` | Save a tab to a new path. Args `{tabId?, filePath}` → `{revision}`. |
+| `save` | Save a tab to its existing path. Args `{tabId?}` → `{filePath, revision, journaled}`. |
+| `save_as` | Save a tab to a new path. Args `{tabId?, filePath}` → `{revision, journaled}`. Never replaces a file other than the tab's own: a destination that already holds one — even one created while the save was in flight — is refused with `APPROVAL_REQUIRED`, and that file keeps its contents. |
 | `close` | Close a document tab. Args `{tabId, force?}`. Without `force: true`, refuses unsaved work with `{closed: false, reason: "DIRTY"}` or `"DIVERGENT"` (the user kept the tab's version over a change on disk); a pinned tab is refused even with `force`, `{closed: false, reason: "PINNED"}`. A browser tab is an `INVALID_TAB` error. |
 | `switch_tab` | Activate a tab. Args `{tabId}`. |
 | `focus_window` | Focus a window. Args `{windowLabel}`. |
 
 Paths are validated non-blank but never trimmed — a trailing space is a legal
 POSIX filename character, and trimming would retarget the write.
+
+`save_as` checks the path again when its save's turn comes in the queue of
+saves to that file: a path that has left the scope by then (for example, the
+workspace was closed while the save waited) is refused with `INVALID_PATH`,
+and nothing is written.
 
 ### `document` — read/write spine (3 actions)
 
@@ -226,10 +236,47 @@ both updated), or `saved: false` with exactly one of `save_skipped`
 (`"untitled"` — call `workspace.save_as`; or `"opt_out"` — you passed
 `save: false`) and `save_error` (the filesystem rejected it; do not retry).
 
+If the tab is closed after `write` changed it but before the save ran, the
+reply is `saved: false` with a `save_error` saying the tab was closed; nothing
+is written to the path the tab held.
+
+Every `write` is recorded in VMark's agent edit journal before anything
+changes, and a success also carries `applied: true` and `durable`.
+`durable: false` means the content was written but its journal record is still
+queued; VMark retries it in the background, and until it lands the next write
+to that document is refused with `JOURNAL_DEGRADED`. If the journal refuses
+the record outright, the write stays applied, is logged as unrecorded, and the
+next write goes ahead. A write is refused,
+changing nothing, with `JOURNAL_BUSY` (another write to the same document is
+being recorded — two windows showing one file share one document; retry
+shortly), `STALE_PARENT` (another window wrote the document after this tab
+last did; re-read and retry), `JOURNAL_UNAVAILABLE` (the journal is not
+running), `INVALID_TEXT` (`content` holds a lone UTF-16 surrogate) or
+`REVIEW_BACKLOG_FULL`. If the user edits the document, closes the tab, starts
+composing with an input method or moves the selection (or switches tabs, when
+no `tabId` was given) while the write is being recorded, it is refused with
+`ABORTED` and a `reason` (`edited`, `closed`, `composing`, `selection`).
+These refusals are plain error results whose text is the envelope. An
+`INTERNAL` error that carries `applied: true` is not a refusal: the editor
+failed after the write changed the document, the text it then held was
+recorded (`durable` as above, `current_revision` the document's revision) —
+re-read before writing again. An `INTERNAL` error without `applied` after a
+failed apply means the document may be partly changed.
+
+`document.transform`, `selection.set` and `workflow.apply_patch` are recorded
+the same way: success carries `applied` and `durable`, and the same journal
+refusals apply. A call that changes nothing is not recorded.
+
 Every save a client makes — `document.write`, `workspace.save`,
 `workspace.save_as` — runs VMark's own save pipeline and is filed in the
 document's version history as an `mcp` snapshot. It is kept as a manual save
 is: never merged into a neighbouring autosave, never skipped for its size.
+
+Each save reply also carries `journaled` (on `write`, only when a save ran):
+`"yes"` — VMark's agent edit journal recorded the saved text; `"pending"` —
+recorded, and ordered into the document's history once a write still being
+recorded finishes; `"no"` — the file is saved, but the journal did not record
+it. A save is never an error because of the journal.
 
 ### `workflow` — GitHub Actions YAML (2 actions)
 

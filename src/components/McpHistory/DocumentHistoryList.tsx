@@ -1,0 +1,218 @@
+/**
+ * Document history list — the focused document's revisions, newest first:
+ * who made each one, its kind and tool, the two restore actions, and the
+ * changes whose automatic revert is blocked, shown under the revision they
+ * were last certified at.
+ *
+ * Key decisions:
+ *   - "Restore this version" restores the row's own revision; "Restore to
+ *     before this change" restores its parent. Neither is offered for text
+ *     retention collected, and the second not for the first revision (its
+ *     parent is the empty document, which the journal does not keep) nor
+ *     for a parent the list does not show (truncated: whether its text is
+ *     kept is unknown, so the button would be a guess).
+ *   - A save recorded with an initiator other than its author (an agent's
+ *     `workspace.save` of the user's text) names both: the author, then
+ *     "Requested by" the initiator.
+ *   - A blocked hunk reads "Blocked: reason (origin)" on its `lastCertified`
+ *     row, which is highlighted. With no `lastCertified`, or one older than
+ *     the rows shown, the panel says the location is unavailable rather than
+ *     guessing one.
+ *   - Restores go through `restoreFromHistory`, one at a time; a second
+ *     click while one is in flight is ignored. A restore the editor failed
+ *     after applying warns (restored, check the document); one that could
+ *     not be confirmed says the document stays locked for agent edits until
+ *     VMark restarts. Neither is reported as "restore failed".
+ *
+ * @coordinates-with services/agentJournal/docHistoryClient.ts — the rows
+ * @coordinates-with services/agentJournal/historyRestore.ts — the restore
+ * @coordinates-with components/McpHistory/historyLabels.ts — the words
+ * @coordinates-with components/McpHistory/restoreVerdict.ts — the restore outcome
+ * @module components/McpHistory/DocumentHistoryList
+ */
+
+import { useCallback, useRef } from "react";
+import { RotateCcw, Undo2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { ICON_SM } from "@/utils/iconSizes";
+import { imeToast as toast } from "@/services/ime/imeToast";
+import type { BlockedHunk, DocumentHistory, HistoryRow } from "@/services/agentJournal/docHistoryClient";
+import { restoreFromHistory } from "@/services/agentJournal/historyRestore";
+import type { JournalActor } from "@/services/agentJournal/journalActor";
+import { journalWarn } from "@/utils/debug";
+import { ActorLabel } from "./ActorLabel";
+import { breakReasonLabel, historyTime, kindLabel, originLabel } from "./historyLabels";
+import { classifyRestore } from "./restoreVerdict";
+
+interface Props {
+  tabId: string;
+  history: DocumentHistory | null;
+  failed: boolean;
+}
+
+function BlockedLine({ hunk }: { hunk: BlockedHunk }): React.ReactElement {
+  const { t } = useTranslation("statusbar");
+  return (
+    <span className="mcp-history-blocked">
+      {t("mcpHistoryBlocked", { reason: breakReasonLabel(hunk.reason, t), origin: originLabel(hunk.origin, t) })}
+    </span>
+  );
+}
+
+/** Blocked hunks under the shown revision they were last certified at, and those with no shown location. */
+function placeBlocked(
+  blocked: readonly BlockedHunk[],
+  shown: ReadonlySet<string>,
+): { anchored: Map<string, BlockedHunk[]>; orphans: BlockedHunk[] } {
+  const anchored = new Map<string, BlockedHunk[]>();
+  const orphans: BlockedHunk[] = [];
+  for (const hunk of blocked) {
+    if (hunk.lastCertified !== null && shown.has(hunk.lastCertified)) {
+      anchored.set(hunk.lastCertified, [...(anchored.get(hunk.lastCertified) ?? []), hunk]);
+    } else orphans.push(hunk);
+  }
+  return { anchored, orphans };
+}
+
+/** Restore one revision of the tab, one restore at a time, reporting the outcome. */
+function useHistoryRestore(tabId: string): (revision: string) => Promise<void> {
+  const { t } = useTranslation("statusbar");
+  const busy = useRef(false);
+  return useCallback(
+    async (revision: string) => {
+      if (busy.current) return;
+      busy.current = true;
+      try {
+        const out = await restoreFromHistory(tabId, { from: "revision", revision }).catch((error: unknown) => {
+          journalWarn("history restore failed:", error);
+          return null;
+        });
+        const verdict = classifyRestore(out);
+        if (verdict.kind === "problem") toast[verdict.tone](t(verdict.key));
+        else if (verdict.changed) toast.success(t("mcpHistoryRestoredVersion"));
+        else toast.error(t("mcpHistoryRestoreNoop"));
+      } finally {
+        busy.current = false;
+      }
+    },
+    [tabId, t],
+  );
+}
+
+/** The same recorded actor — an initiator equal to the author adds nothing. */
+const sameActor = (a: JournalActor, b: JournalActor): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+interface RowProps {
+  row: HistoryRow;
+  /** The parent "Restore to before" puts back, or null when none can be. */
+  before: string | null;
+  hunks: BlockedHunk[] | undefined;
+  onRestore: (revision: string) => Promise<void>;
+}
+
+function RevisionRow({ row: r, before, hunks, onRestore }: RowProps): React.ReactElement {
+  const { t } = useTranslation("statusbar");
+  const time = historyTime(r.at);
+  return (
+    <li
+      data-testid={`history-row-${r.revision}`}
+      data-blocked={hunks ? "true" : undefined}
+      className="mcp-history-popover__row"
+    >
+      <div className="mcp-history-popover__row-meta">
+        {time && (
+          <time className="mcp-history-popover__time" dateTime={time.iso}>
+            {time.text}
+          </time>
+        )}
+        <span>{kindLabel(r.kind, t)}</span>
+        {r.restore && <span className="mcp-history-popover__tag">{t("mcpHistoryRestoreTag")}</span>}
+        {r.tool && <code className="mcp-history-popover__tool">{r.tool}</code>}
+      </div>
+      <ActorLabel actor={r.actor} />
+      {r.initiator && !sameActor(r.initiator, r.actor) && (
+        <div className="mcp-history-popover__note">
+          {t("mcpHistoryRequestedBy")} <ActorLabel actor={r.initiator} />
+        </div>
+      )}
+      {hunks?.map((hunk) => <BlockedLine key={hunk.hunkId} hunk={hunk} />)}
+      <div className="mcp-history-popover__actions">
+        {r.collected ? (
+          <span className="mcp-history-popover__note">{t("mcpHistoryTextCollected")}</span>
+        ) : (
+          <button
+            type="button"
+            className="popup-icon-btn"
+            onClick={() => void onRestore(r.revision)}
+            title={t("mcpHistoryRestoreVersion")}
+            aria-label={t("mcpHistoryRestoreVersion")}
+          >
+            <RotateCcw size={ICON_SM} />
+          </button>
+        )}
+        {before !== null && (
+          <button
+            type="button"
+            className="popup-icon-btn"
+            onClick={() => void onRestore(before)}
+            title={t("mcpHistoryRestoreBefore")}
+            aria-label={t("mcpHistoryRestoreBefore")}
+          >
+            <Undo2 size={ICON_SM} />
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+export function DocumentHistoryList({ tabId, history, failed }: Props): React.ReactElement | null {
+  const { t } = useTranslation("statusbar");
+  const onRestore = useHistoryRestore(tabId);
+
+  if (history === null) {
+    return failed ? <p className="mcp-history-popover__empty">{t("mcpHistoryUnavailable")}</p> : null;
+  }
+
+  const byRevision = new Map(history.rows.map((r) => [r.revision, r]));
+  const { anchored, orphans } = placeBlocked(history.blocked, new Set(byRevision.keys()));
+  /** The parent "Restore to before" puts back, when its row is listed and its text still kept.
+   *  @edge-case A parent beyond a truncated list is not offered: whether it was collected is unknown. */
+  const restorableParent = (r: HistoryRow): string | null =>
+    r.parent !== null && byRevision.get(r.parent)?.collected === false ? r.parent : null;
+
+  return (
+    <section className="mcp-history-section" aria-label={t("mcpHistoryRevisionsTitle")}>
+      <div className="mcp-history-section__title">{t("mcpHistoryRevisionsTitle")}</div>
+      {failed && <p className="mcp-history-popover__empty">{t("mcpHistoryUnavailable")}</p>}
+      {orphans.length > 0 && (
+        <div className="mcp-history-blocked-group">
+          <div className="mcp-history-blocked-group__title">{t("mcpHistoryBlockedNoLocation")}</div>
+          <ul aria-label={t("mcpHistoryBlockedNoLocation")}>
+            {orphans.map((hunk) => (
+              <li key={hunk.hunkId}>
+                <BlockedLine hunk={hunk} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {history.rows.length === 0 ? (
+        <p className="mcp-history-popover__empty">{t("mcpHistoryNoRevisions")}</p>
+      ) : (
+        <ol className="mcp-history-popover__list" aria-label={t("mcpHistoryRevisionsTitle")}>
+          {history.rows.map((r) => (
+            <RevisionRow
+              key={r.revision}
+              row={r}
+              before={restorableParent(r)}
+              hunks={anchored.get(r.revision)}
+              onRestore={onRestore}
+            />
+          ))}
+        </ol>
+      )}
+      {history.truncated && <p className="mcp-history-popover__note">{t("mcpHistoryTruncated")}</p>}
+    </section>
+  );
+}

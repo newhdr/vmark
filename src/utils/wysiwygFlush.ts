@@ -12,6 +12,10 @@
  *     multiple mounted tabs) is synced to the document store before dirty
  *     content is collected, not just the focused one.
  *
+ * `flushAllWysiwygNow` is best-effort and swallows a flusher's failure;
+ * `flushWysiwygNow` flushes one editor and reports it, for a caller that must
+ * know the store now holds that editor's text.
+ *
  * @module utils/wysiwygFlush
  */
 
@@ -57,4 +61,17 @@ export function flushAllWysiwygNow() {
       // Best-effort: one editor failing to flush must not block the rest.
     }
   }
+}
+
+/**
+ * Immediately invoke the keyed flusher registered for `key`, and report its
+ * failure: a flusher's error is rethrown, and a key with no flusher throws,
+ * because nothing brought the store up to that editor's text. For a caller
+ * that has just changed that editor and must not report the store as current
+ * unless it is.
+ */
+export function flushWysiwygNow(key: string): void {
+  const flusher = keyedFlushers.get(key);
+  if (!flusher) throw new Error(`no WYSIWYG flusher is registered for ${key}`);
+  flusher();
 }

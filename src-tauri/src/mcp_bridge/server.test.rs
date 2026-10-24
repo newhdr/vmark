@@ -109,6 +109,7 @@ async fn register_test_client_as(
             shutdown: None,
             identity: None,
             principal,
+            connection_id: uuid::Uuid::new_v4(),
         },
     );
     rx
@@ -492,6 +493,7 @@ async fn stop_bridge_signals_the_loop_drains_every_client_and_answers_every_pend
             shutdown: Some(client_shutdown_tx),
             identity: None,
             principal: BridgePrincipal::Anonymous,
+            connection_id: uuid::Uuid::new_v4(),
         },
     );
 

@@ -30,6 +30,12 @@ vi.mock("@/services/menu/conditionalMenuItemSync", () => ({
 vi.mock("@/services/windowClose/tabCleanup", () => ({
   startTabStateCleanup: service("tabCleanup"),
 }));
+vi.mock("@/services/agentJournal/provenanceSessions", () => ({
+  startProvenanceSessions: service("provenance"),
+}));
+vi.mock("@/services/agentJournal/recordingReport", () => ({
+  startRecordingLifetimes: service("recordingLifetimes"),
+}));
 vi.mock("@/utils/debug", () => ({ appError: vi.fn() }));
 
 import { startRuntimeServices } from "./runtimeWiring";
@@ -43,12 +49,12 @@ describe("startRuntimeServices", () => {
     order.length = 0;
     const stop = startRuntimeServices();
     const starts = order.filter((e) => e.startsWith("start:"));
-    expect(starts).toHaveLength(11);
-    expect(new Set(starts).size).toBe(11);
+    expect(starts).toHaveLength(13);
+    expect(new Set(starts).size).toBe(13);
     expect(starts[0]).toBe("start:grants");
     stop();
     const stops = order.filter((e) => e.startsWith("stop:"));
-    expect(stops).toHaveLength(11);
+    expect(stops).toHaveLength(13);
     expect(stops[0]).toBe("stop:tabCleanup");
     expect(stops.at(-1)).toBe("stop:grants");
   });
@@ -56,6 +62,26 @@ describe("startRuntimeServices", () => {
   // WI-RA1B.1 — per-tab state cleanup is a consequence of tab removal only
   // while this subscriber runs. A window that does not start it leaves every
   // closed tab's document behind, silently.
+  // WI-AL1.4 — without the provenance sessions no editor edit is ever
+  // certified: every save and controlled write would be a snapshotOnly barrier.
+  it("starts the provenance sessions with the window", () => {
+    order.length = 0;
+    const stop = startRuntimeServices();
+    expect(order).toContain("start:provenance");
+    stop();
+    expect(order).toContain("stop:provenance");
+  });
+
+  // WI-AL1.7 — without it a closed document's "history not recorded" entry
+  // is never retired, so the store grows with every document ever reported.
+  it("starts the recording lifetimes with the window", () => {
+    order.length = 0;
+    const stop = startRuntimeServices();
+    expect(order).toContain("start:recordingLifetimes");
+    stop();
+    expect(order).toContain("stop:recordingLifetimes");
+  });
+
   it("starts the tab-state cleanup with the window", () => {
     order.length = 0;
     const stop = startRuntimeServices();
@@ -99,7 +125,7 @@ describe("startRuntimeServices", () => {
     const stop = startRuntimeServices();
     expect(() => stop()).not.toThrow();
     const stops = order.filter((e) => e.startsWith("stop:"));
-    expect(stops).toHaveLength(11);
+    expect(stops).toHaveLength(13);
     expect(stops.at(-1)).toBe("stop:grants");
     expect(vi.mocked(appError)).toHaveBeenCalled();
   });

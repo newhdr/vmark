@@ -16,6 +16,8 @@ rust_i18n::i18n!("locales", fallback = "en");
 #[macro_use]
 mod command_registry;
 mod ai_provider;
+// The agent edit journal: durable single-writer revision history in app data.
+pub mod agent_journal;
 mod app_paths;
 mod app_plugins;
 mod app_setup;
@@ -151,6 +153,9 @@ fn manage_state<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder
         .manage(workspace::grants::WorkspaceGrants::default())
         // Serializes terminal-transcript CLI hook configuration writes.
         .manage(terminal_transcript::TranscriptConfigState::default())
+        // The agent edit journal. Empty until `setup_app`'s startup thread
+        // opens it; a failed open leaves it empty and says why.
+        .manage(agent_journal::service::AgentJournalState::default())
 }
 
 /// Build and run the Tauri application with all plugins, commands, and event handlers.

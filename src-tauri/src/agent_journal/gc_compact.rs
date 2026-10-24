@@ -1,0 +1,186 @@
+//! Collector compaction (pure): the journal rewritten with the planned
+//! victims tombstoned, and the projection that rewrite must replay to.
+//!
+//! A victim's revision record becomes a `tombstone` with the same `seq`,
+//! `txn` and `at` (ids, parent, actor, hashes, its review op, the hunks it
+//! created and the transitions it made — replay needs both). Records that
+//! would reopen or orphan state once the revision is gone are dropped: a
+//! collected commit's `prepared`, a collected observation's
+//! `pendingObservation`, and every record of an `uncommitted` transaction
+//! a collected commit resolved (the resolution is gone with the commit).
+//! The rewrite starts with a `journalHeader` one generation past the live
+//! one, so a reader that missed the `Resync` sees a gap at its next event.
+//!
+//! `Rewrite` maps one record at a time, so the caller streams the journal
+//! through it (twice: once to replay, once to write). The caller replays
+//! the rewrite and compares it with `expected`; any difference — a victim
+//! record missing included — refuses the collection before a byte is
+//! written.
+//!
+//! @module agent_journal/gc_compact
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::agent_journal::errors::TxnError;
+use crate::agent_journal::ids::{RevisionId, TxnId};
+use crate::agent_journal::projection::{Projection, RevisionKind, RevisionMeta, TxnStatus};
+use crate::agent_journal::record::{Envelope, Record, SCHEMA_VERSION};
+use crate::agent_journal::review::{ReviewEffects, ReviewOp};
+
+/// The revision a record creates, if it is a revision record.
+pub fn revision_of(p: &Projection, env: &Envelope) -> Option<RevisionId> {
+    match &env.record {
+        Record::Committed { .. } => p.txns.get(&env.txn).map(|t| t.revision),
+        Record::ObservedRevision { revision, .. }
+        | Record::ConcurrentObservation { revision, .. }
+        | Record::Gap { revision, .. } => Some(*revision),
+        _ => None,
+    }
+}
+
+/// The record that opens a rewritten journal: one generation past the
+/// live one.
+pub fn header(floor: u64) -> Envelope {
+    Envelope {
+        schema_version: SCHEMA_VERSION,
+        seq: floor,
+        txn: TxnId(uuid::Uuid::nil()),
+        at: 0,
+        record: Record::JournalHeader {
+            generation_floor: floor,
+        },
+    }
+}
+
+/// Transactions whose every record the rewrite drops, besides the victim
+/// revision records themselves (which become tombstones). `Invariant` when
+/// a victim is not a revision the projection knows.
+fn dropped_txns(
+    p: &Projection,
+    victims: &BTreeSet<RevisionId>,
+) -> Result<BTreeSet<TxnId>, TxnError> {
+    let victim_txns = victims
+        .iter()
+        .map(|v| {
+            p.revisions
+                .get(v)
+                .map(|m| m.txn)
+                .ok_or_else(|| unknown_victim(*v))
+        })
+        .collect::<Result<BTreeSet<TxnId>, _>>()?;
+    let resolved = p.txns.iter().filter_map(|(id, t)| match t.status {
+        TxnStatus::Resolved { by } if victim_txns.contains(&by) => Some(*id),
+        _ => None,
+    });
+    let mut out: BTreeSet<TxnId> = resolved.collect();
+    out.extend(victim_txns);
+    Ok(out)
+}
+
+fn unknown_victim(rev: RevisionId) -> TxnError {
+    TxnError::Invariant(format!("victim {} is not a known revision", rev.0))
+}
+
+/// The live journal's records rewritten one at a time with the victims
+/// collected, owning what it needs of the projection (a victim's revision
+/// record is the one revision record of its transaction).
+pub struct Rewrite {
+    victims: BTreeMap<TxnId, RevisionMeta>,
+    dropped: BTreeSet<TxnId>,
+}
+
+impl Rewrite {
+    /// # Errors
+    /// `Invariant` when a victim is not a revision the projection knows.
+    pub fn new(p: &Projection, victims: &BTreeSet<RevisionId>) -> Result<Self, TxnError> {
+        let dropped = dropped_txns(p, victims)?;
+        let victims = victims
+            .iter()
+            .map(|v| {
+                let m = p.revisions.get(v).ok_or_else(|| unknown_victim(*v))?;
+                Ok((m.txn, m.clone()))
+            })
+            .collect::<Result<_, TxnError>>()?;
+        Ok(Rewrite { victims, dropped })
+    }
+
+    /// `env` as the rewrite keeps it: tombstoned, dropped (`None`) or as
+    /// it is. A journal header is the caller's to replace.
+    ///
+    /// # Errors
+    /// `Invariant` when a victim's transaction has a record that is not
+    /// one the collector drops or tombstones.
+    pub fn map(&self, env: Envelope) -> Result<Option<Envelope>, TxnError> {
+        let Some(m) = self.victims.get(&env.txn) else {
+            return Ok((!self.dropped.contains(&env.txn)).then_some(env));
+        };
+        let effects: &ReviewEffects = match &env.record {
+            Record::Committed { effects, .. } => effects,
+            Record::ObservedRevision {
+                revision, effects, ..
+            }
+            | Record::ConcurrentObservation {
+                revision, effects, ..
+            }
+            | Record::Gap {
+                revision, effects, ..
+            } if *revision == m.id => effects,
+            Record::Prepared { .. } | Record::PendingObservation { .. } => return Ok(None),
+            _ => {
+                return Err(TxnError::Invariant(
+                    "victim is not a revision record".into(),
+                ))
+            }
+        };
+        Ok(Some(tombstone(m, &env, effects)))
+    }
+}
+
+fn tombstone(m: &RevisionMeta, env: &Envelope, effects: &ReviewEffects) -> Envelope {
+    let attached_to = match &m.review_op {
+        ReviewOp::HunkRevert { hunk_id, .. } => Some(hunk_id.clone()),
+        _ => None,
+    };
+    Envelope {
+        schema_version: SCHEMA_VERSION,
+        seq: env.seq,
+        txn: env.txn,
+        at: env.at,
+        record: Record::Tombstone {
+            doc: m.doc,
+            revision: m.id,
+            parent: m.parent,
+            actor: m.actor.clone(),
+            preimage: m.preimage.clone(),
+            postimage: m.postimage.clone(),
+            review_op: m.review_op.clone(),
+            hunks: effects.new_hunks.clone(),
+            transitions: effects.transitions.clone(),
+            attached_to,
+        },
+    }
+}
+
+/// The projection the rewrite must replay to: the live one with the
+/// victims tombstoned and the dropped transactions and observations gone.
+///
+/// # Errors
+/// `Invariant` when a victim is not a revision the projection knows.
+pub fn expected(
+    p: &Projection,
+    victims: &BTreeSet<RevisionId>,
+    floor: u64,
+) -> Result<Projection, TxnError> {
+    let dropped = dropped_txns(p, victims)?;
+    let mut e = p.clone();
+    e.generation = floor;
+    for v in victims {
+        if let Some(m) = e.revisions.get_mut(v) {
+            m.collected = true;
+            m.kind = RevisionKind::Tombstone;
+        }
+    }
+    e.txns.retain(|id, _| !dropped.contains(id));
+    e.observations.retain(|id, _| !dropped.contains(id));
+    Ok(e)
+}

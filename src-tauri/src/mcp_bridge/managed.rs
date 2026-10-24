@@ -25,7 +25,7 @@ use super::principal::BridgePrincipal;
 use super::state::{BridgeState, ClientConnection};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{AppHandle, Manager, Runtime};
-use tokio::sync::{oneshot, Mutex, MutexGuard};
+use tokio::sync::{oneshot, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 
 /// Shared bridge state, held by the Tauri app for the life of the process.
 pub struct McpBridgeState {
@@ -61,6 +61,11 @@ pub struct McpBridgeState {
     /// start generation — which used to be three statics in `control.rs`
     /// (audit 20260907 #177).
     lifecycle: BridgeLifecycle,
+    /// Rust-answered operations in flight: each holds a read lease from
+    /// admission to completion (`admit_operation`), and `stop_bridge` takes
+    /// the write side after draining, so it completes only after every
+    /// operation admitted before the drain — and none admitted after it.
+    operations: RwLock<()>,
 }
 
 impl Default for McpBridgeState {
@@ -75,6 +80,7 @@ impl Default for McpBridgeState {
             webview_alive: AtomicBool::new(true),
             connection_generation: AtomicU64::new(0),
             lifecycle: BridgeLifecycle::default(),
+            operations: RwLock::new(()),
         }
     }
 }
@@ -165,6 +171,26 @@ impl McpBridgeState {
 }
 
 impl McpBridgeState {
+    /// Admit one Rust-answered operation for `client_id`: a lease held until
+    /// the operation finishes, or `None` when the client is gone (a stop
+    /// drained it). The lease is taken BEFORE the liveness check, so a stop
+    /// that drains after the check waits for the operation
+    /// ([`Self::await_operations`]), and one that drained before it refuses.
+    pub(crate) async fn admit_operation(&self, client_id: u64) -> Option<RwLockReadGuard<'_, ()>> {
+        let lease = self.operations.read().await;
+        self.lock()
+            .await
+            .clients
+            .contains_key(&client_id)
+            .then_some(lease)
+    }
+
+    /// Wait until every admitted operation has finished. `stop_bridge` calls
+    /// it after draining the clients, so no new operation can be admitted.
+    pub(crate) async fn await_operations(&self) {
+        drop(self.operations.write().await);
+    }
+
     /// Forget everything keyed by a destroyed window's label. Its webview
     /// dies without clearing its own workspace registration.
     pub(crate) async fn forget_window(&self, label: &str) {
@@ -185,3 +211,8 @@ pub(crate) fn bridge<R: Runtime>(app: &AppHandle<R>) -> &McpBridgeState {
 #[cfg(test)]
 #[path = "managed.test.rs"]
 mod tests;
+
+// Mock-runtime tests: `tauri::test` does not exist on Windows.
+#[cfg(all(test, not(target_os = "windows")))]
+#[path = "operation_lease.test.rs"]
+mod operation_lease_tests;

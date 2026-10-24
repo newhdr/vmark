@@ -29,6 +29,7 @@ import { createWorkspaceInstance, createWorkspaceRootIdentity } from "@/utils/wo
 import { saveToPath, saveToPathForMcp } from "./saveToPath";
 import { __resetSerializer } from "./serializeByPath";
 import { resetSaveTargetClaims } from "./saveTargetClaim";
+import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
 
 const DOC = `${ROOT}/notes.md`;
 const BOM = "\u{FEFF}";
@@ -64,9 +65,9 @@ describe("saveToPathForMcp reports how the save ended", () => {
     const tabId = await openDocInTab(DOC, `${BOM}一\r\n二\r\n`);
     editDoc(tabId, "一\n二\n三\n");
 
-    const outcome = await saveToPathForMcp(tabId, DOC, "一\n二\n三\n", "document.write");
+    const outcome = await saveToPathForMcp(tabId, DOC, "一\n二\n三\n", "document.write", TEST_ATTRIBUTION);
 
-    expect(outcome).toEqual({ ok: true, written: `${BOM}一\r\n二\r\n三\r\n` });
+    expect(outcome).toMatchObject({ ok: true, written: `${BOM}一\r\n二\r\n三\r\n`, journaled: "yes" });
     expect(statefulFs.read(DOC)).toBe(`${BOM}一\r\n二\r\n三\r\n`);
   });
 
@@ -75,7 +76,7 @@ describe("saveToPathForMcp reports how the save ended", () => {
     const toasts = spyOnToasts();
     statefulFs.failWrites({ code: "not-found", message: "parent missing", detail: { dir: ROOT } });
 
-    const outcome = await saveToPathForMcp(tabId, DOC, "after\n", "workspace.save");
+    const outcome = await saveToPathForMcp(tabId, DOC, "after\n", "workspace.save", TEST_ATTRIBUTION);
 
     expect(outcome).toEqual({ ok: false, reason: "parent-missing", dir: ROOT });
     expect(doc(tabId).isMissing).toBe(true);
@@ -89,7 +90,7 @@ describe("saveToPathForMcp reports how the save ended", () => {
     const rejection = { code: "io", message: "disk quota exceeded" };
     statefulFs.failWrites(rejection);
 
-    const outcome = await saveToPathForMcp(tabId, DOC, "after\n", "workspace.save");
+    const outcome = await saveToPathForMcp(tabId, DOC, "after\n", "workspace.save", TEST_ATTRIBUTION);
 
     expect(outcome.ok).toBe(false);
     // The same object, untouched: the bridge renders a typed error from it.
@@ -114,7 +115,7 @@ describe("saveToPathForMcp reports how the save ended", () => {
     useDocumentStore.getState().setEditorContent("tab-elsewhere", "their unsaved edit\n");
     const toasts = spyOnToasts();
 
-    const outcome = await saveToPathForMcp(tabId, DOC, "after\n", "document.write");
+    const outcome = await saveToPathForMcp(tabId, DOC, "after\n", "document.write", TEST_ATTRIBUTION);
 
     expect(outcome).toMatchObject({ ok: false, reason: "ownership-conflict" });
     const conflicts = (outcome as { conflicts: Array<{ tabId: string; windowLabel: string }> }).conflicts;
@@ -140,7 +141,7 @@ describe("what an MCP save does not inherit from a human save", () => {
     const tabId = await openDocInTab(DOC, "before\n");
     editDoc(tabId, "after\n");
 
-    await saveToPathForMcp(tabId, DOC, "after\n", "workspace.save");
+    await saveToPathForMcp(tabId, DOC, "after\n", "workspace.save", TEST_ATTRIBUTION);
 
     expect(doc(tabId).isDirty).toBe(false);
     expect(doc(tabId).lastAutoSave).toBeNull();
@@ -181,7 +182,7 @@ describe("what an MCP save does not inherit from a human save", () => {
     it("an MCP Save As reclassifies the tab but never switches the visible workspace", async () => {
       const tabId = activeTabInWorkspaceA();
 
-      const outcome = await saveToPathForMcp(tabId, "/repo-b/final.md", "draft\n", "workspace.save_as");
+      const outcome = await saveToPathForMcp(tabId, "/repo-b/final.md", "draft\n", "workspace.save_as", TEST_ATTRIBUTION);
 
       expect(outcome.ok).toBe(true);
       expect(useWorkspaceInstancesStore.getState().instances["wsi-b"].tabIds).toContain(tabId);

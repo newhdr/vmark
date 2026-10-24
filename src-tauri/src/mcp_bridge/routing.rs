@@ -5,12 +5,12 @@
 //! Rust can handle natively without involving the webview.
 
 use super::delivery::fail_pending;
+use super::live_emit::{emit_while_live, LiveEmit};
 use super::managed::bridge;
 use super::principal::BridgePrincipal;
 use super::types::{McpRequest, McpRequestEvent, McpResponse};
 use crate::coherence::commands::CoherenceState;
 use tauri::AppHandle;
-use tauri::Emitter;
 use tauri::Manager;
 use tauri::Runtime;
 use tokio::sync::mpsc::Sender;
@@ -41,10 +41,13 @@ pub(super) async fn wake_webview<R: Runtime>(app: &AppHandle<R>, target_label: &
     }
 }
 
-/// Emit a routed request to its target window. If the window vanished
-/// (a close raced the routing snapshot) or the emit failed, clean up the
-/// pending entry and reply to the client with the error. Returns `false`
-/// when it has already replied — the caller returns.
+/// Emit a routed request to its target window, only while it is still
+/// pending for its connected client (`live_emit`). If the window vanished
+/// (a close raced the routing snapshot), the client disconnected or the emit
+/// failed, clean up the pending entry and reply to the client with the
+/// error. Returns `false` when it has already replied — the caller returns.
+/// A request a stop already drained is not sent; `true` lets the caller
+/// collect stop's answer from the request's own channel.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn emit_to_window_or_reply<R: Runtime>(
     app: &AppHandle<R>,
@@ -56,24 +59,19 @@ pub(super) async fn emit_to_window_or_reply<R: Runtime>(
     client_tx: &Sender<String>,
     msg_id: &str,
 ) -> bool {
-    let outcome = match app.get_webview_window(target_label) {
-        Some(window) => {
-            log::debug!(
-                "[MCP Bridge] Emitting mcp-bridge:request to {target_label:?} for {} (id: {})",
-                crate::peer_text::peer_text(request_type),
-                crate::peer_text::peer_text(request_id)
-            );
-            window
-                .emit("mcp-bridge:request", event)
-                .map_err(|e| format!("Failed to emit event: {e}"))
-        }
-        None => Err(format!("Target window '{target_label}' not found")),
+    log::debug!(
+        "[MCP Bridge] Emitting mcp-bridge:request to {target_label:?} for {} (id: {})",
+        crate::peer_text::peer_text(request_type),
+        crate::peer_text::peer_text(request_id)
+    );
+    let err = match emit_while_live(app, target_label, event, client_id).await {
+        LiveEmit::Sent | LiveEmit::Settled => return true,
+        LiveEmit::ClientGone => "Client disconnected".to_string(),
+        LiveEmit::NoWindow => format!("Target window '{target_label}' not found"),
+        LiveEmit::Failed(e) => format!("Failed to emit event: {e}"),
     };
-    if let Err(err) = outcome {
-        fail_pending(bridge(app), request_id, client_id, client_tx, msg_id, &err).await;
-        return false;
-    }
-    true
+    fail_pending(bridge(app), request_id, client_id, client_tx, msg_id, &err).await;
+    false
 }
 
 /// F5: resolve the target window for a frontend-routed request,
@@ -228,16 +226,32 @@ pub(super) use super::coherence_answers::answer_coherence;
 
 /// The server's single Rust-terminal entry: coherence requests take the
 /// off-loop path below; everything else stays the synchronous
-/// `handle_rust_side` dispatch.
+/// `handle_rust_side` dispatch. Either runs only under an operation lease
+/// for a still-connected `client_id` (`McpBridgeState::admit_operation`),
+/// taken at the moment it would start, so a stop that drained the client
+/// first refuses it and a later stop waits for it.
 pub(super) async fn answer_rust_side<R: Runtime>(
     request: &McpRequest,
     app: &tauri::AppHandle<R>,
     principal: BridgePrincipal,
+    client_id: u64,
 ) -> Option<McpResponse> {
     if request.request_type.starts_with("vmark.coherence.") {
-        return Some(answer_coherence_async(request, app, principal).await);
+        return Some(answer_coherence_async(request, app, principal, client_id).await);
     }
+    let Some(_lease) = bridge(app).admit_operation(client_id).await else {
+        return Some(bridge_stopped());
+    };
     handle_rust_side(request, app, &principal)
+}
+
+/// The answer to an operation a stop got to first.
+fn bridge_stopped() -> McpResponse {
+    McpResponse {
+        success: false,
+        data: None,
+        error: Some("Bridge stopped".to_string()),
+    }
 }
 
 /// Async dispatch for coherence requests.
@@ -250,6 +264,7 @@ async fn answer_coherence_async<R: Runtime>(
     request: &McpRequest,
     app: &tauri::AppHandle<R>,
     principal: BridgePrincipal,
+    client_id: u64,
 ) -> McpResponse {
     // Mutations (resolve) serialize with document writes, like edges.
     let _write_guard = if request.request_type == "vmark.coherence.edges"
@@ -258,6 +273,11 @@ async fn answer_coherence_async<R: Runtime>(
         Some(bridge(app).write_lock().await)
     } else {
         None
+    };
+    // Admitted AFTER the write-lock wait, which can outlast a stop; the
+    // lease is held through the blocking work.
+    let Some(_lease) = bridge(app).admit_operation(client_id).await else {
+        return bridge_stopped();
     };
     let app_clone = app.clone();
     let request_clone = request.clone();

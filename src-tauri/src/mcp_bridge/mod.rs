@@ -11,17 +11,19 @@
 //! - MCP sidecar uses platform-specific path to find the app data directory
 
 mod accept_loop;
+mod attribution;
 mod bind;
-pub(crate) mod checkpoint_store;
 mod coherence_answers;
 pub mod commands;
 mod connection;
+mod connection_closed;
 pub(crate) mod control;
 mod delivery;
 mod frames;
 mod handshake;
 mod identify;
 mod lifecycle;
+mod live_emit;
 pub(crate) mod managed;
 mod message_loop;
 pub(crate) mod path_guard;

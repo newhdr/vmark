@@ -157,7 +157,7 @@ Salva una scheda nel suo percorso esistente.
 |-----------|------|-----------|
 | `tabId` | stringa | No (predefinito su quella in primo piano) |
 
-Restituisce `{filePath, revision}`.
+Restituisce `{filePath, revision, journaled}`.
 
 ### `save_as`
 
@@ -168,13 +168,17 @@ Salva una scheda in un nuovo percorso.
 | `tabId` | stringa | No |
 | `filePath` | stringa | Sì |
 
-Restituisce `{revision}`.
+Restituisce `{revision, journaled}`.
 
 Salvare in un percorso diverso dal file corrente della scheda stessa è trattato come una
 nuova scrittura. Quando **Approva automaticamente le modifiche** (Impostazioni →
 Integrazioni) è disattivato (l'impostazione predefinita), una richiesta di questo tipo
 viene rifiutata con `APPROVAL_REQUIRED` e un toast ti dice cosa è stato bloccato. Salvare
 di nuovo nel percorso proprio della scheda è sempre permesso.
+
+Il controllo del percorso viene ripetuto quando arriva il turno del salvataggio nella coda dei salvataggi di quel file. Un percorso che nel frattempo è uscito dall'ambito consentito (per esempio, l'area di lavoro è stata chiusa mentre il salvataggio attendeva) viene rifiutato con `INVALID_PATH` e non viene scritto nulla.
+
+`save_as` non sostituisce mai un file che non sia quello della scheda. Una destinazione che contiene già un file viene rifiutata con `APPROVAL_REQUIRED`, anche un file creato dopo il controllo della richiesta, mentre il salvataggio era in corso: il file viene scritto solo se in quel percorso non c'è nulla nel momento in cui viene messo al suo posto, e il file trovato lì conserva il suo contenuto. Se il disco non può scrivere in questo modo, il salvataggio viene rifiutato invece di sovrascrivere.
 
 ### `close`
 
@@ -243,19 +247,25 @@ Sostituisce il contenuto completo del documento.
 
 Per impostazione predefinita la scrittura viene salvata: la risposta riporta `saved: true`, oppure `saved: false` con `save_skipped` (`"untitled"` — la scheda non ha ancora un file, usa `save_as`; `"opt_out"` — hai passato `save: false`) o `save_error` (la scrittura su disco non è riuscita). Quando la destinazione è la scheda WYSIWYG attiva di un documento Markdown, il testo viene caricato nell'editor attivo (come un unico passo annullabile), e ciò che viene salvato è la serializzazione dell'editor — lo stesso Markdown, eventualmente normalizzato, non necessariamente gli stessi identici caratteri inviati. Le altre schede salvano il testo così come inviato, con i fine riga normalizzati.
 
+Se la scheda viene chiusa dopo che la scrittura l'ha modificata ma prima del salvataggio, la risposta è `saved: false` con un `save_error` che indica che la scheda è stata chiusa. Nel percorso che la scheda aveva non viene scritto nulla.
+
 Ogni salvataggio fatto da un client IA — tramite `write`, `workspace.save` o `workspace.save_as` — viene archiviato nella cronologia del documento come snapshot `mcp` (etichettato *(mcp)* nella barra laterale Cronologia), così le versioni scritte da un'IA si distinguono dalle tue. Come un salvataggio manuale, non viene mai unito a un salvataggio automatico vicino né saltato per le sue dimensioni.
+
+Ogni risposta di salvataggio riporta anche `journaled` — per `write`, solo quando il salvataggio è avvenuto. `"yes"`: il registro delle modifiche degli agenti di VMark ha registrato il testo salvato. `"pending"`: è registrato e prende il suo posto nella storia del documento quando termina la registrazione di una scrittura ancora in corso. `"no"`: il file è salvato, ma il registro non lo ha registrato. Un salvataggio non è mai un errore a causa del registro.
 
 Se viene fornito `expected_revision` e il documento è cambiato dopo quella lettura, la risposta è una busta di errore strutturato `STALE` con la revisione corrente; rileggi e riprova.
 
 ```json
 // successo
-{ "revision": "rev-newAfterWrite", "saved": true }
+{ "revision": "rev-newAfterWrite", "applied": true, "durable": true, "saved": true }
 
 // stale
 { "error": "STALE", "message": "Document has changed since the last read", "current_revision": "rev-currentNow" }
 ```
 
 Mentre l'utente compone testo con un metodo di input (IME) nell'editor WYSIWYG che mostra la scheda, la scrittura viene rifiutata con `BUSY` e non cambia nulla: il testo in composizione appartiene al metodo di input finché non viene confermato. Riprova a breve. In modalità Sorgente la scrittura viene accettata, e l'editor la mostra appena la composizione termina.
+
+Ogni scrittura viene registrata nel diario delle modifiche degli agenti di VMark prima che cambi qualcosa. La risposta di successo contiene `applied: true` e `durable`: `durable: false` significa che il contenuto è stato scritto ma la sua voce nel diario non è ancora stata salvata — VMark riprova in background e, finché non ci riesce, la scrittura successiva in quel documento viene rifiutata con `JOURNAL_DEGRADED`. Se il diario rifiuta la voce del tutto, la scrittura resta applicata, viene registrata nei log come non annotata e la scrittura successiva procede. Una scrittura viene rifiutata, senza cambiare nulla, con `JOURNAL_BUSY` mentre è in corso la registrazione di un'altra scrittura nello stesso documento (due finestre con lo stesso file condividono un documento), con `STALE_PARENT` quando un'altra finestra ha scritto il documento dopo l'ultima scrittura di questa scheda (rileggi e riprova), con `JOURNAL_UNAVAILABLE` quando il diario non è attivo, e con `INVALID_TEXT` quando `content` contiene un surrogato UTF-16 isolato. Se l'utente modifica il documento, chiude la scheda, inizia a comporre con un metodo di input o sposta la selezione (o cambia scheda, se non è stato indicato `tabId`) durante la registrazione, la scrittura viene rifiutata con `ABORTED` e un `reason` (`edited`, `closed`, `composing`, `selection`) e non cambia nulla; rileggi e riprova. Un errore `INTERNAL` che riporta `applied: true` è diverso: l'editor ha avuto un errore dopo che la scrittura aveva già modificato il documento, e il testo che conteneva in quel momento è stato registrato (`durable` come sopra, `current_revision` è la revisione del documento); rileggi prima di scrivere di nuovo. Un errore `INTERNAL` senza `applied` dopo una scrittura fallita significa che il documento potrebbe essere cambiato in parte; rileggilo comunque.
 
 ### `transform`
 
@@ -269,7 +279,7 @@ Applica una riscrittura deterministica. Attualmente supporta trasformazioni spec
 
 `cjk-format` applica le impostazioni di formattazione CJK dell'utente end-to-end. `cjk-spacing` inserisce singoli spazi tra caratteri CJK e Latini/cifre adiacenti. `cjk-punctuation` converte la punteggiatura ASCII che si trova accanto ai caratteri CJK nella sua forma a larghezza intera.
 
-Restituisce `{revision}`. Come `write`, viene rifiutato con `BUSY`, senza cambiare nulla, mentre l'utente compone con un metodo di input nell'editor WYSIWYG che mostra la scheda.
+Restituisce `{revision, applied, durable}`. Come `write`, viene rifiutato con `BUSY`, senza cambiare nulla, mentre l'utente compone con un metodo di input nell'editor WYSIWYG che mostra la scheda. Come `write`, la chiamata viene registrata nel diario delle modifiche degli agenti di VMark prima che cambi qualcosa: `applied`, `durable` e i rifiuti del diario (`JOURNAL_BUSY`, `STALE_PARENT`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`, `ABORTED`) hanno lo stesso significato; una chiamata che non cambia nulla non viene registrata.
 
 ---
 
@@ -309,7 +319,7 @@ Applica un array di oggetti `IRPatch`. Le patch sono inviate attraverso i mutato
 | `needs.add` / `needs.remove` | Aggiungi o rimuovi un ID job da `needs:` |
 | `trigger.setFilters` | Sostituisci un array di filtri trigger — branches, paths, types, ecc. (`{event, filter, value: string[]}`) |
 
-Restituisce `{revision}` in caso di successo o una busta di errore strutturato `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW`.
+Restituisce `{revision, applied, durable}` in caso di successo o una busta di errore strutturato `STALE` / `INVALID_PATCH` / `NOT_WORKFLOW`. Come `write`, la chiamata viene registrata nel diario delle modifiche degli agenti di VMark prima che cambi qualcosa: `applied`, `durable` e i rifiuti del diario (`JOURNAL_BUSY`, `STALE_PARENT`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`, `ABORTED`) hanno lo stesso significato; una chiamata che non cambia nulla non viene registrata.
 
 ### `validate`
 
@@ -359,7 +369,7 @@ Restituisce:
 
 Sostituisce qualunque cosa l'editor riporti come selezione corrente. **In modalità WYSIWYG**, il testo inline semplice viene inserito come nodo di testo letterale così che gli spazi iniziali/finali facciano round-trip esattamente; il contenuto che porta marcatori markdown (`**bold**`, `*italic*`, `` `code` ``, codice recintato, citazioni, elenchi, ecc.) viene analizzato come markdown e inserito come i nodi corrispondenti. **In modalità sorgente**, `content` viene sempre inserito come testo grezzo — la superficie sorgente è già byte markdown. Un `content` vuoto elimina la selezione. Quando la selezione è collassata, `content` viene inserito in corrispondenza del cursore.
 
-Restituisce `{revision, replaced_chars}` in caso di successo. `replaced_chars` è la lunghezza del testo che era selezionato prima della chiamata — utile all'IA per confermare di aver modificato ciò che si aspettava.
+Restituisce `{revision, replaced_chars, applied, durable}` in caso di successo. `replaced_chars` è la lunghezza del testo che era selezionato prima della chiamata — utile all'IA per confermare di aver modificato ciò che si aspettava. Come `write`, la chiamata viene registrata nel diario delle modifiche degli agenti di VMark prima che cambi qualcosa: `applied`, `durable` e i rifiuti del diario (`JOURNAL_BUSY`, `STALE_PARENT`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`, `ABORTED`) hanno lo stesso significato; una chiamata che non cambia nulla non viene registrata.
 
 `STALE` restituisce `{error: "STALE", message, current_revision}` esattamente come `document.write`. La revisione a livello di documento intercetta le battiture tra `get` e `set`. Il puro spostamento del cursore (senza una battitura) non è arbitrato dal server — se l'utente ha spostato il cursore tra `get` e `set`, la modifica finisce nella nuova posizione.
 
@@ -805,8 +815,15 @@ Compaiono due forme di errore:
 | `INVALID_PATCH` | busta | `workflow.apply_patch` ha ricevuto un array `patches` malformato |
 | `INVALID_TAB` | busta | `tabId` non poteva essere risolto |
 | `INVALID_PATH` | busta | Un `filePath` non poteva essere letto, o è al di fuori dell'ambito del workspace aperto / del documento |
-| `APPROVAL_REQUIRED` | busta | `save_as` verso una nuova posizione mentre **Approva automaticamente i salvataggi in una nuova posizione e i risultati dei geni** è disattivato; oppure `open_workspace` attende l'approvazione dell'utente, o che scelga la cartella nel selettore di cartelle di VMark |
+| `APPROVAL_REQUIRED` | busta | `save_as` verso una nuova posizione mentre **Approva automaticamente i salvataggi in una nuova posizione e i risultati dei geni** è disattivato; `save_as` verso un percorso che contiene già un file diverso da quello della scheda; oppure `open_workspace` attende l'approvazione dell'utente, o che scelga la cartella nel selettore di cartelle di VMark |
 | `BUSY` | busta | `open_workspace` non ha potuto procedere: è aperta un'altra finestra di selezione cartelle, o nella finestra è in corso un cambio di spazio di lavoro; l'approvazione resta valida — riprova. Oppure `document.write`, `document.transform` o `selection.set` è arrivato mentre l'utente componeva testo con un metodo di input; non è stato cambiato nulla — riprova a breve |
+| `JOURNAL_BUSY` | busta | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` è arrivato mentre era in corso la registrazione di un'altra scrittura nello stesso documento; non è stato cambiato nulla — riprova a breve |
+| `STALE_PARENT` | busta | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: un'altra finestra ha scritto il documento dopo l'ultima scrittura di questa scheda; non è stato cambiato nulla — rileggi e riprova |
+| `JOURNAL_DEGRADED` | busta | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: una voce precedente del diario per questo documento attende ancora di essere salvata; non è stato cambiato nulla — riprova tra qualche secondo |
+| `JOURNAL_UNAVAILABLE` | busta | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: il diario delle modifiche degli agenti non è attivo o non può registrare; non è stato cambiato nulla |
+| `INVALID_TEXT` | busta | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: `content` contiene un surrogato UTF-16 isolato; non è stato cambiato nulla |
+| `REVIEW_BACKLOG_FULL` | busta | `document.write`: il documento ha troppe modifiche dell'IA non revisionate; non è stato cambiato nulla |
+| `ABORTED` | busta | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: l'utente ha modificato o chiuso il documento, vi ha composto testo o ne ha spostato la selezione durante la registrazione; `reason` indica quale; non è stato cambiato nulla — rileggi e riprova |
 | `NOT_WORKFLOW` | busta | `workflow.*` è stato chiamato su una scheda non YAML-workflow |
 | `READ_ONLY` | busta | È stata tentata una mutazione su un documento di sola lettura |
 | `NO_EDITOR` | busta | `selection.*` è stato chiamato ma la scheda in primo piano non ha un editor attivo |

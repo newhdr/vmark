@@ -230,6 +230,8 @@ vmark-mcp-server --version
 vmark-mcp-server --port 9223   # Legacy / manuell
 ```
 
+Jedes andere Argument — ein vertipptes Flag, `--port=9223` oder ein überzähliges Wort — wird abgelehnt: Das Programm gibt einen Aufruffehler aus und beendet sich mit Code 64, statt auf die automatische Erkennung zurückzufallen.
+
 ## Funktionsweise
 
 ```text
@@ -326,9 +328,21 @@ Für `document.write`, `selection.set` oder `workflow.apply_patch` gibt es keine
 
 ## Bearbeitungs-Prüfpunkte
 
-Jede KI-Änderung an einem Dokument — `document.write`, `document.transform`, `selection.set` und `workflow.apply_patch` — sichert zuerst den Inhalt, den sie gleich ersetzt. Die Schaltfläche **Verlauf** in der Statusleiste öffnet ein Popover, das für den fokussierten Tab auflistet, wann jeder KI-Schreibvorgang stattfand und welches Tool ihn ausführte, mit einem Ein-Klick-**Auf den Stand vor diesem Schreibvorgang zurücksetzen** in jeder Zeile und einer Aktion **Verlauf für diesen Tab löschen**. Das Zurücksetzen stellt den früheren Inhalt wieder her und erhöht die Revision des Dokuments, sodass ein KI-Client, der noch die alte Revision hält, beim nächsten Schreiben `STALE` erhält, statt Ihre Wiederherstellung zu überschreiben.
+Jede KI-Änderung an einem Dokument — `document.write`, `document.transform`, `selection.set` und `workflow.apply_patch` — wird im Bearbeitungsverlauf von VMark aufgezeichnet, bevor sie etwas ändert. Die Schaltfläche **Verlauf** in der Statusleiste öffnet ein Panel für das fokussierte Dokument. Ihr Zähler nennt die KI-Versionen des Dokuments, und die Schaltfläche nimmt eine Warnfarbe an, wenn Änderungen nicht aufgezeichnet werden. Das Panel aktualisiert sich live, in jedem Fenster, sobald Versionen aufgezeichnet werden.
 
-Prüfpunkte werden pro Datei aufbewahrt — 50 pro Datei und insgesamt 5 MiB — und in `mcp-checkpoints.jsonl` im App-Datenverzeichnis von VMark gespeichert, sodass sie einen Neustart überstehen. Die Datei enthält den vollständigen vorherigen Text jeder gesicherten Bearbeitung und wird nur für den Eigentümer zugänglich (`0600` unter macOS und Linux) angelegt. Die Fußzeile des Popovers zeigt, wie viel Platz die Datei auf der Festplatte belegt, und löscht den gesamten Speicher — alle Dateien und alle Fenster — mit einer Aktion. Unbenannte Dokumente werden pro Tab gesichert.
+Das Panel listet die Versionen des Dokuments auf, die neueste zuerst. Jede Zeile zeigt, wann sie entstand, welche Art von Änderung es war, das Tool und wer sie vorgenommen hat: den Anbieter des KI-Clients (zum Beispiel `claude` oder `codex`), seine Verbindung und seine Sitzungsbezeichnung. Ein Client ohne Token wird als **Nicht identifizierter Client** angezeigt, ein unbekanntes Token als **Unbekannte Zugangsdaten** und ein von mehreren Clients geteiltes Token als **Von mehreren Anbietern geteilte Zugangsdaten** — nie als Anbieter, welchen Namen sich der Client auch gibt. **Diese Version wiederherstellen** setzt den Text dieser Version zurück; **Stand vor dieser Änderung wiederherstellen** setzt den Text davor zurück. Eine Wiederherstellung erhöht die Revision des Dokuments, sodass ein KI-Client, der noch die alte Revision hält, bei seinem nächsten Schreibvorgang `STALE` erhält, statt Ihre Wiederherstellung zu überschreiben. Eine Wiederherstellung wird selbst aufgezeichnet: Der Text, den sie ersetzt, wird zuerst gesichert, und ein Dokument, das während der Wiederherstellung bearbeitet wurde, bleibt unverändert.
+
+Oben im Panel steht, wenn Änderungen nicht aufgezeichnet werden: Der Verlauf konnte nicht starten oder ist schreibgeschützt, er hängt hinterher (Einträge warten und sind noch nicht auf der Festplatte), das letzte Speichern dieses Dokuments wurde abgelehnt oder der Verlauf hat nicht rechtzeitig geantwortet, oder manche KI-Änderungen lassen sich nicht mehr automatisch rückgängig machen. Eine solche Änderung lautet **Blockiert: Grund (Herkunft)** und steht unter der letzten Version, an der ihre Stelle bestätigt war; diese wird hervorgehoben. Gibt es keine, sagt das Panel, dass die Stelle nicht verfügbar ist. Schreibvorgänge, die angewendet, aber nie aufgezeichnet wurden, stehen unter **Nicht protokollierte Schreibvorgänge**, jeweils mit Wiederherstellen und Verwerfen.
+
+Um mehrere Sitzungen eines Clients zu unterscheiden, setzen Sie `VMARK_SESSION_LABEL` in der MCP-Konfiguration des Clients, neben `VMARK_MCP_TOKEN`:
+
+```json
+"env": { "VMARK_MCP_TOKEN": "…", "VMARK_SESSION_LABEL": "docs refactor" }
+```
+
+Die Bezeichnung ist höchstens 128 UTF-8-Bytes lang und enthält keine Steuerzeichen; eine Bezeichnung, die die Regel verletzt, wird mit einer Warnung verworfen, und der Client verbindet sich ohne sie. Sie wird von der Konfiguration des Clients gewählt, dient daher nur der Anzeige und entscheidet nichts.
+
+Der Verlauf liegt im Ordner `agent-journal` im App-Datenverzeichnis von VMark und übersteht so einen Neustart. Der Ordner enthält den vollständigen vorherigen Text jeder aufgezeichneten Bearbeitung und ist nur für den Eigentümer zugänglich (`0700` unter macOS und Linux). Prüfpunkte aus einer früheren Version von VMark (eine `mcp-checkpoints.jsonl`, beim ersten Start importiert und dann umbenannt beiseitegelegt) stehen unter **Frühere Prüfpunkte**, eine Liste für alle Dokumente und Fenster. Wer einen wiederherstellt, öffnet seine Datei; ein unbenannter oder einer, dessen Datei sich nicht mehr öffnen lässt, wird in ein neues Dokument wiederhergestellt. Der Abschnitt zeigt, wie viel Prüfpunkttext aufbewahrt wird, und löscht alles — jede Datei und jedes Fenster — in einem Schritt, wobei die Texte von der Festplatte entfernt werden.
 
 ## Sicherheitshinweise
 

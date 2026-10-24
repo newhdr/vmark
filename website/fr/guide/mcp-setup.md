@@ -229,6 +229,8 @@ vmark-mcp-server --version
 vmark-mcp-server --port 9223   # legacy / manuel
 ```
 
+Tout autre argument — une option mal orthographiée, `--port=9223` ou un mot isolé — est refusé : le programme affiche une erreur d’utilisation et se termine avec le code 64 au lieu de revenir à la détection automatique.
+
 ## Fonctionnement
 
 ```text
@@ -325,9 +327,21 @@ Il n'y a pas d'étape d'aperçu pour `document.write`, `selection.set` ou `workf
 
 ## Points de contrôle d'édition
 
-Chaque mutation de document par l'IA — `document.write`, `document.transform`, `selection.set` et `workflow.apply_patch` — commence par prendre un instantané du contenu qu'elle s'apprête à remplacer. Le bouton **historique** de la barre d'état ouvre une fenêtre contextuelle qui liste, pour l'onglet actif, quand chaque écriture de l'IA a eu lieu et quel outil l'a effectuée, avec en un clic **Restaurer l'état d'avant cette écriture** sur chaque ligne et une action **Effacer l'historique de cet onglet**. La restauration remet le contenu antérieur en place et incrémente la révision du document, de sorte qu'un client IA qui détient encore l'ancienne révision reçoit `STALE` à sa prochaine écriture au lieu d'écraser votre restauration.
+Chaque modification d’un document par l’IA — `document.write`, `document.transform`, `selection.set` et `workflow.apply_patch` — est enregistrée dans l’historique des modifications de VMark avant de changer quoi que ce soit. Le bouton **historique** de la barre d’état ouvre un panneau pour le document actif. Son badge compte les versions du document faites par l’IA, et le bouton prend une couleur d’avertissement quand les modifications ne sont pas enregistrées. Le panneau se met à jour en direct, dans chaque fenêtre, à mesure que des versions sont enregistrées.
 
-Les points de contrôle sont conservés par fichier — 50 par fichier et 5 Mio au total — et persistés dans `mcp-checkpoints.jsonl` dans le répertoire de données de l'application VMark, ils survivent donc à un redémarrage. Le fichier contient le texte précédent complet de chaque modification enregistrée et est créé accessible au seul propriétaire (`0600` sous macOS et Linux). Le pied du panneau indique l'espace occupé par le fichier sur le disque et efface tout le stockage — tous les fichiers et toutes les fenêtres — en une seule action. Les documents sans titre ont des points de contrôle par onglet.
+Le panneau liste les versions du document, la plus récente d’abord. Chaque ligne indique quand elle a eu lieu, le type de modification, l’outil et son auteur : le fournisseur du client d’IA (par exemple `claude` ou `codex`), sa connexion et son libellé de session. Un client sans jeton apparaît comme **Client non identifié**, un jeton inconnu comme **Identifiant non reconnu** et un jeton partagé par plusieurs clients comme **Identifiant partagé par plusieurs fournisseurs** — jamais comme un fournisseur, quel que soit le nom que le client se donne. **Restaurer cette version** remet le texte de cette version ; **Restaurer l’état d’avant cette modification** remet le texte d’avant. Une restauration incrémente la révision du document : un client d’IA qui détient encore l’ancienne révision reçoit `STALE` à sa prochaine écriture au lieu d’écraser votre restauration. Une restauration est elle-même enregistrée : le texte qu’elle remplace est conservé d’abord, et un document modifié pendant la restauration n’est pas touché.
+
+Le haut du panneau signale quand les modifications ne sont pas enregistrées : l’historique n’a pas pu démarrer ou est en lecture seule, il a du retard (enregistrements en attente, pas encore sur le disque), le dernier enregistrement de ce document a été refusé ou l’historique n’a pas répondu à temps, ou certaines modifications de l’IA ne peuvent plus être annulées automatiquement. Une telle modification se lit **Bloqué : raison (origine)** sous la dernière version où son emplacement était certifié, qui est mise en évidence ; s’il n’y en a pas, le panneau indique que l’emplacement est indisponible. Les écritures appliquées mais jamais enregistrées figurent sous **Écritures non enregistrées**, chacune avec une restauration et un abandon.
+
+Pour distinguer plusieurs sessions d’un même client, définissez `VMARK_SESSION_LABEL` dans la configuration MCP du client, à côté de `VMARK_MCP_TOKEN` :
+
+```json
+"env": { "VMARK_MCP_TOKEN": "…", "VMARK_SESSION_LABEL": "docs refactor" }
+```
+
+Le libellé fait au plus 128 octets UTF-8, sans caractère de contrôle ; un libellé qui enfreint la règle est ignoré avec un avertissement et le client se connecte sans lui. Il est choisi par la configuration du client : il sert uniquement à l’affichage et ne décide de rien.
+
+L’historique est conservé dans le dossier `agent-journal` du répertoire de données de VMark, il survit donc à un redémarrage. Le dossier contient le texte précédent complet de chaque modification enregistrée et n’est accessible qu’à son propriétaire (`0700` sous macOS et Linux). Les points de contrôle d’une version antérieure de VMark (un `mcp-checkpoints.jsonl`, importé au premier démarrage puis renommé) figurent sous **Points de contrôle antérieurs**, une seule liste pour tous les documents et fenêtres. En restaurer un ouvre son fichier ; un point sans titre, ou dont le fichier ne peut plus être ouvert, est restauré dans un nouveau document. La section indique la quantité de texte conservée et efface tout — chaque fichier et chaque fenêtre — en une seule action, en supprimant les textes du disque.
 
 ## Notes de sécurité
 

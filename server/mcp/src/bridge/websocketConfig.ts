@@ -46,6 +46,12 @@ export interface ClientIdentity {
   pid?: number;
   /** Parent process name (helps identify which AI spawned this) */
   parentProcess?: string;
+  /**
+   * The user's name for this session, for grouping its edits in VMark.
+   * Untrusted, display and grouping only; validated before it is set (see
+   * `utils/sessionLabel.ts`). Omitted, not empty, when there is none.
+   */
+  sessionLabel?: string;
 }
 
 /**
@@ -70,7 +76,10 @@ export interface WebSocketBridgeConfig {
    * bridge's worst case of 20s (10s initial wait + 10s wake-and-retry,
    * server.rs) — a shorter value discards retry results that the bridge
    * successfully recovered, so the AI client sees a timeout even though
-   * the write WAS applied.
+   * the write WAS applied. A value of 20000 or less is refused (RangeError).
+   * Known limitation: the 20s starts once the bridge admits the request; a
+   * write-class request first waits, unbounded, for the bridge's global write
+   * lock (routed_request.rs), and no client timeout covers that wait.
    */
   requestTimeout?: number;
   /** Whether to auto-reconnect on disconnect (default: true) */
@@ -87,7 +96,7 @@ export interface WebSocketBridgeConfig {
   maxRequestsPerSecond?: number;
   /** Queue requests while disconnected if autoReconnect is enabled (default: false) */
   queueWhileDisconnected?: boolean;
-  /** Maximum queue size when disconnected (default: 100) */
+  /** Maximum queue size when disconnected (default: 100; a positive integer, else RangeError) */
   maxQueueSize?: number;
   /** Client identity for VMark to identify who is connecting */
   clientIdentity?: ClientIdentity;
@@ -129,7 +138,50 @@ export interface ResolvedBridgeConfig {
 }
 
 /**
+ * The Rust bridge's worst case for one ADMITTED request: 10 s initial wait +
+ * 10 s wake-and-retry (wake_retry.rs). Time queued for the write lock is extra.
+ * Known limitation: 20 s bounds the two window-response waits, not the whole
+ * request. A timeout does not cancel a mutation: it may already have succeeded
+ * or may succeed later. Re-read before retrying; an immediate re-read does not
+ * establish that queued work has finished.
+ */
+const BRIDGE_WORST_CASE_MS = 20_000;
+/** The longest delay `setTimeout` holds; a longer one fires at once. */
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+
+/**
+ * The pending-request timeout, refused unless it outlasts the bridge's worst
+ * case: a shorter one reports a write the bridge recovered as timed out.
+ * @edge-case NaN, Infinity and delays past the timer limit are refused too —
+ * `setTimeout` treats them as an immediate timeout.
+ */
+function requestTimeoutOf(value: number | undefined): number {
+  const timeout = value ?? 25000;
+  if (!Number.isFinite(timeout) || timeout <= BRIDGE_WORST_CASE_MS || timeout > MAX_TIMER_DELAY_MS) {
+    throw new RangeError(
+      `requestTimeout must be more than ${BRIDGE_WORST_CASE_MS} ms (the bridge's wake-and-retry worst case) and at most ${MAX_TIMER_DELAY_MS} ms, got ${timeout}`
+    );
+  }
+  return timeout;
+}
+
+/**
+ * The disconnected-queue cap, refused unless it is a positive safe integer.
+ * @edge-case NaN makes the cap comparison permanently false (an unbounded
+ * queue); fractions, zero and negatives are refused rather than clamped.
+ */
+function maxQueueSizeOf(value: number | undefined): number {
+  const size = value ?? 100;
+  if (!Number.isSafeInteger(size) || size < 1) {
+    throw new RangeError(`maxQueueSize must be a positive integer, got ${size}`);
+  }
+  return size;
+}
+
+/**
  * Apply the documented defaults to a caller-supplied config.
+ * @throws RangeError when `requestTimeout` cannot outlast the bridge's worst
+ * case, or `maxQueueSize` is not a positive integer.
  */
 export function resolveBridgeConfig(
   config: WebSocketBridgeConfig = {}
@@ -139,8 +191,7 @@ export function resolveBridgeConfig(
     port: config.port, // May be undefined - will use portResolver
     portResolver: config.portResolver,
     timeout: config.timeout ?? 10000,
-    // Must exceed the Rust bridge's 20s wake-and-retry worst case.
-    requestTimeout: config.requestTimeout ?? 25000,
+    requestTimeout: requestTimeoutOf(config.requestTimeout),
     autoReconnect: config.autoReconnect ?? true,
     maxReconnectAttempts: config.maxReconnectAttempts ?? 10,
     reconnectDelay: config.reconnectDelay ?? 1000,
@@ -148,7 +199,7 @@ export function resolveBridgeConfig(
     logger: config.logger ?? nullLogger,
     maxRequestsPerSecond: config.maxRequestsPerSecond ?? 100,
     queueWhileDisconnected: config.queueWhileDisconnected ?? false,
-    maxQueueSize: Math.max(1, config.maxQueueSize ?? 100),
+    maxQueueSize: maxQueueSizeOf(config.maxQueueSize),
     clientIdentity: config.clientIdentity ?? null,
     authTokenResolver: config.authTokenResolver,
     clientTokenResolver: config.clientTokenResolver,

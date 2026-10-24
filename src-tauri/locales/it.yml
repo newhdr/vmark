@@ -41,6 +41,7 @@ menu:
   file.docHistory: "Cronologia documento"
   file.docHistory.clearWorkspace: "Cancella cronologia spazio di lavoro..."
   file.docHistory.clearAll: "Cancella tutta la cronologia..."
+  file.docHistory.exportToGit: "Esporta cronologia modifiche in Git..."
   file.print: "Stampa..."
 
   # File menu — Windows/Linux extras
@@ -311,6 +312,8 @@ errors:
   save.parentMissing: "La cartella di questo file non esiste più: %{dir}"
   save.noParentDirectory: "Il percorso del file non ha una cartella superiore"
   save.symlinkLoop: "L'alias di questo file punta in circolo, quindi il file reale non è stato trovato"
+  save.targetExists: "Esiste già un file in %{path}, quindi non è stato sostituito"
+  save.noReplaceUnsupported: "Questo disco non può salvare senza sostituire un file esistente, quindi %{path} non è stato salvato"
   save.writeFailed: "Impossibile salvare il file: %{detail}"
   window.pdfExportMenu: "Impossibile assegnare una barra dei menu vuota alla finestra Esporta PDF: %{detail}"
   window.pdfExportCreate: "Impossibile aprire la finestra Esporta PDF: %{detail}"

@@ -8,9 +8,15 @@
  * (issue #900) is identifiable from the error string alone, without
  * grepping logs.
  *
+ * Every dispatched request gets one immutable `McpWriteContext` (who is
+ * behind it), built here from the request's attribution and threaded through
+ * `dispatchV2` to the handlers that change a document. An attribution that
+ * does not validate is refused with an error reply before any handler runs.
+ *
  * Origin: MCP pruning plan (retired).
  *
  * @coordinates-with utils.ts — respond()
+ * @coordinates-with writeContext.ts — createMcpWriteContext
  * @coordinates-with v2/dispatch.ts — dispatchV2
  * @coordinates-with types.ts — McpRequestEvent
  * @module services/mcpBridge/handleRequest
@@ -18,6 +24,7 @@
 
 import type { McpRequestEvent } from "./types";
 import { respond } from "./utils";
+import { createMcpWriteContext } from "./writeContext";
 import { isTargetDocReadOnly } from "@/services/editor/readOnlyGuard";
 import { dispatchV2, SUPPORTED_TOOL_PREFIXES } from "@/services/mcpBridge/v2/dispatch";
 import { v2ErrorString } from "@/services/mcpBridge/v2/types";
@@ -34,24 +41,28 @@ const READ_ONLY_BLOCKED = new Set<string>([
 export async function handleRequest(event: McpRequestEvent): Promise<void> {
   const { id, type } = event;
 
-  // Gate on the tab the mutation TARGETS, not the active one. These
-  // request types accept a `tabId`, so an active-tab check let writes to
-  // read-only background tabs through and refused writes to writable ones.
-  // `selection.set` carries no tabId and correctly falls back to the active tab.
-  if (READ_ONLY_BLOCKED.has(type) && isTargetDocReadOnly(event.args?.tabId)) {
-    await respond({
-      id,
-      success: false,
-      error: v2ErrorString({
-        error: "READ_ONLY",
-        message: "Document is read-only",
-      }),
-    });
-    return;
-  }
-
   try {
-    if (await dispatchV2(event)) return;
+    // First, before any request-specific decision: an unattributable
+    // request is refused as such, whatever it asks for.
+    const context = createMcpWriteContext(event);
+
+    // Gate on the tab the mutation TARGETS, not the active one. These
+    // request types accept a `tabId`, so an active-tab check let writes to
+    // read-only background tabs through and refused writes to writable ones.
+    // `selection.set` carries no tabId and correctly falls back to the active tab.
+    if (READ_ONLY_BLOCKED.has(type) && isTargetDocReadOnly(event.args?.tabId)) {
+      await respond({
+        id,
+        success: false,
+        error: v2ErrorString({
+          error: "READ_ONLY",
+          message: "Document is read-only",
+        }),
+      });
+      return;
+    }
+
+    if (await dispatchV2(event, context)) return;
     // Diagnostic suffix exposes the contract this VMark build advertises
     // so version-mismatch failures (#900) name themselves.
     await respond({

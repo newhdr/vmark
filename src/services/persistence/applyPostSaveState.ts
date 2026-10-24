@@ -19,7 +19,7 @@ import {
 import { useRecentFilesStore } from "@/stores/workspaceStore";
 import { clearPendingSaveAfterGrace, type registerPendingSave } from "@/utils/pendingSaves";
 import { normalizePath } from "@/utils/paths";
-import { isCurrentSaveTarget, type SaveTargetClaim } from "./saveTargetClaim";
+import { isCurrentSaveTarget, isSameDocument, type SaveTargetClaim } from "./saveTargetClaim";
 import type { SaveType } from "./saveHistorySnapshot";
 import type { NormalizedSaveContent } from "./normalizedSaveContent";
 
@@ -44,13 +44,15 @@ import type { NormalizedSaveContent } from "./normalizedSaveContent";
  * and tab back to the file the user just moved away from.
  *
  * An untitled document (no live path) matches nothing, so only its newest save
- * may name it.
+ * may name it. A save of a document closed since it was submitted names
+ * nothing, even when the same tab id was opened again on the same file.
  */
 function mayRepointDocument(
   tabId: string,
   path: string,
   claim: SaveTargetClaim
 ): boolean {
+  if (!isSameDocument(claim)) return false;
   if (isCurrentSaveTarget(claim)) return true;
   const live = useDocumentStore.getState().getDocument(tabId)?.filePath;
   return live != null && normalizePath(live) === normalizePath(path);
