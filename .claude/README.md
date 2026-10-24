@@ -103,18 +103,13 @@ Not enabled here, but used by the maintainer and referenced by the rules: **`cc-
 
 | Skill | When used |
 |-------|-----------|
-| `ai-coding-agents` | Driving Codex CLI and Claude Code CLI |
 | `css-design-tdd` | CSS token changes and audits |
-| `mcp-dev` / `mcp-server-manager` | MCP server and client configuration |
-| `planning` / `plan-audit` / `plan-verify` | Writing a plan, auditing an implementation against it, verifying it |
+| `mcp-dev` | MCP tools, the bridge, and registering MCP servers |
+| `planning` / `plan-audit` | Writing a plan; auditing or verifying an implementation against it |
 | `react-app-dev` | React UI changes (components, hooks, stores) |
-| `release-gate` | Running the release gates |
-| `rust-tauri-backend` | Rust/Tauri backend changes |
-| `shortcut-audit` | Keyboard shortcut consistency |
-| `tauri-app-dev` | Tauri desktop app guidance |
-| `tauri-mcp-test-runner` / `tauri-mcp-testing` | E2E testing through Tauri MCP |
-| `tauri-v2-integration` | Frontend-backend IPC bridges |
-| `tiptap-dev` / `tiptap-editor` | Rich text editor work |
+| `rust-tauri-backend` | Rust/Tauri backend: commands, IPC bridges, menus, plugins |
+| `tauri-mcp-testing` | E2E testing through Tauri MCP, and when to use VMark MCP |
+| `tiptap-dev` | Tiptap and ProseMirror editor work |
 | `translate-docs` | Translating VMark docs and strings into the nine other locales |
 | `workflow-audit` | Auditing GitHub Actions workflows |
 

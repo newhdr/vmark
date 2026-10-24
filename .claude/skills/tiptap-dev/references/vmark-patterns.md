@@ -185,7 +185,7 @@ tr.setNodeMarkup(pos, null, { ...newAttrs })
 editor.view.dispatch(tr)
 ```
 
-## Common Patterns in vmark
+## Common Patterns in VMark
 
 ### Toggle with Fallback
 ```typescript
