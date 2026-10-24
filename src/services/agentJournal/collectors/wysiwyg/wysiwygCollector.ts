@@ -32,12 +32,18 @@
  *   - A replaced session (save-as) is re-attached uncertified.
  *   - A report that throws interrupts the window the same way.
  *   - The editor's teardown detaches it (the extension's destroy hook).
+ *   - An agent apply is captured (`captureWysiwygApply`): the window its
+ *     flushes built is handed back for the commit's certificate, and the
+ *     session's deferral of it is dropped by the controlled write's fork. A
+ *     gap or a load during the apply makes the capture a whole break; the
+ *     first one sticks.
  *
  * @coordinates-with services/agentJournal/collectors/wysiwyg/txnLedger.ts — the observer
  * @coordinates-with services/agentJournal/collectors/wysiwyg/wysiwygWindow.ts — what a flush claims
  * @coordinates-with services/agentJournal/provenanceSessions.ts — the tab's session
  * @coordinates-with components/Editor/tiptapContentLoad.ts — the loads
  * @coordinates-with components/Editor/useTiptapFlush.ts — the flushes
+ * @coordinates-with services/agentJournal/collectors/wysiwyg/wysiwygCertificate.ts — what a capture certifies
  * @module services/agentJournal/collectors/wysiwyg/wysiwygCollector
  */
 
@@ -47,6 +53,7 @@ import { journalWarn } from "@/utils/debug";
 import type { ProvenanceCollector, ProvenanceSession } from "../../provenance/session";
 import { provenanceSessionFor } from "../../provenanceSessions";
 import { TxnLedger, observerPlugin, type Boundary } from "./txnLedger";
+import type { WysiwygApplyCapture } from "./wysiwygCertificate";
 import { WYSIWYG_ORIGIN, extendWindow, materializeWindow, type PendingWindow, type Spanned } from "./wysiwygWindow";
 
 interface Anchor {
@@ -61,6 +68,7 @@ class EditorProvenance {
   #collector: ProvenanceCollector | null = null;
   #anchor: Anchor | null = null;
   #pending: PendingWindow | null = null;
+  #capture: { result: WysiwygApplyCapture | null } | null = null;
 
   constructor(
     private readonly tabId: string,
@@ -75,6 +83,7 @@ class EditorProvenance {
     this.#bound = session;
     this.#pending = null;
     this.#anchor = null;
+    this.#see({ whole: `${WYSIWYG_ORIGIN}:no-certificate` });
     if (!session) return void (this.#collector = null);
     const certified = session.text === markdown;
     this.#collector = session.attach(this.#owner, certified ? session.openView(this.#owner) : null, WYSIWYG_ORIGIN);
@@ -102,6 +111,25 @@ class EditorProvenance {
     this.#pending = window;
     const schema = this.editor.schema;
     collector.defer(markdown, (base) => materializeWindow(schema, window, base));
+    this.#see({ schema, window });
+  }
+
+  /** Run `apply`, keeping what its flushes report; see `captureWysiwygApply`. */
+  capture<T>(apply: () => T): { value: T; capture: WysiwygApplyCapture | null } {
+    const outer = this.#capture;
+    const slot: { result: WysiwygApplyCapture | null } = { result: null };
+    this.#capture = slot;
+    try {
+      return { value: apply(), capture: slot.result };
+    } finally {
+      this.#capture = outer;
+    }
+  }
+
+  /** Record `result` in the open capture, unless a whole break already stuck there. */
+  #see(result: WysiwygApplyCapture): void {
+    const slot = this.#capture;
+    if (slot && !(slot.result && "whole" in slot.result)) slot.result = result;
   }
 
   stop(): void {
@@ -131,6 +159,7 @@ class EditorProvenance {
   interrupt(why: string): void {
     this.#anchor = null;
     this.#pending = null;
+    this.#see({ whole: `${WYSIWYG_ORIGIN}:unobserved-transaction` });
     if (!this.#collector) return;
     journalWarn(`wysiwyg provenance: ${why}; this window is snapshot-only`);
     this.#collector.gap(`${WYSIWYG_ORIGIN}:unobserved-transaction`);
@@ -163,6 +192,16 @@ export function noteWysiwygLoaded(editor: Editor, markdown: string): void {
 /** `editor` is about to write `markdown`, serialized with `opts`, to the store. */
 export function noteWysiwygFlush(editor: Editor, markdown: string, opts: MarkdownPipelineOptions): void {
   report(editor, (p) => p.flushed(markdown, opts));
+}
+
+/**
+ * Run `apply` (an agent's edit of `editor` and its flushes, synchronously)
+ * and return what the collector saw of it, for the commit's certificate:
+ * `null` when no flush reported (no collector or session, nothing changed).
+ */
+export function captureWysiwygApply<T>(editor: Editor, apply: () => T): { value: T; capture: WysiwygApplyCapture | null } {
+  const provenance = registry.get(editor);
+  return provenance ? provenance.capture(apply) : { value: apply(), capture: null };
 }
 
 function report(editor: Editor, run: (p: EditorProvenance) => void): void {

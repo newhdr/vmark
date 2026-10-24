@@ -37,9 +37,13 @@
  *     resolves the editor again after the prepare. In Source, the exact
  *     change (`{from, to, insert}` over the editor's text, when that text
  *     is the journal's preimage) is certified with the prepare, so older
- *     hunks elsewhere map through it. In WYSIWYG the commit is a
- *     whole-document barrier: the serialized change is not known before
- *     the apply, and no operation map is claimed for it. A replacement the surface proves changes nothing
+ *     hunks elsewhere map through it. In WYSIWYG the serialized change is
+ *     not known before the apply: the certificate goes with the commit,
+ *     built from the window the provenance collector saw for the apply's
+ *     flushes (bounded breaks over the touched blocks and their separators,
+ *     a whole break when that cannot be certified;
+ *     `wysiwygCertificate.ts`). An editor without a collector sends none
+ *     (a barrier). A replacement the surface proves changes nothing
  *     (`wouldChange`) is answered before the prepare with the current
  *     revision. An apply that throws is read back with the editor mirrored
  *     into the store first (`journaledEdit.ts` answers it).
@@ -48,6 +52,7 @@
  * @coordinates-with tabGuard.ts — focused-tab resolution, INVALID_TAB and STALE
  * @coordinates-with liveEditor.ts — the flush that keeps the returned revision current
  * @coordinates-with journaledEdit.ts — the journal protocol `set` runs
+ * @coordinates-with services/agentJournal/collectors/wysiwyg/wysiwygCertificate.ts — the WYSIWYG commit certificate
  * @coordinates-with stores/documentStore/revision.ts — optimistic concurrency
  * @module services/mcpBridge/v2/selection
  */
@@ -63,6 +68,7 @@ import { requireCurrentRevision, requireTab, structuredError, type GuardedTab } 
 import { runJournaledEdit } from "./journaledEdit";
 import { invalidTextError } from "./journalV2Error";
 import { isWellFormedText } from "@/services/agentJournal/wellFormedText";
+import { wysiwygApplyCertificate, type WysiwygApplyCapture } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCertificate";
 
 /**
  * Handle `vmark.selection.get`. Args: `{tabId?: string}`.
@@ -102,18 +108,22 @@ export async function handleSelectionGet(
  * Replace the focused selection of `tabId` now, synchronously, and mirror
  * the editor into the store: the journaled edit's apply. The surface is
  * resolved again here, after the prepare, so the edit never lands in an
- * editor that was swapped out meanwhile.
+ * editor that was swapped out meanwhile. `seen` learns what the editor's
+ * provenance collector saw of the replacement and its flush.
  */
-function applySelectionEdit(tabId: string, content: string) {
+function applySelectionEdit(tabId: string, content: string, seen: (capture: WysiwygApplyCapture | null) => void) {
   const surface = resolveSelectionSurface(tabId);
   if ("error" in surface) return { refused: "selection" as const };
   // The prepare awaited: a composition may have started since.
   if (surface.writeRefusal()) return { refused: "composing" as const };
-  surface.replaceSelection(content);
-  // Flush the mounted editor NOW: the store then holds its serialization
-  // and the editor knows it, so its content sync does not parse and load
-  // the same document again.
-  flushLiveEditors();
+  const { capture } = surface.captureApply(() => {
+    surface.replaceSelection(content);
+    // Flush the mounted editor NOW: the store then holds its serialization
+    // and the editor knows it, so its content sync does not parse and load
+    // the same document again.
+    flushLiveEditors();
+  });
+  seen(capture);
   // Mirror the editor into the store. After a flush this is the same text;
   // it is what covers an editor that has no flusher registered.
   const contentAfter = surface.documentText();
@@ -206,6 +216,12 @@ export async function handleSelectionSet(
     const preimage = useDocumentStore.getState().documents[tab.tabId]?.content ?? contentBefore;
     // Source offsets name preimage positions only when the editor holds the preimage.
     const change = surface.mode === "source" && contentBefore === preimage ? { ...surface.range(), insert: content } : undefined;
+    // WYSIWYG: certified after the apply, from what its collector saw.
+    let capture: WysiwygApplyCapture | null = null;
+    const certify =
+      surface.mode === "wysiwyg"
+        ? async (pre: string, post: string) => (capture ? wysiwygApplyCertificate(capture, pre, post) : null)
+        : undefined;
 
     const outcome = await runJournaledEdit(id, {
       tab,
@@ -215,8 +231,9 @@ export async function handleSelectionSet(
       requireFocus: true,
       tool: "selection.set",
       ...(change ? { change } : {}),
+      ...(certify ? { certify } : {}),
       context,
-      apply: () => applySelectionEdit(tab.tabId, content),
+      apply: () => applySelectionEdit(tab.tabId, content, (seen) => (capture = seen)),
       recover: () => recoverSelectionEdit(tab.tabId),
     });
     if (!outcome) return;

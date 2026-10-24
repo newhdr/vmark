@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// WI-AL2.1c — a Source selection.set sends its exact change as a certificate with the prepare (no document, epoch or basis; its map reproduces the applied text), CJK and emoji included; a WYSIWYG set, and a Source editor whose text is not the journal's preimage, send none (the commit stays a whole-document barrier)
+// WI-AL2.1c — a Source selection.set sends its exact change as a certificate with the prepare (no document, epoch or basis; its map reproduces the applied text), CJK and emoji included; a WYSIWYG set sends none with the prepare and its post-apply certificate with the commit (bounded breaks over the touched block, an untouched block mapped exactly); a WYSIWYG editor without a provenance collector, and a Source editor whose text is not the journal's preimage, send none (the commit stays a whole-document barrier)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
@@ -20,9 +20,16 @@ import { useEditorStore } from "@/stores/editorStore";
 import { useUIStore } from "@/stores/uiStore";
 import { handleSelectionSet } from "@/services/mcpBridge/v2/selection";
 import { resetJournalBases } from "@/services/agentJournal/documentIdentity";
-import { verifyPayloadTexts } from "@/services/agentJournal/provenance/payload";
+import { decodePayload, verifyPayloadTexts } from "@/services/agentJournal/provenance/payload";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
+import { createTiptapExtensions } from "@/services/assembly/createTiptapExtensions";
+import { setContentWithoutHistory } from "@/components/Editor/tiptapContentLoad";
+import { parseMarkdown, serializeMarkdown } from "@/utils/markdownPipeline";
+import { registerWysiwygFlusher } from "@/utils/wysiwygFlush";
+import { noteWysiwygFlush, wysiwygProvenanceExtension } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCollector";
+import { provenanceSessionFor, startProvenanceSessions } from "@/services/agentJournal/provenanceSessions";
+import { mapHunk } from "@/test/wysiwygNetZeroHarness";
 
 let view: CMView | null = null;
 let editor: Editor | null = null;
@@ -89,7 +96,50 @@ describe("selection.set — certificates", () => {
     expect(useDocumentStore.getState().documents.a.content).toBe(post);
   });
 
-  it("a WYSIWYG set sends no certificate", async () => {
+  it("a WYSIWYG set sends its post-apply certificate with the commit, none with the prepare", async () => {
+    const text = "# Title\n\npara one\n\npara two\n";
+    const opts = { preserveBlankLines: true } as const;
+    seed(text);
+    const stop = startProvenanceSessions();
+    try {
+      provenanceSessionFor("a")!.fork(text).recorded("r0");
+      const element = document.createElement("div");
+      document.body.appendChild(element);
+      editor = new Editor({ element, extensions: [...createTiptapExtensions(), wysiwygProvenanceExtension("a")] });
+      const live = editor;
+      expect(setContentWithoutHistory(live, parseMarkdown(live.schema, text, opts), () => true, text)).toBe("applied");
+      registerWysiwygFlusher("a", () => {
+        const markdown = serializeMarkdown(live.schema, live.state.doc, opts);
+        noteWysiwygFlush(live, markdown, opts);
+        useDocumentStore.getState().setEditorContent("a", markdown);
+      });
+      let at = -1;
+      live.state.doc.descendants((n, pos) => {
+        if (at < 0 && n.isText && n.text === "para two") at = pos + 5;
+      });
+      live.commands.setTextSelection({ from: at, to: at + 3 });
+      useEditorStore.getState().setActiveWysiwygEditor(live, "a");
+      await handleSelectionSet("c4", { content: "2" }, TEST_WRITE_CONTEXT);
+
+      expect(sent().certificate ?? null).toBeNull();
+      const post = useDocumentStore.getState().documents.a.content;
+      expect(post).toBe("# Title\n\npara one\n\npara 2\n");
+      const [, committed, extras] = fake.commitControlledWrite.mock.calls[0] as [string, string, { certificate?: object }];
+      expect(committed).toBe(post);
+      expect(extras?.certificate).toBeTruthy();
+      const bound = { ...extras.certificate, document: "d", epoch: "0", basis: "r" };
+      await expect(verifyPayloadTexts(bound, text, post)).resolves.toBeDefined();
+      const p = decodePayload(bound);
+      expect(p.whole).toBeNull();
+      expect(mapHunk(p, text, "para two").block).not.toBeNull();
+      expect(mapHunk(p, text, "itl").block).toBeNull();
+    } finally {
+      registerWysiwygFlusher("a", null);
+      stop();
+    }
+  });
+
+  it("a WYSIWYG editor without a provenance collector sends no certificate", async () => {
     seed("Hello world");
     editor = new Editor({ extensions: [StarterKit], content: "<p>Hello world</p>" });
     editor.commands.setTextSelection({ from: 7, to: 12 });
@@ -98,6 +148,8 @@ describe("selection.set — certificates", () => {
 
     expect(fake.prepareControlledWrite).toHaveBeenCalledTimes(1);
     expect(sent().certificate ?? null).toBeNull();
+    const extras = fake.commitControlledWrite.mock.calls[0]?.[2] as { certificate?: object } | undefined;
+    expect(extras?.certificate ?? null).toBeNull();
   });
 
   it("a Source editor whose text is not the journal's preimage sends no certificate", async () => {

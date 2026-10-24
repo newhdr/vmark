@@ -12,16 +12,19 @@
  * read-back after the caller's `recover`, and the MCP answer.
  *
  * Key decisions:
- *   - A commit is a whole-document barrier unless the edit names its exact
- *     change (`change`): only a Source `selection.set` knows one before it
- *     applies. Its certificate goes with the prepare; the journal binds it
- *     to the parent it mints and checks it against the applied text, and
- *     falls back to the barrier when it does not hold. `document.write`,
- *     `document.transform`, `workflow.apply_patch` and a WYSIWYG
- *     `selection.set` send none: the journal records the conservative
- *     barrier rather than a guessed mapping (fail closed).
+ *   - A commit is a whole-document barrier unless the edit certifies it:
+ *     with its exact change (`change`, a Source `selection.set`, known before
+ *     it applies), sent with the prepare; or after the apply (`certify`, a
+ *     WYSIWYG `selection.set`, from what the editor's collector saw), sent
+ *     with the commit through the coordinator's effects hook. The journal
+ *     binds either to the parent it mints, checks it against the applied
+ *     text, and falls back to the barrier when it does not hold.
+ *     `document.write`, `document.transform` and `workflow.apply_patch` send
+ *     none: the journal records the conservative barrier rather than a
+ *     guessed mapping (fail closed).
  *   - A certificate that cannot be built is logged and not sent: the write
- *     goes ahead as a barrier, never refused for it.
+ *     goes ahead as a barrier, never refused or degraded for it (the effects
+ *     hook never throws).
  *   - Refusals and aborts are answered here, so a caller only sees the
  *     applied outcome; `null` means the request has been answered. An apply
  *     that threw and changed the buffer is answered INTERNAL with
@@ -49,7 +52,7 @@
 
 import type { McpWriteContext } from "@/services/mcpBridge/writeContext";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
-import { prepareControlledWrite, type AbortReason } from "@/services/agentJournal/journalClient";
+import { prepareControlledWrite, type AbortReason, type CommitExtras } from "@/services/agentJournal/journalClient";
 import { prepareWithBaselineRetry } from "@/services/agentJournal/controlledMutation";
 import { runJournaledMutation, type JournaledOutcome } from "@/services/agentJournal/journaledMutation";
 import { journalActorFor } from "@/services/agentJournal/journalActor";
@@ -77,6 +80,12 @@ export interface JournaledEdit<T> {
    * certificate. Omitted when the edit cannot name one (a barrier).
    */
   change?: ExactChange;
+  /**
+   * After a successful apply: the certificate of what it applied, `preimage`
+   * → `postimage`, sent with the commit. Omitted, or answering `null`, the
+   * commit is a barrier.
+   */
+  certify?: (preimage: string, postimage: string) => Promise<SelectionCertificate | null>;
   context: McpWriteContext;
   /**
    * Apply now, synchronously. `postimage` is the text the store holds
@@ -105,6 +114,17 @@ async function certificateFor(edit: JournaledEdit<unknown>, preimage: string): P
   } catch (error) {
     journalWarn(`${edit.tool}: no certificate for its change; recording a barrier:`, error);
     return null;
+  }
+}
+
+/** The commit's extras: `edit.certify`'s certificate, or none when it has none or fails (logged, never thrown). */
+async function commitCertificate(edit: JournaledEdit<unknown>, preimage: string, postimage: string): Promise<CommitExtras> {
+  try {
+    const certificate = await edit.certify?.(preimage, postimage);
+    return certificate ? { certificate } : {};
+  } catch (error) {
+    journalWarn(`${edit.tool}: no certificate for its applied edit; recording a barrier:`, error);
+    return {};
   }
 }
 
@@ -149,6 +169,7 @@ export async function runJournaledEdit<T>(
     },
     verify: () => reverifyWriteTarget(target),
     apply: edit.apply,
+    ...(edit.certify ? { effects: (preimage: string, postimage: string) => commitCertificate(edit, preimage, postimage) } : {}),
     recover: () => {
       edit.recover?.();
       return storeText(tab.tabId);

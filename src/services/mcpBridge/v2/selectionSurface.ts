@@ -30,6 +30,9 @@
  *     attributes included: equal selected Markdown is not enough, since the
  *     Markdown may not carry a mark (`++underline++` comes back as literal
  *     text) and a block-spanning slice re-inserted splits its paragraphs.
+ *   - `captureApply` runs an apply and returns what the WYSIWYG provenance
+ *     collector saw of its flushes (the window its commit certificate is
+ *     built from); Source has nothing to capture, its change is exact.
  *   - While an IME composition is in progress in the editor (or has just
  *     ended and is not yet cleaned up), `writeRefusal` answers BUSY and
  *     `replaceSelection` throws: a replacement dispatched under the preedit
@@ -41,6 +44,7 @@
  * @coordinates-with utils/markdownPipeline/index.ts — parseMarkdown / serializeMarkdown
  * @coordinates-with services/ime/compositionWriteGate.ts — WYSIWYG composition state
  * @coordinates-with utils/imeGuard.ts — Source composition state
+ * @coordinates-with services/agentJournal/collectors/wysiwyg/wysiwygCollector.ts — the apply capture
  * @module services/mcpBridge/v2/selectionSurface
  */
 import type { Editor as TiptapEditor } from "@tiptap/core";
@@ -52,6 +56,8 @@ import { parseMarkdown, serializeMarkdown } from "@/utils/markdownPipeline";
 import { getSerializeOptions } from "@/plugins/toolbarActions/wysiwygAdapterUtils";
 import { isCompositionInProgress } from "@/services/ime/compositionWriteGate";
 import { isCodeMirrorComposing, isCodeMirrorInCompositionGrace } from "@/utils/imeGuard";
+import { captureWysiwygApply } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCollector";
+import type { WysiwygApplyCapture } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCertificate";
 import { composingRefusal } from "./liveEditor";
 import type { V2Error } from "./types";
 
@@ -76,6 +82,8 @@ export interface SelectionSurface {
   replaceSelection(content: string): void;
   /** Whether `replaceSelection(content)` would change the document; `false` only when provably not. */
   wouldChange(content: string): boolean;
+  /** Run `apply` (the replacement and its flush) and what the editor's provenance collector saw of it; `null` in Source or when nothing reported. */
+  captureApply<T>(apply: () => T): { value: T; capture: WysiwygApplyCapture | null };
 }
 
 /** Fail loudly if a caller replaces without asking `writeRefusal` first. */
@@ -184,6 +192,7 @@ function wysiwygSurface(editor: TiptapEditor): SelectionSurface {
     writeRefusal: () => (isCompositionInProgress(editor.view) ? composingRefusal() : null),
     replaceSelection: (content) => replaceTiptapSelection(editor, content),
     wouldChange: (content) => tiptapWouldChange(editor, content),
+    captureApply: (apply) => captureWysiwygApply(editor, apply),
   };
 }
 
@@ -212,6 +221,7 @@ function sourceSurface(view: CMView): SelectionSurface {
       });
     },
     wouldChange: (content) => content !== selectedText(),
+    captureApply: (apply) => ({ value: apply(), capture: null }),
   };
 }
 
