@@ -91,18 +91,55 @@ al_linked_tests() {
     | LC_ALL=C sort -u
 }
 
+# Sets _AL_MOD to the module path of one Rust source file, "" for the crate
+# root. The file path is the module path (`a/b.rs` → `a::b`, `a/mod.rs` → `a`)
+# unless a sibling mounts the file under another name with `#[path = "…"]`:
+# `#[path = "writer_replay.rs"] mod replay;` in `a/writer.rs` makes
+# `a/writer_replay.rs` the module `a::writer::replay`, and a filter built from
+# the file name would match no test at all.
+_al_module_path() {
+  local file="$1" depth="${2:-0}" dir base sib name m
+  _AL_MOD=""
+  dir="$(dirname "$file")"; base="$(basename "$file")"
+  if (( depth < 8 )); then
+    for sib in "$dir"/*.rs; do
+      [[ -f "$sib" && "$sib" != "$file" ]] || continue
+      name="$(awk -v want="$base" '
+        /^[[:space:]]*\/\// { next }
+        match($0, /#\[path[[:space:]]*=[[:space:]]*"[^"]*"\]/) {
+          p = substr($0, RSTART, RLENGTH); sub(/^#\[path[[:space:]]*=[[:space:]]*"/, "", p); sub(/"\]$/, "", p)
+          armed = (p == want) ? 4 : 0; next
+        }
+        armed > 0 {
+          if (match($0, /^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?mod[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*;/)) {
+            m = substr($0, RSTART, RLENGTH); sub(/;$/, "", m); sub(/[[:space:]]*$/, "", m); sub(/.*mod[[:space:]]+/, "", m)
+            print m; exit
+          }
+          armed--
+        }' "$sib")"
+      if [[ -n "$name" ]]; then
+        _al_module_path "$sib" $((depth + 1))
+        _AL_MOD="${_AL_MOD:+$_AL_MOD::}$name"
+        return 0
+      fi
+    done
+  fi
+  m="${file#src-tauri/src/}"; m="${m%.rs}"; m="${m%/mod}"
+  case "$m" in lib|main) _AL_MOD="" ;; *) _AL_MOD="${m//\//::}" ;; esac
+}
+
 # Sets _AL_FILTER to the cargo filter for one Rust test: the module path of
-# the file that mounts it (`a/b.rs` → `a::b::`, `a/mod.rs` → `a::`), or ""
-# when the crate root mounts it (run the whole crate). Global, not printed: a
-# command substitution would leave the dod-syntax probe server.
+# the file that mounts it followed by `::`, or "" when the crate root mounts
+# it (run the whole crate). Global, not printed: a command substitution would
+# leave the dod-syntax probe server.
 al_rust_filter() {
-  local f="$1" owner="" m
+  local f="$1" owner=""
   if [[ -f "${f%.test.rs}.rs" ]] && rust_test_included "${f%.test.rs}.rs" "$(basename "$f")"; then owner="${f%.test.rs}.rs"
   else rust_mount_owner "$f" >/dev/null; owner="$_DOD_MOUNT"; fi
   _AL_FILTER="-"
   [[ -n "$owner" ]] || return 1
-  m="${owner#src-tauri/src/}"; m="${m%.rs}"; m="${m%/mod}"
-  case "$m" in lib|main) _AL_FILTER="" ;; *) _AL_FILTER="${m//\//::}::" ;; esac
+  _al_module_path "$owner"
+  _AL_FILTER="${_AL_MOD:+$_AL_MOD::}"
 }
 
 # cargo test over the given filters, failing when no test ran: a filter that

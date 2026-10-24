@@ -194,3 +194,30 @@ describe("al-gate.sh scratch files", () => {
     expect(out).toMatch(/al-gate: cannot create a scratch directory/);
   });
 });
+
+describe("al_rust_filter names the module a Rust test is compiled under", () => {
+  const filter = (files, test) => {
+    const r = call(tree(files), `if al_rust_filter ${JSON.stringify(test)}; then echo "FILTER[$_AL_FILTER]"; else echo "FILTER-NONE"; fi`);
+    return /FILTER\[([^\]]*)\]|FILTER-NONE/.exec(r.out)?.[1] ?? null;
+  };
+  const mountTest = (name) => `#[cfg(test)]\n#[path = "${name}"]\nmod tests;\n`;
+  it.each([
+    ["a file mounted by its own name", { "src-tauri/src/a/mod.rs": "mod b;\n", "src-tauri/src/a/b.rs": mountTest("x.test.rs") }, "a::b::"],
+    ["a mod.rs owner is its directory", { "src-tauri/src/a/mod.rs": mountTest("x.test.rs") }, "a::"],
+    ["the crate root runs the whole crate", { "src-tauri/src/lib.rs": mountTest("x.test.rs") }, "", "src-tauri/src/x.test.rs"],
+    ["an owner renamed by #[path] takes the name it is mounted under",
+      { "src-tauri/src/a/mod.rs": "mod w;\n", "src-tauri/src/a/w.rs": '#[path = "w_replay.rs"]\nmod replay;\n', "src-tauri/src/a/w_replay.rs": mountTest("x.test.rs") },
+      "a::w::replay::"],
+    ["a rename two levels deep resolves through both",
+      { "src-tauri/src/a/w.rs": '#[path = "w_r.rs"]\npub(crate) mod r;\n', "src-tauri/src/a/w_r.rs": '#[path = "w_r_s.rs"]\nmod s;\n', "src-tauri/src/a/w_r_s.rs": mountTest("x.test.rs") },
+      "a::w::r::s::"],
+    ["a commented-out #[path] renames nothing",
+      { "src-tauri/src/a/w.rs": '// #[path = "w_replay.rs"]\n// mod replay;\n', "src-tauri/src/a/w_replay.rs": mountTest("x.test.rs") },
+      "a::w_replay::"],
+  ])("%s", (_, files, want, test = "src-tauri/src/a/x.test.rs") => {
+    expect(filter(files, test)).toBe(want);
+  });
+  it("an unmounted test file has no filter", () => {
+    expect(filter({ "src-tauri/src/a/mod.rs": "\n" }, "src-tauri/src/a/x.test.rs")).toBeNull();
+  });
+});
