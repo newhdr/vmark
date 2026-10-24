@@ -1,4 +1,4 @@
-//! The app windows' lifecycle, as the journal writer sees it.
+//! The app windows' lifecycle, as the journal sees it.
 //!
 //! A destroyed app window releases every base root its documents held and
 //! tombstones its label, so a capture still in flight cannot pin a stale
@@ -6,10 +6,21 @@
 //! rebuilds), so a live window under the label keeps it open whichever of
 //! the release and the rebuild runs first. Both are no-ops until the
 //! journal is ready.
+//!
+//! A page load that started, and a destroyed window, also revoke the
+//! label's page registrations (`page_events`) — from launch, not only once
+//! the journal is ready, because the page table exists from the start. The
+//! cleanup worker's pass then sweeps what the revoked pages owned. Neither
+//! takes the writer lock for the revocation, and the table update finishes
+//! before the destroy's writer call begins.
+
+use std::sync::Arc;
 
 use tauri::Manager;
 
 use super::AgentJournalState;
+use crate::agent_journal::admission::cleanup_worker::Pass;
+use crate::agent_journal::admission::page_events::{page_destroyed, page_started, sweep_pass};
 use crate::agent_journal::writer::Writer;
 
 fn writer<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<std::sync::Arc<Writer>> {
@@ -30,6 +41,9 @@ fn writer<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<std::sync::Arc
 /// returns to the event loop), so releasing the label's names takes none
 /// of its own.
 pub fn release_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>, label: &str) {
+    if let Some(state) = app.try_state::<AgentJournalState>() {
+        page_destroyed(&state.pages, &state.cleanup, label, cleanup_pass(app));
+    }
     if let Some(writer) = writer(app) {
         let rebuilt = app.get_webview_window(label).is_some();
         writer.release_window_label(label);
@@ -53,3 +67,26 @@ pub fn reopen_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>, label: 
         writer.reopen_window_label(label);
     }
 }
+
+/// A page load started in `label`'s webview: revoke its registrations and
+/// signal the cleanup worker. Runs on the main thread from the page-load
+/// hook; takes the page table's lock and the worker's, never the writer's.
+pub fn page_load_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>, label: &str) {
+    if let Some(state) = app.try_state::<AgentJournalState>() {
+        page_started(&state.pages, &state.cleanup, label, cleanup_pass(app));
+    }
+}
+
+/// The worker's pass: the sweep over the app's journal, once ready.
+fn cleanup_pass<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Pass {
+    let app = app.clone();
+    Arc::new(move || {
+        if let Some(state) = app.try_state::<AgentJournalState>() {
+            sweep_pass(state.controller(), &state.pages);
+        }
+    })
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+#[path = "service_pages.test.rs"]
+mod service_pages_tests;

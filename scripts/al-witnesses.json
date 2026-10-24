@@ -218,6 +218,126 @@
         "assert": ["\\bExecutable\\b", "\\bTerminalPending\\b", "\\bTerminal\\b", "\\bUnavailable\\b", "assert_eq!\\([^;]*appl(?:y|ies|ied)"]
       },
       {
+        "row": "page load revokes the owner: its commit is STALE_PAGE and the worker records uncommitted",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/page_lifecycle.test.rs",
+        "title": "revoked_owner_commit_is_stale_page_and_the_worker_records_uncommitted",
+        "runner": "cargo",
+        "assert": ["\\.started\\(", "STALE_PAGE", "\\brun_held\\(", "TxnStatus::Uncommitted"]
+      },
+      {
+        "row": "destroy between begin and admission: staleGeneration, nothing reserved",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/page_lifecycle.test.rs",
+        "title": "destroy_between_begin_and_admission_is_stale_generation_nothing_reserved",
+        "runner": "cargo",
+        "assert": ["\\bhold_original\\(", "\\.destroyed\\(", "assert_eq!\\([^;]*\\(0, 0, 0, 0\\)"]
+      },
+      {
+        "row": "page entries change the table before they signal the cleanup worker",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/page_lifecycle.test.rs",
+        "title": "each_entry_changes_the_table_before_it_signals_the_worker",
+        "runner": "cargo",
+        "assert": ["\\blife_inline\\(", "\\.started\\(", "\\.replace\\(", "\\.destroyed\\(", "OwnedEnd::Recorded"]
+      },
+      {
+        "row": "page entries return while the writer lock is held",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/page_lifecycle.test.rs",
+        "title": "writer_held_main_thread_rendezvous_needs_no_writer_lock",
+        "runner": "cargo",
+        "assert": ["writer\\.lock\\(\\)", "\\breturns_at_once\\(", "assert_eq!\\([^;]*labels\\(\\),\\s*0"]
+      },
+      {
+        "row": "cleanup worker: an event before the exit decision is served by the running worker",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/cleanup_worker.test.rs",
+        "title": "worker_exit_loses_reacquire_to_producer",
+        "runner": "cargo",
+        "assert": ["Point::AfterPass", "assert_eq!\\([^;]*spawns"]
+      },
+      {
+        "row": "cleanup worker: concurrent producers never run two passes, and a pass follows the last event",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/cleanup_worker.test.rs",
+        "title": "concurrent_producers_never_run_two_passes",
+        "runner": "cargo",
+        "assert": ["assert_eq!\\([^;]*max", "40_000"]
+      },
+      {
+        "row": "cleanup worker: a panicking pass leaves the work pending and counted, and the next event restarts it",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/cleanup_worker.test.rs",
+        "title": "a_panicking_pass_clears_running_and_the_next_event_restarts_it",
+        "runner": "cargo",
+        "assert": ["assert_eq!\\(w\\.state\\(\\), \\(true, false\\)", "assert_eq!\\([^;]*spawns[^;]*\\(1, 2\\)"]
+      },
+      {
+        "row": "cleanup worker: a refused spawn rolls back the claim",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/cleanup_worker.test.rs",
+        "title": "spawn_failure_rolls_back_worker_claim",
+        "runner": "cargo",
+        "assert": ["assert_eq!\\(w\\.state\\(\\), \\(true, false\\)", "assert_eq!\\([^;]*w\\.failures\\(\\)"]
+      },
+      {
+        "row": "owner death: a queued commit is left as it is and survives",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/owner_death.test.rs",
+        "title": "a_queued_commit_is_left_as_it_is_and_survives",
+        "runner": "cargo",
+        "assert": ["\\.commit\\(", "OwnedEnd::AlreadyQueued", "assert_eq!\\(queue\\(&l\\), queued"]
+      },
+      {
+        "row": "owner death: a cleanup append failing once is released by the drainer alone",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/owner_death.test.rs",
+        "title": "cleanup_append_failing_once_is_released_by_the_drainer_alone",
+        "runner": "cargo",
+        "assert": ["fail_next_appends\\(1\\)", "OwnedEnd::Queued", "\\breleased\\("]
+      },
+      {
+        "row": "owner death: destroying one window ends only its transactions",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/owner_death.test.rs",
+        "title": "destroying_one_window_ends_only_its_transactions",
+        "runner": "cargo",
+        "assert": ["\\.destroyed\\(", "OwnedEnd::Recorded", "TxnStatus::Prepared"]
+      },
+      {
+        "row": "owner death: discarded and resolved are already terminal, with nothing appended",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/owner_death.test.rs",
+        "title": "discarded_and_resolved_are_already_terminal",
+        "runner": "cargo",
+        "assert": ["TxnStatus::Discarded", "TxnStatus::Resolved", "\\bswept_as_already_terminal\\("]
+      },
+      {
+        "row": "abandon racing a queued commit keeps the earlier intent, in both orders",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/request_abandon_race.test.rs",
+        "title": "abandon_racing_a_queued_commit_keeps_the_earlier_intent",
+        "runner": "cargo",
+        "assert": ["\\.commit\\(", "\\.abandon\\(", "\\bone_intent\\("]
+      },
+      {
+        "row": "abandon racing a queued abort keeps the earlier intent, in both orders",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/request_abandon_race.test.rs",
+        "title": "abandon_racing_a_queued_abort_keeps_the_earlier_intent",
+        "runner": "cargo",
+        "assert": ["\\.abort\\(", "\\.abandon\\(", "\\bone_intent\\("]
+      },
+      {
+        "row": "the journal status reports cleanup worker failures",
+        "wi": "WI-AL2.2h",
+        "file": "src-tauri/src/agent_journal/cleanup_worker.test.rs",
+        "title": "the_status_reports_cleanup_worker_failures",
+        "runner": "cargo",
+        "assert": ["cleanupWorkerFailures", "cleanup_worker_failures"]
+      },
+      {
         "row": "uncertainty contract: the freeze is released only on a confirmed clean refusal",
         "wi": "WI-AL2.2g",
         "file": "src/services/agentJournal/__tests__/journalUncertainty.test.ts",

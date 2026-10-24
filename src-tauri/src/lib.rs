@@ -187,6 +187,16 @@ pub fn run() {
         })
         .invoke_handler(crate::all_commands!())
         .setup(app_setup::setup_app)
+        // A page load that started revokes the webview's journal page
+        // registrations (main thread; never takes the journal writer lock).
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                agent_journal::service::page_load_started(
+                    tauri::Manager::app_handle(webview),
+                    webview.label(),
+                );
+            }
+        })
         .on_menu_event(menu::events::handle_menu_event)
         // CRITICAL: Only intercept close for document windows (main, doc-*)
         // Non-document windows (settings) should close normally

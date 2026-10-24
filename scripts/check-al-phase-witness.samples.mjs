@@ -103,6 +103,52 @@ export const SAMPLES = {
     "assert!(matches!(a, Duplicate::Executable));", "assert!(matches!(b, Duplicate::TerminalPending));", "assert!(matches!(c, Duplicate::Terminal));",
     "assert!(matches!(d, Duplicate::Unavailable));", "assert_eq!(applies.get(), 1);",
   ],
+  "page load revokes the owner: its commit is STALE_PAGE and the worker records uncommitted": [
+    "l.started(&a.label);", 'assert_eq!(journal_code(&e), "STALE_PAGE");', "l.run_held();", "assert_eq!(l.r.status(txn), Some(TxnStatus::Uncommitted));",
+  ],
+  "destroy between begin and admission: staleGeneration, nothing reserved": [
+    "let (held, go) = hold_original(&l.r, &a, &p);", "l.destroyed(&a.label);", "assert_eq!((inflight, owners, receipts, reservations), (0, 0, 0, 0));",
+  ],
+  "page entries change the table before they signal the cleanup worker": [
+    "let l = life_inline();", "l.started(&a.label);", "l.replace(&a, 3);", "l.destroyed(&b.label);", "assert_eq!(l.ended()[2..], [(t3, OwnedEnd::Recorded)]);",
+  ],
+  "page entries return while the writer lock is held": [
+    "let g = l.r.c.writer.lock();", "returns_at_once(move || other.started(&label));", "assert_eq!(l.r.pages.labels(), 0);",
+  ],
+  "cleanup worker: an event before the exit decision is served by the running worker": [
+    "let (reached, go) = pause_once(&w, Point::AfterPass);", "assert_eq!(spawns.load(SeqCst), 1);",
+  ],
+  "cleanup worker: concurrent producers never run two passes, and a pass follows the last event": [
+    "assert_eq!(g.max.load(SeqCst), 1);", "assert_eq!(seen.load(SeqCst), 40_000);",
+  ],
+  "cleanup worker: a panicking pass leaves the work pending and counted, and the next event restarts it": [
+    "assert_eq!(w.state(), (true, false));", "assert_eq!((g.passes.load(SeqCst), spawns.load(SeqCst)), (1, 2));",
+  ],
+  "cleanup worker: a refused spawn rolls back the claim": [
+    "assert_eq!(w.state(), (true, false));", "assert_eq!((w.failures(), g.passes.load(SeqCst)), (1, 0));",
+  ],
+  "owner death: a queued commit is left as it is and survives": [
+    'l.r.commit(&a, txn, "text!").unwrap();', "assert_eq!(l.ended(), vec![(txn, OwnedEnd::AlreadyQueued)]);", "assert_eq!(queue(&l), queued);",
+  ],
+  "owner death: a cleanup append failing once is released by the drainer alone": [
+    "l.r.faults.fail_next_appends(1);", "assert_eq!(l.ended(), vec![(txn, OwnedEnd::Queued)]);", "released(&l, txn);",
+  ],
+  "owner death: destroying one window ends only its transactions": [
+    "l.destroyed(&a.label);", "assert_eq!(l.ended(), vec![(ta, OwnedEnd::Recorded)]);", "assert_eq!(l.r.status(tb), Some(TxnStatus::Prepared));",
+  ],
+  "owner death: discarded and resolved are already terminal, with nothing appended": [
+    "assert!(matches!(l.r.status(txn), Some(TxnStatus::Discarded { .. })));", "assert_eq!(l.r.status(txn), Some(TxnStatus::Resolved { by }));",
+    "swept_as_already_terminal(&l, txn);",
+  ],
+  "abandon racing a queued commit keeps the earlier intent, in both orders": [
+    'r.commit(&a, txn, "text!").unwrap();', "let later = r.abandon(&a.label, &p);", 'one_intent(&r, txn, "Committed", TxnStatus::Committed);',
+  ],
+  "abandon racing a queued abort keeps the earlier intent, in both orders": [
+    "r.abort(&a, txn).unwrap();", "let later = r.abandon(&a.label, &p);", 'one_intent(&r, txn, "edited", TxnStatus::Aborted);',
+  ],
+  "the journal status reports cleanup worker failures": [
+    'assert_eq!(json["cleanupWorkerFailures"], json!(0));', "assert_eq!(state.status().cleanup_worker_failures, 1);",
+  ],
   "uncertainty contract: the freeze is released only on a confirmed clean refusal": [
     "expect(release).toHaveBeenCalled();", "expect(releaseOnRetry).not.toHaveBeenCalled();", "expect(invalidate).toHaveBeenCalled();",
     "expect(out).toMatchObject({ indeterminate: true });",

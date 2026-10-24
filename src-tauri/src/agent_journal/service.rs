@@ -32,13 +32,14 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
+use crate::agent_journal::admission::cleanup_worker::CleanupWorker;
 use crate::agent_journal::admission::page_table::PageTable;
 use crate::agent_journal::capture::{docs_with_pending, linearize_all_pending};
 use crate::agent_journal::controller::Controller;
 use crate::agent_journal::degraded_drain::DrainScheduler;
 use crate::agent_journal::doc_registry::DocRegistry;
 use crate::agent_journal::generation_events::{LiveUpdates, LiveUpdatesCell};
-use crate::agent_journal::journal_file::{create_dir_durable, SyncPolicy};
+use crate::agent_journal::journal_file::SyncPolicy;
 use crate::agent_journal::legacy_import::{
     import_legacy_file, LegacyImportReport, LEGACY_CHECKPOINT_FILE,
 };
@@ -73,7 +74,7 @@ pub struct Started {
 /// cannot be recovered; typed when a newer build wrote it (`service_off`).
 pub fn start(app_data: &Path) -> Result<Started, StartFailure> {
     let dir = app_data.join(JOURNAL_DIR);
-    private_dir(&dir).map_err(|e| StartFailure::open(&e.into()))?;
+    startup::private_dir(&dir).map_err(|e| StartFailure::open(&e.into()))?;
     let cfg = WriterConfig {
         dir: dir.clone(),
         sync: SyncPolicy::Full,
@@ -100,19 +101,6 @@ pub fn start(app_data: &Path) -> Result<Started, StartFailure> {
         retirement,
         gc,
     })
-}
-
-/// Create `dir` if needed, its new names fsynced, and make it `0700` on
-/// Unix (also when an earlier run left it wider). On Windows the app-data
-/// directory's ACL is the boundary.
-fn private_dir(dir: &Path) -> std::io::Result<()> {
-    create_dir_durable(dir, true)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -148,6 +136,8 @@ pub struct AgentJournalStatus {
     pub incarnation: Option<String>,
     /// Page registrations refused at the per-label cap since launch.
     pub registration_cap_refusals: u64,
+    /// Cleanup-worker runs lost to a failed start or a panic since launch.
+    pub cleanup_worker_failures: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub legacy: Option<LegacyImportReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,8 +169,10 @@ pub struct AgentJournalState {
     pub(super) git_exports: Arc<Mutex<()>>,
     /// Set by the generation-event forwarder (`generation_events`).
     live_updates: Arc<LiveUpdatesCell>,
-    /// Live webview pages; process-wide, so it outlives no writer.
+    /// Live webview pages, and the worker that sweeps after revocations;
+    /// process-wide, so they outlive no writer.
     pages: Arc<PageTable>,
+    pub(super) cleanup: Arc<CleanupWorker>,
 }
 
 impl AgentJournalState {
@@ -252,6 +244,7 @@ impl AgentJournalState {
             uncertified_fallbacks: 0,
             incarnation: None,
             registration_cap_refusals: self.pages.registration_cap_refusals(),
+            cleanup_worker_failures: self.cleanup.failures(),
             legacy: None,
             retirement: None,
             identity,
@@ -290,7 +283,7 @@ impl AgentJournalState {
 
 #[path = "service_windows.rs"]
 mod windows;
-pub use windows::{release_window_label, reopen_window_label};
+pub use windows::{page_load_started, release_window_label, reopen_window_label};
 #[path = "service_off.rs"]
 mod off;
 pub use off::StartFailure;

@@ -15,6 +15,9 @@
 //!   a receipted request's transaction.
 //! - `reduce` — what `Projection::apply` checks before an admission's
 //!   items, or a receipted record, reduce.
+//! - `page_events`, `cleanup_worker` — a page load, a destroyed window or a
+//!   replaced registration revokes generations and signals the one worker
+//!   whose passes sweep what the revoked pages owned.
 //!
 //! @module agent_journal/admission
 
@@ -22,9 +25,11 @@ pub mod abandon;
 pub mod answer;
 pub(crate) mod blobs;
 pub mod bound;
+pub mod cleanup_worker;
 pub(crate) mod framed;
 pub mod identity;
 pub mod owned;
+pub mod page_events;
 pub mod page_table;
 pub(crate) mod payload;
 pub(crate) mod prepare;
@@ -124,3 +129,23 @@ mod duplicate_requests_tests;
 #[cfg(test)]
 #[path = "../request_settle.test.rs"]
 mod request_settle_tests;
+
+#[cfg(test)]
+#[path = "../lifecycle_support.test.rs"]
+pub(crate) mod lifecycle_support;
+
+#[cfg(test)]
+#[path = "../cleanup_worker.test.rs"]
+mod cleanup_worker_tests;
+
+#[cfg(test)]
+#[path = "../page_lifecycle.test.rs"]
+mod page_lifecycle_tests;
+
+#[cfg(test)]
+#[path = "../owner_death.test.rs"]
+mod owner_death_tests;
+
+#[cfg(test)]
+#[path = "../request_abandon_race.test.rs"]
+mod request_abandon_race_tests;

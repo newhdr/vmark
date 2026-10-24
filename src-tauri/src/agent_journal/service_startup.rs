@@ -2,7 +2,23 @@
 //! journal and publishes the outcome into the managed
 //! [`AgentJournalState`]; a thread that cannot spawn publishes a failure.
 
+use std::path::Path;
+
 use super::{start, AgentJournalState};
+use crate::agent_journal::journal_file::create_dir_durable;
+
+/// Create `dir` if needed, its new names fsynced, and make it `0700` on
+/// Unix (also when an earlier run left it wider). On Windows the app-data
+/// directory's ACL is the boundary.
+pub(super) fn private_dir(dir: &Path) -> std::io::Result<()> {
+    create_dir_durable(dir, true)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
 
 /// Open the journal on a background thread and publish the outcome into the
 /// managed [`AgentJournalState`]. Failures are logged at error level.

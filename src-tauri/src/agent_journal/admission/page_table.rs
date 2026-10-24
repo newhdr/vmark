@@ -252,6 +252,12 @@ impl PageTable {
         self.lock().labels.get(label).map_or(0, Vec::len)
     }
 
+    /// Labels the table holds (open windows), registrations or not.
+    #[cfg(test)]
+    pub(crate) fn labels(&self) -> usize {
+        self.lock().labels.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn set_next(&self, next: u64) {
         self.lock().next = next;
