@@ -29,7 +29,7 @@ import {
   mount,
   store,
   typeAfter,
-} from "../collectors/wysiwyg/__tests__/netZeroHarness";
+} from "@/test/wysiwygNetZeroHarness";
 
 const PATH = "/notes.md";
 const KEY = `path:${PATH}`;

@@ -1,7 +1,11 @@
-// Shared fixture for the WYSIWYG net-zero tests: a production Tiptap editor
-// with the provenance collector on tab "t1", loads and flushes the way the
-// production paths make them, edits that leave the Markdown unchanged, and a
-// freeze that decodes its window for the span oracle.
+/**
+ * Shared fixture for the WYSIWYG net-zero tests: a production Tiptap editor
+ * with the provenance collector on tab "t1", loads and flushes the way the
+ * production paths make them, edits that leave the Markdown unchanged, and a
+ * freeze that decodes its window for the span oracle.
+ *
+ * @module test/wysiwygNetZeroHarness
+ */
 import { expect } from "vitest";
 import { Editor } from "@tiptap/core";
 import { createTiptapExtensions } from "@/services/assembly/createTiptapExtensions";
@@ -12,7 +16,7 @@ import { freezeUnsavedProvenance } from "@/services/agentJournal/unsavedProvenan
 import { decodePayload } from "@/services/agentJournal/provenance/payload";
 import type { Provenance } from "@/services/agentJournal/provenance/accumulator";
 import { mapSpan } from "@/services/agentJournal/provenance/__tests__/spanMapping";
-import { noteWysiwygFlush, wysiwygProvenanceExtension } from "../wysiwygCollector";
+import { noteWysiwygFlush, wysiwygProvenanceExtension } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCollector";
 
 const OPTS = { preserveBlankLines: true } as const;
 export const store = () => useDocumentStore.getState();

@@ -9,7 +9,7 @@ import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
 import { ProvenanceSession, type ProvenanceCollector } from "@/services/agentJournal/provenance/session";
 import { provenanceSessionFor, startProvenanceSessions } from "@/services/agentJournal/provenanceSessions";
 import { MAX_RETAINED_STEPS, TxnLedger } from "../txnLedger";
-import { deleteAndRetype, destroyEditors, flush, freezeDecoded, load, mapHunk, mount, posOf, store } from "./netZeroHarness";
+import { deleteAndRetype, destroyEditors, flush, freezeDecoded, load, mapHunk, mount, posOf, store } from "@/test/wysiwygNetZeroHarness";
 
 const TEXT = "# Title\n\npara one\n\npara two 中文😀\n";
 let stop: (() => void) | null = null;
