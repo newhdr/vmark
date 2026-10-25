@@ -22,9 +22,13 @@
  *     its revision changed. `composing`: a live editor showing the tab
  *     (WYSIWYG or Source) has an IME composition in progress or in its
  *     grace (the same check that answers BUSY before a write). `selection`: the live editor's
- *     selection moved while the tab stayed focused, or — for a write that
- *     requires focus (it named no tab, or edits the selection) — the
- *     focused tab is no longer the one the write resolved to. Any other
+ *     selection the write captured moved, or its editor went away, while the
+ *     tab stayed focused; or — for a write that requires focus (it named
+ *     no tab, or edits the selection) — the focused tab is no longer the
+ *     one the write resolved to. A write captured with no live selection (no
+ *     editor showed the tab yet, or the tab was not focused) is not
+ *     aborted when an editor mounts or the user switches to the tab: that
+ *     is not a selection the user moved. Any other
  *     explicit-target write to a tab the user switched away from goes
  *     ahead: it no longer touches what the user is doing.
  *   - Synchronous, so the caller can apply in the same task with nothing
@@ -127,6 +131,9 @@ export function reverifyWriteTarget(target: WriteTarget): AbortReason | null {
   if (liveCompositionRefusal(target.tabId)) return "composing";
   const focused = focusedTabId() === target.tabId;
   if (target.requireFocus && !focused) return "selection";
-  if (focused && selectionKey(target.tabId) !== target.selection) return "selection";
+  // Only a selection the write saw can have moved: one captured as `null` (no
+  // live editor showed the tab, or it was not focused) is not the user's
+  // selection moving when an editor mounts or the user switches to the tab.
+  if (focused && target.selection !== null && selectionKey(target.tabId) !== target.selection) return "selection";
   return null;
 }
