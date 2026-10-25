@@ -1,5 +1,5 @@
 //! Tauri commands of the history panel over the agent edit journal: prepare
-//! a restore (committed or aborted through `agent_journal_commit` /
+//! a restore or a hunk revert (committed or aborted through `agent_journal_commit` /
 //! `agent_journal_abort`), list a document's revisions, list or discard a document's uncommitted
 //! entries, and keep the panel's checkpoints (`controller_checkpoints`).
 //!
@@ -13,6 +13,7 @@
 use crate::agent_journal::admission::bound::{bind_call, Bound, CallBind, RequestBind};
 use crate::agent_journal::commands::run;
 use crate::agent_journal::controlled_restore::RestorePrepared;
+use crate::agent_journal::controlled_revert::RevertReply;
 use crate::agent_journal::controller::AbortReply;
 use crate::agent_journal::controller_checkpoints::CheckpointView;
 use crate::agent_journal::controller_doc_history::DocHistory;
@@ -38,6 +39,30 @@ pub async fn agent_journal_restore_prepare<R: tauri::Runtime>(
     let label = webview.label().to_owned();
     run(&state, move |c| {
         c.restore_prepare_framed(&pages, &label, &payload)
+    })
+    .await
+}
+
+/// Prepare a revert of one hunk from a frozen payload (JSON `{docKey,
+/// parent, observedParent, preimage, hunkId, expectedReviewGen,
+/// baselineProvenance?, baselineTouched?, capture?, requestId,
+/// incarnation, webviewGeneration, pageIdentity}`) for the invoking page;
+/// replies `{bind: {requestId, digest}, reply: {kind, response}}`: kind
+/// `prepared` with the patch to apply, or `decided` with the review
+/// decision recorded instead.
+///
+/// # Errors
+/// A journal refusal (`detail.journalCode`), or the off refusal.
+#[tauri::command]
+pub async fn agent_journal_revert_prepare<R: tauri::Runtime>(
+    webview: tauri::Webview<R>,
+    state: tauri::State<'_, AgentJournalState>,
+    payload: String,
+) -> Result<Bound<RequestBind, RevertReply>, CommandError> {
+    let pages = state.pages().clone();
+    let label = webview.label().to_owned();
+    run(&state, move |c| {
+        c.revert_prepare_framed(&pages, &label, &payload)
     })
     .await
 }

@@ -91,7 +91,7 @@ impl Writer {
         let preimage = referenced_blob(&mut g.blobs, &t.preimage)?;
         let (window, reverted, certification) =
             self.commit_window(&mut g, &t, &preimage, &req, sent)?;
-        let reverted_ref = reverted.as_ref().map(|(id, r)| (id, *r));
+        let reverted_ref = reverted.as_ref().map(|(id, r, _)| (id, *r));
         let ctx = EffectsCtx {
             doc: g.proj.docs.get(&t.doc),
             op: &t.review_op,

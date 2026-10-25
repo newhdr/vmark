@@ -1,4 +1,4 @@
-// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound)
+// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound) | AL2.2d: the revert prepare is request-bound like the restore prepare
 //! Each command is invoked the way a webview invokes it: through the mock
 //! runtime's IPC layer and the generated handler. Gated off Windows, where
 //! `tauri::test` does not exist.
@@ -280,7 +280,9 @@ fn every_journal_command_reply_is_bound() {
         let returns = &sig[sig.find("->").expect("returns")..];
         match *name {
             // R98: bound by the request's own id and digest, or its pair.
-            "agent_journal_prepare" | "agent_journal_restore_prepare" => {
+            "agent_journal_prepare"
+            | "agent_journal_restore_prepare"
+            | "agent_journal_revert_prepare" => {
                 assert!(returns.contains("Bound<RequestBind"), "{name}: {sig}")
             }
             "agent_journal_commit" | "agent_journal_abort" => {

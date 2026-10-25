@@ -13,14 +13,18 @@ use crate::agent_journal::ids::HunkId;
 use crate::agent_journal::projection::TxnEntry;
 use crate::agent_journal::provenance::{BreakReason, Certificate, Provenance};
 use crate::agent_journal::revert_gate::RevertDecision;
-use crate::agent_journal::review::{Range, ReviewOp};
+use crate::agent_journal::review::{Range, ReviewEffects, ReviewOp};
 use crate::agent_journal::writer::certificate::{certify_commit, Certification};
 use crate::agent_journal::writer::{CommitRequest, Inner, Writer};
 use crate::agent_journal::writer_epoch::{basis_of, check_payload, whole_window};
 use crate::agent_journal::writer_revert::plan;
 
+/// The hunk a `hunkRevert` reverts, the range it restores, and the effects
+/// its plan derived (the only effects such a commit may carry).
+pub(super) type Reverted = (HunkId, Range, ReviewEffects);
+
 /// A commit window, the revert it applies, and its certification.
-type Window = (Provenance, Option<(HunkId, Range)>, Certification);
+type Window = (Provenance, Option<Reverted>, Certification);
 
 impl Writer {
     /// The map a commit's effects are derived from: the revert's own
@@ -59,7 +63,11 @@ impl Writer {
                     (RevertDecision::Apply { postimage, .. }, Some((w, r)))
                         if postimage == req.postimage =>
                     {
-                        Ok((w, Some((hunk_id.clone(), r)), Certification::Absent))
+                        Ok((
+                            w,
+                            Some((hunk_id.clone(), r, p.effects)),
+                            Certification::Absent,
+                        ))
                     }
                     _ => refuse("the postimage is not the revert of the hunk"),
                 }

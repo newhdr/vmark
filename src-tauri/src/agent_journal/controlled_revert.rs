@@ -119,6 +119,15 @@ pub struct RevertDecided {
     pub head: Option<RevisionId>,
 }
 
+/// A framed revert's reply: the patch to apply, or the decision recorded
+/// instead (`{kind, response}`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "response", rename_all = "camelCase")]
+pub enum RevertReply {
+    Prepared(RevertPrepared),
+    Decided(RevertDecided),
+}
+
 /// Decode a revert prepare payload (`INVALID_TEXT`, then the shape).
 pub fn decode_revert_prepare(payload: &[u8]) -> Result<RevertPrepareRequest, TxnError> {
     decode(payload)

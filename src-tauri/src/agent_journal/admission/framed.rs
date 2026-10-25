@@ -1,4 +1,4 @@
-//! A framed prepare: an agent write or a restore whose payload names the
+//! A framed prepare: an agent write, a restore or a revert whose payload names the
 //! writer incarnation and the page (generation and identity) it was frozen
 //! for, answered by the request protocol.
 //!
@@ -39,6 +39,7 @@ use crate::agent_journal::controlled::{controlled_prep, decode_prepare, reused_i
 use crate::agent_journal::controlled_restore::{
     decode_restore_prepare, restore_prep, RestorePrepared,
 };
+use crate::agent_journal::controlled_revert::{decode_revert_prepare, revert_prep, RevertReply};
 use crate::agent_journal::controlled_wire::ControlledPrepared;
 use crate::agent_journal::controller::Controller;
 use crate::agent_journal::errors::TxnError;
@@ -101,6 +102,33 @@ impl Controller {
             }),
             _ => Err(refusal(&reused_id())),
         }
+    }
+
+    /// Prepare a revert from a framed payload: the patch, or the review
+    /// decision a revert that does not apply records instead.
+    ///
+    /// # Errors
+    /// As `prepare_framed`.
+    pub fn revert_prepare_framed(
+        &self,
+        pages: &PageTable,
+        label: &str,
+        payload: &str,
+    ) -> Result<Bound<RequestBind, RevertReply>, CommandError> {
+        let frame = Frame::decode(payload)?;
+        let req = decode_revert_prepare(frame.body().as_bytes()).map_err(|e| refusal(&e))?;
+        let request = frame.request(req.request_id)?;
+        let key = req.doc_key.clone();
+        let prep = revert_prep(req).map_err(|e| refusal(&e))?;
+        let reply = match self.run_framed(pages, label, &frame, &request, &key, prep)? {
+            Outcome::Prepared(PreparedResponse::Revert(p)) => RevertReply::Prepared(p),
+            Outcome::Decision(d) => RevertReply::Decided(d),
+            Outcome::Prepared(_) => return Err(refusal(&reused_id())),
+        };
+        Ok(Bound {
+            bind: frame.bind(&request),
+            reply,
+        })
     }
 
     fn run_framed(

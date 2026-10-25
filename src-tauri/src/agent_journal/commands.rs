@@ -272,3 +272,6 @@ pub(crate) mod commands_dispatch;
 #[cfg(all(test, not(target_os = "windows")))]
 #[path = "future_format_dispatch.test.rs"]
 mod future_format_dispatch;
+#[cfg(all(test, not(target_os = "windows")))]
+#[path = "revert_dispatch.test.rs"]
+mod revert_dispatch;

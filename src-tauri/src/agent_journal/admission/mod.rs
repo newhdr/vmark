@@ -164,3 +164,10 @@ mod request_abandon_race_tests;
 #[cfg(test)]
 #[path = "../expected_head.test.rs"]
 mod expected_head_tests;
+#[cfg(test)]
+#[path = "../revert_commit.test.rs"]
+mod revert_commit_tests;
+
+#[cfg(test)]
+#[path = "../revert_controller.test.rs"]
+mod revert_controller_tests;

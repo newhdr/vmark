@@ -191,10 +191,10 @@ impl Writer {
         let preimage = referenced_blob(&mut g.blobs, &t.preimage)?;
         let (window, reverted, certification) =
             self.commit_window(&mut g, &t, &preimage, req, sent)?;
-        if reverted.is_some() {
-            return Err(TxnError::InvalidRequest(
-                "a hunkRevert's effects are not derived here".into(),
-            ));
+        // A revert's effects are its plan's, derived under this lock from
+        // the head text; the window sends none.
+        if let Some((_, _, effects)) = reverted {
+            return Ok(effects);
         }
         let new_hunks = match t.review_op {
             ReviewOp::Restore { .. } => {
