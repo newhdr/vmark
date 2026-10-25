@@ -41,6 +41,7 @@ fn prepare_with(
         "actor": mcp_actor(),
         "tool": "document.write",
         "baselineProvenance": flushed,
+        "observedParent": observed_on(parent),
     }))
     .unwrap();
     let req = decode_prepare(&payload)?;

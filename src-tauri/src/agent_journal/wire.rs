@@ -62,3 +62,14 @@ pub(crate) fn decode_json<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Res
     check_json_text(payload)?;
     serde_json::from_slice(payload).map_err(|e| TxnError::InvalidRequest(e.to_string()))
 }
+
+/// Read a nullable field that must be present: serde fills a missing
+/// `Option` with `None`, which would let an absent key pass for `null`.
+/// Use as `#[serde(deserialize_with = "…::wire::required")]`.
+pub fn required<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    serde::Deserialize::deserialize(d)
+}

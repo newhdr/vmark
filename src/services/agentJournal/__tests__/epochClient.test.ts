@@ -1,10 +1,10 @@
 // @vitest-environment node
-// WI-AL1.4 — editing epochs and window release over IPC: arm replies are validated (doc, decimal epoch, head with its sha256 text hash or neither), close and release pass their arguments as the commands expect, a refusal carries detail.field so a window can tell a refused map from a refused save, and every call on the save path is bounded by a deadline that refuses JOURNAL_TIMEOUT (charged from the call's start, including the client's own work)
+// WI-AL1.4 — editing epochs and window release over IPC: arm replies are validated (doc, decimal epoch, head with its sha256 text hash or neither), close and release pass their arguments as the commands expect, a refusal carries detail.field so a window can tell a refused map from a refused save, and every call on the save path is bounded by a deadline that refuses JOURNAL_TIMEOUT (charged from the call's start, including the client's own work) | AL2.2c: readJournalHead reads a key's head (a revision id, or null at genesis or for a key with no document) and refuses any other reply
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.unmock("@/services/agentJournal/epochClient");
 import { invoke } from "@tauri-apps/api/core";
-import { armEpoch, bindDocument, closeEpoch, findDocument, releaseWindow } from "../epochClient";
+import { armEpoch, bindDocument, closeEpoch, findDocument, readJournalHead, releaseWindow } from "../epochClient";
 import { JOURNAL_DEADLINE_MS, withJournalDeadline } from "../journalDeadline";
 import { JournalRefusal, toJournalRefusal } from "../journalRefusal";
 
@@ -104,6 +104,30 @@ describe("findDocument", () => {
   it("reads a rejection as a journal refusal", async () => {
     invokeMock.mockRejectedValueOnce({ code: "invalid_input", message: "INVALID_REQUEST: empty key", detail: { journalCode: "INVALID_REQUEST" } });
     await expect(findDocument("")).rejects.toMatchObject({ journalCode: "INVALID_REQUEST" });
+  });
+});
+
+describe("readJournalHead", () => {
+  it("sends the doc key as one JSON payload and returns the head or null", async () => {
+    invokeMock.mockResolvedValueOnce(REV);
+    await expect(readJournalHead("path:/读书.md")).resolves.toBe(REV);
+    expect(invokeMock).toHaveBeenLastCalledWith("agent_journal_head", { payload: JSON.stringify({ docKey: "path:/读书.md" }) });
+    invokeMock.mockResolvedValueOnce(null);
+    await expect(readJournalHead("k")).resolves.toBeNull();
+  });
+
+  it.each([
+    ["an empty id", ""],
+    ["an object", { revision: REV }],
+    ["no reply", undefined],
+  ])("refuses %s as JOURNAL_UNAVAILABLE", async (_name, reply) => {
+    invokeMock.mockResolvedValueOnce(reply);
+    await expect(readJournalHead("k")).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });
+  });
+
+  it("reads a rejection as a journal refusal", async () => {
+    invokeMock.mockRejectedValueOnce({ code: "invalid_input", message: "JOURNAL_UNAVAILABLE: off", detail: { journalCode: "JOURNAL_UNAVAILABLE" } });
+    await expect(readJournalHead("k")).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });
   });
 });
 

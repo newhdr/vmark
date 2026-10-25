@@ -14,7 +14,7 @@ use crate::agent_journal::projection::TxnStatus;
 fn rebind_then_retry_returns_the_stored_response() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let first = r.prepare(&a, &p).expect("prepare");
     r.c.docs.bind(KEY, "path:/notes/moved.md").expect("Save As");
     let len = r.journal_len();
@@ -29,7 +29,7 @@ fn duplicate_from_another_page_is_conflict() {
     let r = rig();
     let a = r.page("doc-a", 1);
     let b = r.page("doc-b", 2);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     let len = r.journal_len();
     let e = r.prepare_as(&b.label, &p).expect_err("A's bytes from B");
@@ -50,7 +50,7 @@ fn abandon_from_another_page_is_conflict() {
     let r = rig();
     let a = r.page("doc-a", 1);
     let b = r.page("doc-b", 2);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     let e = r.abandon(&b.label, &p).expect_err("A's bytes from B");
     assert_eq!(state(&e), "conflict");
@@ -67,7 +67,7 @@ fn revoked_owner_payload_from_another_page_is_stale_generation() {
     let r = rig();
     let a = r.page("doc-a", 1);
     let b = r.page("doc-b", 2);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     r.pages.started(&a.label);
     for label in [&b.label, &a.label] {
@@ -90,12 +90,12 @@ fn live_owner_payload_from_another_page_is_conflict() {
     let r = rig();
     let a = r.page("doc-a", 1);
     let b = r.page("doc-b", 2);
-    let receipted = r.p(&a, None, "text");
+    let receipted = r.p_head(&a, "text");
     r.prepare(&a, &receipted).expect("prepare");
     let fenced = r.p(&a, Some(RevisionId::new()), "text");
     r.prepare(&a, &fenced).expect_err("refused, so fenced");
-    let unknown = r.p(&a, None, "text");
-    let running = r.p(&a, None, "text");
+    let unknown = r.p_head(&a, "text");
+    let running = r.p_head(&a, "text");
     let (h, go) = hold_original(&r, &a, &running);
     let before = (r.sizes(), r.journal_len());
     for p in [&receipted, &fenced, &unknown, &running] {
@@ -131,13 +131,13 @@ fn counted_document_without_script_cannot_authorize_successor() {
         1,
         "nothing B-shaped to inherit"
     );
-    let txn = txn_of(&r.prepare(&c, &r.p(&c, None, "text")).expect("prepare"));
+    let txn = txn_of(&r.prepare(&c, &r.p_head(&c, "text")).expect("prepare"));
     r.commit(&c, txn, "text!").expect("C commits");
 
     // Codex's order: C registers under the previous document's epoch, is
     // admitted, and only then does its own Started arrive.
     let d = r.register("win", 4);
-    let txn = txn_of(&r.prepare(&d, &r.p(&d, None, "text!")).expect("prepare"));
+    let txn = txn_of(&r.prepare(&d, &r.p_head(&d, "text!")).expect("prepare"));
     r.pages.started("win");
     let len = r.journal_len();
     let e = r
@@ -153,7 +153,7 @@ fn counted_document_without_script_cannot_authorize_successor() {
 fn fallback_after_own_started_can_return_a_new_generation_but_cannot_rebind_old_requests() {
     let r = rig();
     let g1 = r.page("doc-a", 1);
-    let p1 = r.p(&g1, None, "text");
+    let p1 = r.p_head(&g1, "text");
     r.pages.started("doc-a");
     let g2 = r.register("doc-a", 1);
     assert_eq!(g2.identity, g1.identity);
@@ -163,7 +163,7 @@ fn fallback_after_own_started_can_return_a_new_generation_but_cannot_rebind_old_
         state(&r.abandon(&g1.label, &p1).unwrap_err()),
         "staleGeneration"
     );
-    r.prepare(&g2, &r.p(&g2, None, "text"))
+    r.prepare(&g2, &r.p_head(&g2, "text"))
         .expect("a new P2 under G2");
     assert_eq!(
         state(&r.prepare(&g2, &p1).unwrap_err()),
@@ -178,7 +178,7 @@ fn old_payload_stays_stale_across_two_starteds_cleanup_and_label_recreation() {
     let a = r.page("doc-a", 1);
     let refused = r.p(&a, Some(RevisionId::new()), "text");
     assert_eq!(state(&r.prepare(&a, &refused).unwrap_err()), "notAdmitted");
-    let p1 = r.p(&a, None, "text");
+    let p1 = r.p_head(&a, "text");
     r.pages.started("doc-a");
     let stale = |step: &str| {
         for p in [&p1, &refused] {

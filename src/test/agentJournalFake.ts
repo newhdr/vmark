@@ -1,7 +1,7 @@
 /**
  * Test helper — an in-memory stand-in for the agent edit journal's IPC
  * client with the writer's semantics: one reservation per document key
- * (JOURNAL_BUSY), the parent CAS (STALE_PARENT), a degraded queue that
+ * (JOURNAL_BUSY), the strict parent CAS (STALE_PARENT; `null` is genesis), a degraded queue that
  * refuses controlled writes (JOURNAL_DEGRADED) until drained, lone
  * surrogates refused (INVALID_TEXT), injectable failures for the commit
  * and abort appends, and a refused commit that ends its transaction
@@ -106,7 +106,7 @@ function createFake() {
     const d = doc(input.docKey);
     if (d.queue.length > 0) throw new JournalRefusal("JOURNAL_DEGRADED", "degraded");
     if (d.reservedBy) throw new JournalRefusal("JOURNAL_BUSY", "busy");
-    if (input.parent !== null && input.parent !== d.head) {
+    if (input.parent !== d.head) {
       throw new JournalRefusal("STALE_PARENT", "stale parent", d.head);
     }
     let baseline: string | null = null;

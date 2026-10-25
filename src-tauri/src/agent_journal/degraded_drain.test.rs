@@ -57,8 +57,9 @@ fn fast() -> Backoff {
 }
 
 fn prepare(w: &Writer, docs: &DocRegistry, key: &str) -> super::controlled::ControlledPrepared {
+    let parent = docs.resolve(key).ok().and_then(|d| w.head(d));
     let payload = serde_json::json!({
-        "docKey": key, "preimage": "", "actor": agent(), "tool": "document.write",
+        "docKey": key, "parent": parent, "preimage": "", "actor": agent(), "tool": "document.write",
     });
     let req = decode_prepare(&serde_json::to_vec(&payload).unwrap()).unwrap();
     let doc = docs.resolve(&req.doc_key).unwrap();

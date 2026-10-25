@@ -28,6 +28,7 @@ pub fn rreq(w: &Writer, doc: DocId, buffer: &str, hunk: &HunkId) -> RevertPrepar
         preimage: buffer.into(),
         baseline_provenance: None,
         baseline_touched: false,
+        observed_parent: Some(observed_on(w.head(doc))),
         request_id: None,
         capture: None,
         hunk_id: hunk.clone(),
@@ -103,6 +104,7 @@ pub fn found_base_hunk(w: &Writer, doc: DocId) -> HunkId {
         source: RestoreSource::Revision { revision: two },
         baseline_provenance: None,
         baseline_touched: false,
+        observed_parent: None,
         request_id: None,
         capture: None,
     };

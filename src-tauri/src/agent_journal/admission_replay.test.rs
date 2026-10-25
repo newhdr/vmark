@@ -39,7 +39,7 @@ fn live_projection_equals_replay_including_requests_after_an_immediate_retry() {
     observe(&c.writer, d, "seed\nsaved\n", None);
 
     let req = request_id();
-    let payload = body(None, "seed\nsaved\nunsaved\n", Some(&req));
+    let payload = body(Some(head), "seed\nsaved\nunsaved\n", Some(&req));
     let first = c.prepare(&payload.to_string()).expect("prepare");
     let second = c.prepare(&payload.to_string()).expect("retry prepare");
     assert_eq!(first, second);
@@ -67,9 +67,9 @@ fn an_immediate_duplicate_gets_the_exact_reply_in_every_prepare_shape() {
     let dir = tmp();
     let (c, _) = controller(dir.path());
     let d = doc(&c);
-    human_save(&c.writer, d, "a\n");
+    let head = human_save(&c.writer, d, "a\n");
     observe(&c.writer, d, "a\nb\n", None);
-    let r = prepare_twice(&c, &body(None, "a\nb\n", Some(&request_id())));
+    let r = prepare_twice(&c, &body(Some(head), "a\nb\n", Some(&request_id())));
     assert!(r["baseline"].is_null());
 
     // No baseline, nothing pending: the direct path.

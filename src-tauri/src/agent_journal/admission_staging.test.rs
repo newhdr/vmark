@@ -71,6 +71,7 @@ fn a_refused_admission_leaves_reservations_queues_and_window_bases_unchanged() {
     // A reservation on another document.
     let other = json!({
         "docKey": "path:/notes/other.md",
+        "parent": null,
         "preimage": "",
         "actor": agent(),
         "tool": "document.write",
@@ -102,7 +103,14 @@ fn a_refused_admission_leaves_reservations_queues_and_window_bases_unchanged() {
     assert_eq!(before.window_bases.len(), 1);
 
     faults.fail_next_appends(1);
-    let out = c.prepare(&body(None, "base\nsaved\nand unsaved\n", Some(&request_id())).to_string());
+    let out = c.prepare(
+        &body(
+            Some(head),
+            "base\nsaved\nand unsaved\n",
+            Some(&request_id()),
+        )
+        .to_string(),
+    );
     assert_eq!(outcome(&out), "refused", "{out:?}");
 
     let after = observable(&c.writer, dir.path());

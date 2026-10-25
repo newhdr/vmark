@@ -11,7 +11,7 @@ use crate::agent_journal::projection::TxnStatus;
 fn abandon_aborts_releases_and_admits_the_next_write() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     assert_eq!(
         r.abandon(&a.label, &p).expect("abandon"),
@@ -29,7 +29,7 @@ fn abandon_aborts_releases_and_admits_the_next_write() {
         answer(&e),
         ("STALE_REQUEST".into(), "terminal".into(), Some(false))
     );
-    r.prepare(&a, &r.p(&a, None, "text"))
+    r.prepare(&a, &r.p_head(&a, "text"))
         .expect("the next write admits");
 }
 
@@ -37,7 +37,7 @@ fn abandon_aborts_releases_and_admits_the_next_write() {
 fn abandon_linearizes_a_save_held_behind_the_aborted_transaction() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let _txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     held_save(&r);
     assert_eq!(
@@ -51,7 +51,7 @@ fn abandon_linearizes_a_save_held_behind_the_aborted_transaction() {
 fn a_delayed_original_after_abandon_is_abandoned() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let (h, go) = hold_original(&r, &a, &p);
     let before = r.journal_len();
     assert_eq!(
@@ -72,7 +72,7 @@ fn a_delayed_original_after_abandon_is_abandoned() {
 fn abandon_while_poisoned_is_uncertain_and_reopen_is_uncommitted() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     r.c.writer.lock().journal.poison();
     let e = r.abandon(&a.label, &p).expect_err("an unhealthy writer");
@@ -90,7 +90,7 @@ fn abandon_cannot_pair_foreign_digest_with_own_generation() {
     let r = rig();
     let a = r.page("doc-a", 1);
     let b = r.register("doc-a", 2);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     // b names a's request id under its own pair: another digest.
     let forged = with(
@@ -121,7 +121,7 @@ fn abandon_ignores_identity_fields_outside_the_payload() {
     let b = r.register("doc-a", 2);
     let swap = |p: &str| with(p, "pageIdentity", json!(b.identity));
 
-    let receipted = r.p(&a, None, "text");
+    let receipted = r.p_head(&a, "text");
     r.prepare(&a, &receipted).expect("prepare");
     let fenced = r.p(
         &a,
@@ -129,7 +129,7 @@ fn abandon_ignores_identity_fields_outside_the_payload() {
         "text",
     );
     r.prepare(&a, &fenced).expect_err("refused, so fenced");
-    let unknown = r.p(&a, None, "text");
+    let unknown = r.p_head(&a, "text");
     for (p, want) in [
         (&receipted, "aborted"),
         (&fenced, "fenced"),
@@ -141,7 +141,7 @@ fn abandon_ignores_identity_fields_outside_the_payload() {
         );
         assert_eq!(r.abandon(&a.label, p).expect("own pair")["state"], want);
     }
-    let running = r.p(&a, None, "text");
+    let running = r.p_head(&a, "text");
     let (h, go) = hold_original(&r, &a, &running);
     assert_eq!(
         state(&r.abandon(&a.label, &swap(&running)).unwrap_err()),
@@ -159,7 +159,7 @@ fn abandon_ignores_identity_fields_outside_the_payload() {
 fn abandon_with_one_byte_different_payload_is_conflict() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     let e = r
         .abandon(&a.label, &with(&p, "preimage", json!("texT")))
@@ -167,7 +167,7 @@ fn abandon_with_one_byte_different_payload_is_conflict() {
     assert_eq!(state(&e), "conflict");
     assert_eq!(r.status(txn), Some(TxnStatus::Prepared));
 
-    let q = r.p(&a, None, "text");
+    let q = r.p_head(&a, "text");
     let (h, go) = hold_original(&r, &a, &q);
     let e = r
         .abandon(&a.label, &with(&q, "preimage", json!("texT")))
@@ -184,8 +184,8 @@ fn abandon_of_an_unknown_id_fences_under_the_payload_generation() {
     let r = rig();
     let a = r.page("doc-a", 1);
     let b = r.register("doc-a", 2);
-    let ua = r.p(&a, None, "text");
-    let ub = r.p(&b, None, "text");
+    let ua = r.p_head(&a, "text");
+    let ub = r.p_head(&b, "text");
     assert_eq!(
         r.abandon(&a.label, &ua).expect("abandon")["state"],
         "fenced"
@@ -207,7 +207,7 @@ fn abandon_of_an_unknown_id_fences_under_the_payload_generation() {
             Some((&a.identity, &a.generation)),
         )
         .expect("replace a");
-    r.prepare(&b, &r.p(&b, None, "text")).expect("b admits");
+    r.prepare(&b, &r.p_head(&b, "text")).expect("b admits");
     assert_eq!(r.sizes(), (0, 1, 1, 1, 1));
     assert_eq!(state(&r.prepare(&b, &ub).unwrap_err()), "abandoned");
 }
@@ -216,7 +216,7 @@ fn abandon_of_an_unknown_id_fences_under_the_payload_generation() {
 fn abandon_with_an_undecodable_payload_refuses_before_lookup() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     r.prepare(&a, &p).expect("prepare");
     let mut no_id: serde_json::Value = serde_json::from_str(&p).unwrap();
     no_id.as_object_mut().unwrap().remove("requestId");
@@ -246,7 +246,7 @@ fn abandon_with_an_undecodable_payload_refuses_before_lookup() {
 fn abandon_behind_a_failed_append_is_queued_and_drained() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     r.faults.fail_next_appends(1);
     assert_eq!(
@@ -262,7 +262,7 @@ fn abandon_behind_a_failed_append_is_queued_and_drained() {
         );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
-    r.prepare(&a, &r.p(&a, None, "text"))
+    r.prepare(&a, &r.p_head(&a, "text"))
         .expect("the next write admits");
 }
 
@@ -272,7 +272,7 @@ fn abandon_whose_abort_poisons_the_writer_is_queued_and_uncommitted_at_reopen() 
     // poisoned by this very append and keeps the record queued.
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     r.faults.fail_next_fsyncs(1);
     assert_eq!(

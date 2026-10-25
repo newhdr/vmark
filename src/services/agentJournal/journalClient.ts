@@ -56,18 +56,28 @@ export interface PrepareSpec<P> {
 export interface PrepareInput {
   /** `path:<file>` or `tab:<window>/<tab>` (see `documentIdentity.ts`). */
   docKey: string;
-  /** The revision this tab last learned from the journal, or `null`. */
+  /**
+   * The head the write expects: the revision this tab last learned, or the
+   * head it read when it had none; `null` is genesis. Any other head is
+   * refused `STALE_PARENT` (strict, every controlled prepare).
+   */
   parent: string | null;
   /** The tab's buffer as the write found it. */
   preimage: string;
   actor: JournalMcpActor;
   tool: string;
   /**
-   * The certified map from the journal's head text to `preimage`, flushed
+   * The certified map from `observedParent`'s text to `preimage`, flushed
    * from the tab's unsaved edits (`unsavedProvenance.ts`). `null`: the
    * baseline is recorded as a `snapshotOnly` barrier.
    */
   baselineProvenance: JournalProvenancePayload | null;
+  /**
+   * The predecessor `baselineProvenance` was built on; the journal records
+   * the baseline on it. Required with a map; without one it may be omitted,
+   * and the snapshot is then recorded on the head.
+   */
+  observedParent?: JournalBaseRef;
   /**
    * A person changed the buffer since its journaled text, even if it is
    * equal again: an equal-text baseline is then still recorded.
@@ -111,6 +121,9 @@ export interface CommittedTxn {
 export type JournalObservedRef =
   | { ref: "revision"; revision: string }
   | { ref: "pending"; observation: string };
+
+/** What a controlled prepare's buffer was built on: a saved buffer's predecessors, or genesis. */
+export type JournalBaseRef = JournalObservedRef | { ref: "genesis" };
 
 /** Who asked for a save; not who wrote its text (`CaptureInput.author`). */
 export type JournalSaveInitiator = { type: "human" } | { type: "system"; reason: string } | JournalMcpActor;

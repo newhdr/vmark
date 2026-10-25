@@ -50,7 +50,7 @@ fn a_malformed_baseline_map_refuses_the_prepare_as_provenance() {
     let (_dir, w, c, _) = setup();
     let h = agent_write(&c, "k", None, "", "abc");
     let req = json!({ "docKey": "k", "parent": h, "preimage": "abc!", "actor": agent(), "tool": "document.write",
-        "baselineProvenance": malformed(&w, doc_of(&w, h), h) });
+        "baselineProvenance": malformed(&w, doc_of(&w, h), h), "observedParent": observed_on(Some(h)) });
     let err = c.prepare(&req.to_string()).unwrap_err();
     assert_eq!(err.detail().unwrap()["field"], "provenance");
 }
@@ -60,7 +60,8 @@ fn prepare_equal(
     h: RevisionId,
     extra: serde_json::Value,
 ) -> Option<RevisionId> {
-    let mut req = json!({ "docKey": "k", "parent": h, "preimage": "aa", "actor": agent(), "tool": "document.write" });
+    let mut req = json!({ "docKey": "k", "parent": h, "preimage": "aa", "actor": agent(), "tool": "document.write",
+        "observedParent": observed_on(Some(h)) });
     for (k, v) in extra.as_object().unwrap() {
         req[k] = v.clone();
     }
@@ -164,10 +165,10 @@ fn a_prepare_is_refused_while_the_degraded_budget_could_not_hold_its_terminal_re
         degraded_bytes: 1 << 20,
         window_bases: 16,
     });
-    let open = json!({ "docKey": "a", "preimage": "", "actor": agent(), "tool": "document.write" });
+    let open = json!({ "docKey": "a", "parent": null, "preimage": "", "actor": agent(), "tool": "document.write" });
     c.prepare(&open.to_string())
         .expect("first reservation fits");
-    let next = json!({ "docKey": "b", "preimage": "", "actor": agent(), "tool": "document.write" });
+    let next = json!({ "docKey": "b", "parent": null, "preimage": "", "actor": agent(), "tool": "document.write" });
     let err = c.prepare(&next.to_string()).unwrap_err();
     assert_eq!(journal_code(&err), "JOURNAL_DEGRADED");
 }

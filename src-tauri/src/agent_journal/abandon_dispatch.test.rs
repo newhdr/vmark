@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::agent_journal::admission::page_table_tests::ident;
-use crate::agent_journal::commands::commands_dispatch::{p, ready, txn_of, App, Page};
+use crate::agent_journal::commands::commands_dispatch::{p, p_on, ready, txn_of, App, Page};
 use crate::agent_journal::projection::TxnStatus;
 use crate::ipc_caller::invoke_from;
 
@@ -94,7 +94,10 @@ fn abandon_dispatch_ignores_contradictory_outer_fields() {
 
     // Durable receipt: the transaction is aborted.
     let receipted = p(&page, "text");
-    let txn = txn_of(&prepare(&page, &receipted).expect("prepare"));
+    let reply = prepare(&page, &receipted).expect("prepare");
+    let txn = txn_of(&reply);
+    // The unsaved "text" was admitted as a baseline: the head now.
+    let head = serde_json::from_value(reply["reply"]["baseline"].clone()).expect("baseline");
     assert_eq!(
         abandon_noisy(&page, &receipted).expect("receipted"),
         json!({ "state": "aborted" })
@@ -102,7 +105,7 @@ fn abandon_dispatch_ignores_contradictory_outer_fields() {
     assert_eq!(a.status(txn), Some(TxnStatus::Aborted));
 
     // Queued: the abort sits behind a failed append.
-    let queued = p(&page, "text");
+    let queued = p_on(&page, head, "text");
     let txn = txn_of(&prepare(&page, &queued).expect("prepare"));
     a.faults.fail_next_appends(1);
     assert_eq!(

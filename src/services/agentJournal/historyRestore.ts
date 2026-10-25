@@ -80,6 +80,7 @@ export async function restoreFromHistory(tabId: string, source: RestoreSource): 
         source,
         baselineProvenance: baseline.baselineProvenance,
         baselineTouched: baseline.baselineTouched,
+        ...(baseline.observedParent && { observedParent: baseline.observedParent }),
         ...(baseline.capture && { capture: baseline.capture }),
       }),
     verify: () => {

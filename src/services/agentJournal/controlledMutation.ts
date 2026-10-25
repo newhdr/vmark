@@ -99,8 +99,8 @@ export type ControlledOutcome<T> =
 
 /** A controlled write; its prepare is the caller's (an MCP edit, a restore). */
 export interface PreparedWrite<T, P extends PreparedTxn> {
-  /** The parent the prepare states; the basis when it records no baseline. */
-  parent: string | null;
+  /** The parent the prepare stated, read once it was built; the basis when it records no baseline. */
+  parent: () => string | null;
   /** The text the prepare records as overwritten: what `recover` reads when nothing changed. */
   preimage: string;
   /** The document's journal key, so an applied write's durability is reported. */
@@ -182,7 +182,7 @@ async function settlePrepared<T, P extends PreparedTxn>(
   write: PreparedWrite<T, P>,
   { prepared, pair, report }: { prepared: P; pair: PagePair; report: (durable: boolean) => void },
 ): Promise<ControlledOutcome<T>> {
-  const basis = prepared.baseline ?? write.parent;
+  const basis = prepared.baseline ?? write.parent();
   const ctx: CommitContext = { prepared, pair, basis, report };
   const aborted: Aborted<T> = async (reason, thrown) => {
     await abortTxn(prepared.txn, reason, pair);

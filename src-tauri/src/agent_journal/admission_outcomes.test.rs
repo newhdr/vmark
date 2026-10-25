@@ -150,7 +150,7 @@ fn an_admission_success_prepares_and_swaps_the_projection() {
     let rx = c.writer.subscribe();
 
     let p = c
-        .prepare(&body(None, "one\ntwo\nthree\n", Some(&request_id())).to_string())
+        .prepare(&body(Some(head), "one\ntwo\nthree\n", Some(&request_id())).to_string())
         .expect("Prepared");
     let records = c.writer.debug_records();
     let last = records.last().expect("a record");
@@ -250,20 +250,20 @@ fn a_no_baseline_prepare_that_linearizes_a_pending_capture_takes_the_admission_p
     let dir = tmp();
     let (c, faults) = controller(dir.path());
     let d = doc(&c);
-    human_save(&c.writer, d, "a\n");
+    let head = human_save(&c.writer, d, "a\n");
     observe(&c.writer, d, "a\nb\n", None);
 
     // A failure while the frame is written changes nothing.
     let before = observable(&c.writer, dir.path());
     let rx = c.writer.subscribe();
     faults.fail_next_appends(1);
-    let out = c.prepare(&body(None, "a\nb\n", Some(&request_id())).to_string());
+    let out = c.prepare(&body(Some(head), "a\nb\n", Some(&request_id())).to_string());
     assert_eq!(outcome(&out), "refused");
     assert_eq!(observable(&c.writer, dir.path()), before);
     assert!(appended(&rx).is_empty());
 
     let p = c
-        .prepare(&body(None, "a\nb\n", Some(&request_id())).to_string())
+        .prepare(&body(Some(head), "a\nb\n", Some(&request_id())).to_string())
         .expect("prepared");
     assert_eq!(
         p.baseline, None,
@@ -285,11 +285,11 @@ fn a_buffer_equal_to_the_head_with_a_pending_capture_is_one_admission_frame() {
     let dir = tmp();
     let (c, _) = controller(dir.path());
     let d = doc(&c);
-    human_save(&c.writer, d, "a\n");
+    let head = human_save(&c.writer, d, "a\n");
     let obs = observe(&c.writer, d, "a\nb\n", None);
     let before = c.writer.debug_records().len();
 
-    c.prepare(&body(None, "a\n", Some(&request_id())).to_string())
+    c.prepare(&body(Some(head), "a\n", Some(&request_id())).to_string())
         .expect("prepared");
     let mut records = c.writer.debug_records();
     assert_eq!(records.len(), before + 1, "exactly one frame appended");

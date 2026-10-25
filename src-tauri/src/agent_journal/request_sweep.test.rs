@@ -32,15 +32,15 @@ fn breaks(r: &Rig) -> u64 {
 fn destroy_and_sweep_release_the_reservation() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     let next = r.page("doc-b", 2);
     let e = r
-        .prepare(&next, &r.p(&next, None, "text"))
+        .prepare(&next, &r.p_head(&next, "text"))
         .expect_err("the document is held");
     assert_eq!(state(&e), "notAdmitted");
 
-    r.abandon(&a.label, &r.p(&a, None, "text"))
+    r.abandon(&a.label, &r.p_head(&a, "text"))
         .expect("fence an id under A");
     assert_eq!(r.sizes().1, 2);
     r.pages.destroy(&a.label);
@@ -51,7 +51,7 @@ fn destroy_and_sweep_release_the_reservation() {
         (0, 1, 0, 1, 0),
         "A's fence purged with its owner and reservation; next's stays"
     );
-    r.prepare(&next, &r.p(&next, None, "text"))
+    r.prepare(&next, &r.p_head(&next, "text"))
         .expect("the document is free");
     assert_eq!(state(&r.prepare(&a, &p).unwrap_err()), "staleGeneration");
 }
@@ -61,7 +61,7 @@ fn queued_terminal_revoke_and_sweep_stays_stale_generation_queue_unchanged() {
     let r = rig();
     let a = r.page("doc-a", 1);
     let b = r.page("doc-b", 2);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     r.faults.fail_next_appends(u32::MAX);
     let out = r.commit(&a, txn, "text!").expect("the commit is queued");
@@ -99,7 +99,7 @@ fn queued_terminal_revoke_and_sweep_stays_stale_generation_queue_unchanged() {
 fn committed_txn_without_owner_entry_reports_terminal_committed() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let txn = txn_of(&r.prepare(&a, &p).expect("prepare"));
     r.commit(&a, txn, "text!").expect("commit");
     assert_eq!(r.sizes().2, 0, "the owner went when the terminal landed");
@@ -124,7 +124,7 @@ fn the_sweep_reports_each_way_an_owned_transaction_ends() {
     // The writer is corrupt: nothing ends, the owner is kept for a reopen.
     let r = rig();
     let a = r.page("doc-a", 1);
-    let txn = txn_of(&r.prepare(&a, &r.p(&a, None, "text")).expect("prepare"));
+    let txn = txn_of(&r.prepare(&a, &r.p_head(&a, "text")).expect("prepare"));
     r.c.writer.lock().corrupt = Some("test".into());
     r.pages.started(&a.label);
     assert_eq!(r.c.sweep(&r.pages), vec![(txn, OwnedEnd::WriterStopped)]);
@@ -137,7 +137,7 @@ fn the_sweep_reports_each_way_an_owned_transaction_ends() {
     // Poisoned: queued, the reservation held; a reopen records uncommitted.
     let r = rig();
     let a = r.page("doc-a", 1);
-    let txn = txn_of(&r.prepare(&a, &r.p(&a, None, "text")).expect("prepare"));
+    let txn = txn_of(&r.prepare(&a, &r.p_head(&a, "text")).expect("prepare"));
     r.c.writer.lock().journal.poison();
     r.pages.started(&a.label);
     assert_eq!(r.c.sweep(&r.pages), vec![(txn, OwnedEnd::Queued)]);
@@ -148,7 +148,7 @@ fn the_sweep_reports_each_way_an_owned_transaction_ends() {
     // Its reservation gone: a writer bug, counted, the owner dropped.
     let r = rig();
     let a = r.page("doc-a", 1);
-    let txn = txn_of(&r.prepare(&a, &r.p(&a, None, "text")).expect("prepare"));
+    let txn = txn_of(&r.prepare(&a, &r.p_head(&a, "text")).expect("prepare"));
     r.c.writer.lock().reservations.clear();
     r.pages.started(&a.label);
     let ended = r.c.sweep(&r.pages);
@@ -161,7 +161,7 @@ fn the_sweep_reports_each_way_an_owned_transaction_ends() {
     // An owner naming no transaction, and one whose transaction ended.
     let r = rig();
     let a = r.page("doc-a", 1);
-    let done = txn_of(&r.prepare(&a, &r.p(&a, None, "text")).expect("prepare"));
+    let done = txn_of(&r.prepare(&a, &r.p_head(&a, "text")).expect("prepare"));
     r.commit(&a, done, "text!").expect("commit");
     let unknown = TxnId::new();
     {

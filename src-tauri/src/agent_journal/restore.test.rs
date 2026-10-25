@@ -28,6 +28,7 @@ fn req(w: &Writer, doc: DocId, buffer: &str, source: RestoreSource) -> RestorePr
         source,
         baseline_provenance: None,
         baseline_touched: false,
+        observed_parent: None,
         request_id: None,
         capture: None,
     }

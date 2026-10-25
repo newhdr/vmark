@@ -22,8 +22,13 @@ fn dirty(c: &Controller) -> DocId {
     d
 }
 
-fn admission_payload() -> String {
-    body(None, "base\nsaved\nunsaved\n", Some(&request_id())).to_string()
+fn admission_payload(c: &Controller) -> String {
+    body(
+        c.writer.head(doc(c)),
+        "base\nsaved\nunsaved\n",
+        Some(&request_id()),
+    )
+    .to_string()
 }
 
 /// A human capture of a fresh document: a record far shorter than the frame.
@@ -52,7 +57,7 @@ fn a_torn_admission_rolled_back_at_any_offset_leaves_state_and_a_shorter_append_
         let rx = c.writer.subscribe();
 
         faults.tear_next_append_after(tear);
-        let out = c.prepare(&admission_payload());
+        let out = c.prepare(&admission_payload(&c));
         assert_eq!(outcome(&out), "refused", "tear {tear}: {out:?}");
         let after = observable(&c.writer, dir.path());
         assert_eq!(
@@ -83,7 +88,7 @@ fn a_torn_admission_rolled_back_at_any_offset_leaves_state_and_a_shorter_append_
             "nothing queued"
         );
         assert!(
-            c.prepare(&admission_payload()).is_ok(),
+            c.prepare(&admission_payload(&c)).is_ok(),
             "tear {tear}: the admission itself is writable again"
         );
         close_epoch(&c.writer, other);
@@ -114,7 +119,7 @@ fn poisoned_by(fault: fn(&Faults), torn_at_reopen: u64) {
 
     faults.tear_next_append_after(9);
     fault(&faults);
-    let out = c.prepare(&admission_payload());
+    let out = c.prepare(&admission_payload(&c));
     assert_eq!(outcome(&out), "indeterminate", "{out:?}");
     assert_eq!(c.writer.health().unwrap_err().code(), "JOURNAL_DEGRADED");
     let after = observable(&c.writer, dir.path());
@@ -190,7 +195,7 @@ fn a_refused_admission_leaves_the_unpinned_windows_of_an_over_budget_window() {
     );
 
     faults.fail_next_appends(1);
-    let out = c.prepare(&admission_payload());
+    let out = c.prepare(&admission_payload(&c));
     assert_eq!(outcome(&out), "refused", "{out:?}");
     let after = observable(&c.writer, dir.path());
     assert_eq!(

@@ -1,6 +1,6 @@
 //! Tauri commands that carry a document to a new key (Save As, in-app
-//! rename) or look up the document a key carries. Both work before the
-//! journal is ready.
+//! rename), look up the document a key carries (both work before the
+//! journal is ready), or read its settled head.
 //!
 //! Key decisions:
 //!   - Same contract as `commands`: `spawn_blocking` for the durable bind,
@@ -11,7 +11,7 @@
 use tauri::Manager;
 
 use crate::agent_journal::admission::bound::{bind_call, Bound, CallBind};
-use crate::agent_journal::ids::DocId;
+use crate::agent_journal::ids::{DocId, RevisionId};
 use crate::agent_journal::service::AgentJournalState;
 use crate::command_error::CommandError;
 
@@ -58,6 +58,26 @@ pub async fn agent_journal_find_document<R: tauri::Runtime>(
         })
         .await
         .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
+    })
+    .await
+}
+
+/// The settled head of the document a key carries (`payload`: JSON
+/// `{docKey}`), without minting one; `null` is genesis. Read before a
+/// controlled write by a tab with no expected head.
+///
+/// # Errors
+/// `INVALID_REQUEST` for a malformed payload or key, or the off refusal.
+#[tauri::command]
+pub async fn agent_journal_head<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    payload: String,
+    call_id: String,
+) -> Result<Bound<CallBind, Option<RevisionId>>, CommandError> {
+    bind_call(&call_id, async move {
+        tokio::task::spawn_blocking(move || app.state::<AgentJournalState>().head(&payload))
+            .await
+            .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
     })
     .await
 }

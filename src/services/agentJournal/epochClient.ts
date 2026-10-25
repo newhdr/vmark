@@ -1,7 +1,8 @@
 /**
  * Epoch client — the IPC calls a window's provenance session makes besides
  * prepare and capture: arm and close a document's editing epoch, release
- * a closed tab's base root, and bind or look up a key's document. Replies are validated and every
+ * a closed tab's base root, bind or look up a key's document, and read its
+ * head (the parent a controlled write expects). Replies are validated and every
  * rejection is read as a `JournalRefusal` (`journalIpc.ts`).
  *
  * Key decisions:
@@ -11,7 +12,7 @@
  *     text hashes the same.
  *
  * @coordinates-with src-tauri/src/agent_journal/controller.rs — arm_epoch, close_epoch, release_window
- * @coordinates-with src-tauri/src/agent_journal/service_identity.rs — bind_document, find_document
+ * @coordinates-with src-tauri/src/agent_journal/service_identity.rs — bind_document, find_document, head
  * @module services/agentJournal/epochClient
  */
 
@@ -79,6 +80,19 @@ export async function findDocument(docKey: string): Promise<string | null> {
   const r = await call(FIND, { payload: JSON.stringify({ docKey }) });
   if (r === null || isId(r)) return r;
   throw malformed(FIND);
+}
+
+const HEAD = "agent_journal_head";
+
+/**
+ * The head revision of `docKey`, or `null` at genesis (no revision, or no
+ * document). A read: it never mints a document. Rejects with a
+ * `JournalRefusal`.
+ */
+export async function readJournalHead(docKey: string): Promise<string | null> {
+  const r = await call(HEAD, { payload: JSON.stringify({ docKey }) });
+  if (r === null || isId(r)) return r;
+  throw malformed(HEAD);
 }
 
 /** A tab closed: release its base root. Idempotent. Rejects with a `JournalRefusal`. */

@@ -8,6 +8,7 @@
 //! - `shape` — the static rules of an `admission` frame: a multi-record
 //!   write (observations, their linearizations, a baseline, the outcome)
 //!   persisted as one frame so it is durable whole or not at all.
+//! - `observed_base` — the frozen predecessor a baseline is recorded on.
 //! - `prepare`, `stage`, `publish` — a controlled prepare written as one
 //!   top-level record or one staged admission frame, durable whole or not
 //!   at all, answered from its receipt when retried.
@@ -28,6 +29,7 @@ pub mod bound;
 pub mod cleanup_worker;
 pub(crate) mod framed;
 pub mod identity;
+pub(crate) mod observed_base;
 pub mod owned;
 pub mod page_events;
 pub mod page_table;
@@ -158,3 +160,7 @@ mod owner_death_tests;
 #[cfg(test)]
 #[path = "../request_abandon_race.test.rs"]
 mod request_abandon_race_tests;
+
+#[cfg(test)]
+#[path = "../expected_head.test.rs"]
+mod expected_head_tests;

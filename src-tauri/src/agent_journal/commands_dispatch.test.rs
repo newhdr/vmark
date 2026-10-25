@@ -125,7 +125,12 @@ pub(crate) fn frame(page: &Page, mut body: Value) -> String {
 }
 
 pub(crate) fn p(page: &Page, preimage: &str) -> String {
-    frame(page, body(None, preimage, Some(&request_id())))
+    p_on(page, None, preimage)
+}
+
+/// `p` expecting `parent` as the document's head.
+pub(crate) fn p_on(page: &Page, parent: Option<RevisionId>, preimage: &str) -> String {
+    frame(page, body(parent, preimage, Some(&request_id())))
 }
 
 pub(crate) fn txn_of(reply: &Value) -> TxnId {

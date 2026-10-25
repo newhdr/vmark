@@ -106,6 +106,11 @@ impl Rig {
         self.frame(page, body(parent, preimage, Some(&request_id())))
     }
 
+    /// `p` on `KEY`'s current head, the head a window expects (R32).
+    pub(crate) fn p_head(&self, page: &Page, preimage: &str) -> String {
+        self.p(page, self.c.writer.head(doc(&self.c)), preimage)
+    }
+
     /// `p` prepared from `page`'s label: the bound reply as JSON.
     pub(crate) fn prepare(&self, page: &Page, p: &str) -> Result<Value, CommandError> {
         self.prepare_as(&page.label, p)

@@ -19,7 +19,7 @@ use crate::agent_journal::{commands, commands_history, git_export};
 use crate::ipc_caller::{invoke_from, window};
 
 /// The commands bound by a call id, in the order they were converted.
-const CALL_BOUND: [&str; 13] = [
+const CALL_BOUND: [&str; 14] = [
     "agent_journal_capture",
     "agent_journal_arm_epoch",
     "agent_journal_close_epoch",
@@ -33,6 +33,7 @@ const CALL_BOUND: [&str; 13] = [
     "agent_journal_history",
     "agent_journal_status",
     "agent_journal_git_export",
+    "agent_journal_head",
 ];
 
 const CALL: &str = "0123456789abcdef0123456789abcdef";
@@ -55,6 +56,7 @@ fn ready() -> Ready {
             commands::agent_journal_release_window,
             commands::document::agent_journal_bind_document,
             commands::document::agent_journal_find_document,
+            commands::document::agent_journal_head,
             commands_history::agent_journal_history,
             commands_history::agent_journal_uncommitted,
             commands_history::agent_journal_discard,
@@ -112,6 +114,11 @@ fn answerable(key: &str) -> Vec<(&'static str, Value)> {
         ),
         (
             "agent_journal_find_document",
+            payload(json!({ "docKey": "path:/never.md" })),
+        ),
+        ("agent_journal_head", payload(json!({ "docKey": key }))),
+        (
+            "agent_journal_head",
             payload(json!({ "docKey": "path:/never.md" })),
         ),
         (

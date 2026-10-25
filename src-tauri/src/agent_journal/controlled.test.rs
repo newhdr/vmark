@@ -48,15 +48,16 @@ fn commit_payload(postimage: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({ "postimage": postimage })).unwrap()
 }
 
-/// Decode, resolve and prepare, the way the command does.
+/// Resolve, decode and prepare on the current head, the way the command does.
 fn prepare(
     w: &Writer,
     docs: &DocRegistry,
     key: &str,
     preimage: &str,
 ) -> Result<super::controlled::ControlledPrepared, crate::agent_journal::errors::TxnError> {
-    let req = decode_prepare(&payload(key, preimage, &mcp_actor()))?;
-    let doc = docs.resolve(&req.doc_key)?;
+    // The window knows the head it writes on (strict expectedHead).
+    let doc = docs.resolve(key)?;
+    let req = decode_prepare(&payload_on(key, w.head(doc), preimage, &mcp_actor()))?;
     prepare_controlled(w, doc, req)
 }
 

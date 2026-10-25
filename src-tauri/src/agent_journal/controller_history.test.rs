@@ -43,8 +43,9 @@ fn write(c: &Controller, key: &str, parent: Option<&str>, pre: &str, post: &str)
 
 /// A write of `key` left uncommitted (prepared, never committed).
 fn uncommitted(c: &Controller, w: &Writer, key: &str, pre: &str) -> TxnId {
+    let parent = c.docs.resolve(key).ok().and_then(|d| w.head(d));
     let p = serde_json::json!({
-        "docKey": key, "preimage": pre, "actor": agent(), "tool": "document.write",
+        "docKey": key, "parent": parent, "preimage": pre, "actor": agent(), "tool": "document.write",
     });
     let txn = c.prepare(&p.to_string()).expect("prepare").txn;
     w.record_uncommitted(txn).expect("uncommitted");

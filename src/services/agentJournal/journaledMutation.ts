@@ -6,8 +6,9 @@
  * and the outcome mapper.
  *
  * Pipeline: refuse an evicted basis → freeze the tab's unsaved provenance at
- * the preimage (and await its payload, then the caller's `recheck`) → the
- * caller's prepare → verify → apply, forking the provenance window onto the
+ * the preimage (and await its payload, then the caller's `recheck`) → state
+ * the expected head and name the payload's predecessor (`expectedHead.ts`)
+ * → the caller's prepare → verify → apply, forking the provenance window onto the
  * applied text → effects → commit (`controlledMutation.ts`) → settle the
  * tab's journal basis → settle the freeze and the forks → map the outcome.
  *
@@ -15,6 +16,13 @@
  *   - A basis evicted from the bounded identity table refuses STALE_PARENT
  *     before anything is sent: the retry rebases on the journal's head
  *     instead of writing without a compare-and-set.
+ *   - Every prepare states the head it expects: the tab's basis, else the
+ *     head read as the prepare is built, inside its send turn and after the
+ *     document is ready, so a save answered before it is already the head.
+ *     A head read that is refused or outlives its deadline refuses with
+ *     nothing sent. A payload is sent only with the
+ *     predecessor it names (`observedParent`); one the tab cannot name is
+ *     dropped, so the baseline is a `snapshotOnly` barrier.
  *   - Basis: a STALE_PARENT refusal, an unreadable apply
  *     (`recoveryRequired`) or a commit refused with no basis drops it;
  *     otherwise the outcome's basis is kept. A tab closed since `life` was
@@ -54,24 +62,20 @@
  * @coordinates-with services/agentJournal/controlledMutation.ts — the protocol
  * @coordinates-with services/agentJournal/unsavedProvenance.ts — the freeze and fork
  * @coordinates-with services/agentJournal/documentIdentity.ts — the basis
+ * @coordinates-with services/agentJournal/expectedHead.ts — the parent and observedParent
  * @module services/agentJournal/journaledMutation
  */
 
 import { useRevisionStore } from "@/stores/documentStore";
-import type { AbortReason, CommitExtras, PreparedTxn, PrepareSpec } from "./journalClient";
+import type { AbortReason, CommitExtras, JournalBaseRef, PreparedTxn, PrepareSpec } from "./journalClient";
+import { expectedHead, observedParentFor } from "./expectedHead";
 import { runPreparedWrite } from "./controlledMutation";
 import { JournalRefusal } from "./journalRefusal";
 import { JOURNAL_PREAPPLY_BUDGET_MS, journalTimeout, settleWithin, startJournalBudget } from "./journalDeadline";
 import { forkUnsavedProvenance, freezeUnsavedProvenance, type JournalProvenancePayload } from "./unsavedProvenance";
 import type { ProvenanceFork } from "./provenance/session";
 import type { CaptureId } from "./provenance/captureId";
-import {
-  forgetJournalBasis,
-  isJournalBasisEvicted,
-  isJournalTabLive,
-  journalBasis,
-  rememberJournalBasis,
-} from "./documentIdentity";
+import { forgetJournalBasis, isJournalBasisEvicted, isJournalTabLive, outstandingSaveBase, rememberJournalBasis } from "./documentIdentity";
 
 /** How long the effects hook may take before the commit goes ahead without it. */
 export const EFFECTS_DEADLINE_MS = 5000;
@@ -79,10 +83,12 @@ export const EFFECTS_DEADLINE_MS = 5000;
 /** What the coordinator hands the caller's prepare: the shared baseline fields. */
 interface MutationBaseline {
   docKey: string;
-  /** The tab's journal basis for `docKey`, or `null`. */
+  /** The head the tab expects (its basis, else the head it read); `null` is genesis. */
   parent: string | null;
   preimage: string;
   baselineProvenance: JournalProvenancePayload | null;
+  /** The predecessor `baselineProvenance` was built on; absent with no payload. */
+  observedParent?: JournalBaseRef;
   baselineTouched: boolean;
   /** The freeze's capture id; absent when the tab has no provenance source. */
   capture?: CaptureId;
@@ -142,7 +148,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     const evicted = new JournalRefusal("STALE_PARENT", `the tab's journal basis was evicted; ${m.retryHint}`);
     return m.outcome({ status: "refused", refusal: evicted });
   }
-  const parent = journalBasis(tabId, docKey);
+  const inFlightSave = outstandingSaveBase(tabId, docKey);
   const freeze = freezeUnsavedProvenance(tabId, preimage);
   const forks: ProvenanceFork[] = [];
   const fork = (postimage: string): void => {
@@ -163,7 +169,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     freeze?.release();
   };
   try {
-    const frozen = freeze ? await settleWithin(freeze.payload(parent), budget.remaining()) : { value: null };
+    const frozen = freeze ? await settleWithin(freeze.payload(null), budget.remaining()) : { value: null };
     if (frozen === null) {
       // Nothing was sent: a client-side refusal releases.
       releaseFreeze();
@@ -173,19 +179,28 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     // The payload awaited: the tab may have changed under it.
     const changed = freeze ? (m.recheck?.() ?? null) : null;
     if (changed) return await m.outcome({ status: "aborted", reason: changed });
-    const baseline: MutationBaseline = {
-      docKey,
-      parent,
-      preimage,
-      baselineProvenance: named?.payload ?? null,
-      baselineTouched: freeze?.touched ?? false,
-      ...(freeze && { capture: freeze.capture }),
+    // Stated once the prepare is built (see the header).
+    let parent: string | null = null;
+    const prepare = async (): Promise<PrepareSpec<P>> => {
+      const expected = await expectedHead(tabId, docKey, budget, inFlightSave);
+      if ("refusal" in expected) throw expected.refusal;
+      parent = expected.parent;
+      const observedParent = named ? observedParentFor(tabId, docKey, parent, named.basis) : null;
+      return m.prepare({
+        docKey,
+        parent,
+        preimage,
+        baselineProvenance: observedParent && named ? named.payload : null,
+        ...(observedParent && { observedParent }),
+        baselineTouched: freeze?.touched ?? false,
+        ...(freeze && { capture: freeze.capture }),
+      });
     };
     const outcome = await runPreparedWrite({
-      parent,
+      parent: () => parent,
       preimage,
       docKey,
-      prepare: () => m.prepare(baseline),
+      prepare,
       ...(freeze && { turn: (send) => freeze.inTurn(send) }),
       verify: m.verify,
       apply: (prepared) => {

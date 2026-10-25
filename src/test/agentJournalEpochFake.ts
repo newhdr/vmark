@@ -12,7 +12,8 @@
  * `null`: the source must carry none; an id: it must carry that one). A
  * repeat of the last bind out of a key is a no-op while the destination
  * still holds what it delivered. A bind replies the destination's document. Binds and lookups can be held or failed;
- * a failed one changes nothing.
+ * a failed one changes nothing. `readJournalHead` reads the journal fake's
+ * head of a key (`null` at genesis); head reads can be failed.
  *
  * Use: mocked globally in `globalTestHooks.ts`; drive `agentJournalEpochFake`.
  *
@@ -46,6 +47,7 @@ function createEpochFake() {
   let armFailures = 0;
   let bindFailures = 0;
   let findFailures = 0;
+  let headFailures = 0;
   let heldBind: Promise<void> | null = null;
 
   /** A new document id: the key itself on first use (what the journal fake reports), unique after. */
@@ -98,6 +100,14 @@ function createEpochFake() {
     return { doc: resolve(docKey), epoch, head: d.head, headHash };
   };
 
+  const readHead = async (docKey: string): Promise<string | null> => {
+    if (headFailures > 0) {
+      headFailures -= 1;
+      throw new JournalRefusal("JOURNAL_UNAVAILABLE", "injected head read failure");
+    }
+    return agentJournalFake.doc(docKey).head;
+  };
+
   const close = async (docKey: string, epoch: string): Promise<void> => {
     if (open.get(docKey) !== epoch) throw new JournalRefusal("INVALID_REQUEST", "not the open epoch");
     open.delete(docKey);
@@ -126,6 +136,7 @@ function createEpochFake() {
       }
       return registry.get(docKey) ?? null;
     }),
+    readJournalHead: vi.fn(readHead),
     /** The document a key carries in the registry, if any. */
     documentOf: (docKey: string) => registry.get(docKey) ?? null,
     /** Another window resolved `docKey` (arm, capture): it carries a document now, minted if it had none. */
@@ -144,6 +155,10 @@ function createEpochFake() {
     /** The next `n` lookups fail. */
     failNextFinds(n = 1) {
       findFailures += n;
+    },
+    /** The next `n` head reads fail. */
+    failNextHeads(n = 1) {
+      headFailures += n;
     },
     /** The next bind waits until the returned function runs. */
     holdNextBind(): () => void {
@@ -172,12 +187,15 @@ function createEpochFake() {
       armFailures = 0;
       bindFailures = 0;
       findFailures = 0;
+      headFailures = 0;
       heldBind = null;
       this.armEpoch.mockClear();
       this.closeEpoch.mockClear();
       this.releaseWindow.mockClear();
       this.bindDocument.mockClear();
       this.findDocument.mockClear();
+      this.readJournalHead.mockReset();
+      this.readJournalHead.mockImplementation(readHead);
     },
   };
 }
@@ -193,5 +211,6 @@ export function epochClientModule() {
     releaseWindow: agentJournalEpochFake.releaseWindow,
     bindDocument: agentJournalEpochFake.bindDocument,
     findDocument: agentJournalEpochFake.findDocument,
+    readJournalHead: agentJournalEpochFake.readJournalHead,
   };
 }

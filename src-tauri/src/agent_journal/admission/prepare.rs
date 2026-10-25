@@ -154,7 +154,7 @@ pub(crate) fn prepare_admitted(
         }
     }
     let head = g.proj.head(doc);
-    if prep.parent.is_some_and(|p| Some(p) != head) {
+    if prep.parent != head {
         return Err(TxnError::StaleParent { head });
     }
     if let Some(id) = &prep.capture {

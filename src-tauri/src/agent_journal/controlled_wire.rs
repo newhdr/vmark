@@ -15,6 +15,7 @@ use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance::Certificate;
 use crate::agent_journal::provenance_field::ProvenanceField;
+use crate::agent_journal::record::ObservedRef;
 use crate::agent_journal::writer::certificate::FallbackReason;
 
 /// Longest accepted tool name, in bytes.
@@ -24,10 +25,16 @@ pub const TOOL_MAX_BYTES: usize = 64;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ControlledPrepareRequest {
     pub doc_key: String,
-    /// The revision this window last learned from the journal; `None` when
-    /// it never wrote through the journal (no CAS then).
-    #[serde(default)]
+    /// The head the window expects (strict CAS). Required on the wire;
+    /// `null` means genesis, never "skip the check".
+    #[serde(deserialize_with = "crate::agent_journal::wire::required")]
     pub parent: Option<RevisionId>,
+    /// The predecessor the window's frozen buffer was built on: a
+    /// revision, its own pending observation, or genesis. Required with a
+    /// `baselineProvenance`; the baseline is recorded on it, never on the
+    /// head relabelled.
+    #[serde(default)]
+    pub observed_parent: Option<ObservedRef>,
     /// The window's current buffer text.
     pub preimage: String,
     pub actor: Actor,

@@ -19,7 +19,7 @@
  * @module services/agentJournal/historyClient
  */
 
-import type { PreparedTxn, PrepareSpec } from "./journalClient";
+import type { JournalBaseRef, PreparedTxn, PrepareSpec } from "./journalClient";
 import { parseJournalActor, type JournalActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
 import type { CaptureId } from "./provenance/captureId";
@@ -34,13 +34,15 @@ export type RestoreSource =
 export interface RestorePrepareInput {
   /** `path:<file>` or `tab:<window>/<tab>` (see `documentIdentity.ts`). */
   docKey: string;
-  /** The revision the tab last learned from the journal, or `null`. */
+  /** The head the restore expects (`PrepareInput.parent`); `null` is genesis. */
   parent: string | null;
   /** The buffer the restore overwrites; recorded first when unjournaled. */
   preimage: string;
   source: RestoreSource;
   baselineProvenance: JournalProvenancePayload | null;
   baselineTouched: boolean;
+  /** The predecessor `baselineProvenance` was built on (`PrepareInput.observedParent`). */
+  observedParent?: JournalBaseRef;
   /** The provenance freeze the overwritten buffer was taken under; omitted when nothing froze it. */
   capture?: CaptureId;
 }

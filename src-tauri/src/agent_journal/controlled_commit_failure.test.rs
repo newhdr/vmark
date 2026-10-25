@@ -33,8 +33,10 @@ fn prepare(
     key: &str,
     preimage: &str,
 ) -> Result<ControlledPrepared, TxnError> {
+    let parent = docs.resolve(key).ok().and_then(|d| w.head(d));
     let payload = serde_json::to_vec(&serde_json::json!({
         "docKey": key,
+        "parent": parent,
         "preimage": preimage,
         "actor": mcp_actor(),
         "tool": "document.write",

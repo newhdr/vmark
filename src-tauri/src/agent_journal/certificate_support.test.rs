@@ -84,6 +84,7 @@ pub fn prepare(w: &Writer, docs: &DocRegistry, r: Req<'_>) -> Result<ControlledP
         "actor": mcp_actor(),
         "tool": r.tool,
         "baselineProvenance": r.flushed,
+        "observedParent": observed_on(r.parent),
         "baselineTouched": r.touched,
     });
     if let Some(c) = r.certificate {

@@ -23,13 +23,19 @@ const OTHER: &str = "path:/notes/other.md";
 /// A prepared transaction of `KEY` owned by page 1 in `doc-a`.
 fn owned(l: &Life) -> (Page, TxnId) {
     let a = l.r.page("doc-a", 1);
-    let txn = txn_of(&l.r.prepare(&a, &l.r.p(&a, None, "text")).expect("prepare"));
+    let txn = txn_of(&l.r.prepare(&a, &l.r.p_head(&a, "text")).expect("prepare"));
     (a, txn)
 }
 
 /// A prepared transaction of the other document, owned by `page`.
 fn owned_other(l: &Life, page: &Page, preimage: &str) -> TxnId {
-    let mut other = body(None, preimage, None);
+    let head =
+        l.r.c
+            .docs
+            .resolve(OTHER)
+            .ok()
+            .and_then(|d| l.r.c.writer.head(d));
+    let mut other = body(head, preimage, None);
     other["docKey"] = json!(OTHER);
     let q = l.r.frame(page, other);
     txn_of(&l.r.prepare(page, &q).expect("prepare the other document"))
@@ -157,9 +163,9 @@ fn committed_aborted_and_uncommitted_are_already_terminal() {
     let l = life();
     let (a, committed) = owned(&l);
     l.r.commit(&a, committed, "text!").expect("commit");
-    let aborted = txn_of(&l.r.prepare(&a, &l.r.p(&a, None, "text!")).expect("prepare"));
+    let aborted = txn_of(&l.r.prepare(&a, &l.r.p_head(&a, "text!")).expect("prepare"));
     l.r.abort(&a, aborted).expect("abort");
-    let ended = txn_of(&l.r.prepare(&a, &l.r.p(&a, None, "text!")).expect("prepare"));
+    let ended = txn_of(&l.r.prepare(&a, &l.r.p_head(&a, "text!")).expect("prepare"));
     reload(&l, &a.label);
     assert_eq!(l.r.status(ended), Some(TxnStatus::Uncommitted));
     let before = l.ended().len();

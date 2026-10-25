@@ -93,16 +93,19 @@ describe("save outcomes", () => {
     expect(fake.captureSaveToJournal).not.toHaveBeenCalled();
   });
 
-  it("an earlier save settling after a later agent write does not overwrite it", async () => {
+  it("a later agent write waits for the earlier save in flight, and the earlier save's report does not overwrite it", async () => {
     let answer: (v: CapturedSave) => void = () => {};
     fake.captureSaveToJournal.mockImplementationOnce(() => new Promise((r) => (answer = r)));
     const firstOut = save("a");
     await vi.waitFor(() => expect(fake.captureSaveToJournal).toHaveBeenCalledTimes(1));
     fake.failNextCommits(1);
-    await agentWrite("x");
-    expect(problem()).toEqual({ kind: "queued", code: null });
+    const written = agentWrite("x");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fake.prepareControlledWrite).not.toHaveBeenCalled();
+    fake.doc(KEY).head = "r";
     answer({ doc: KEY, journaled: "yes", observation: null, revision: "r" });
     await firstOut;
+    expect(await written).toMatchObject({ status: "applied", durable: false });
     expect(problem()).toEqual({ kind: "queued", code: null });
   });
 });

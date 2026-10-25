@@ -17,6 +17,7 @@
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::blobs::StagedBlobs;
+use crate::agent_journal::admission::observed_base::observed_base;
 use crate::agent_journal::admission::prepare::{
     needs_baseline, prepare_request, Minted, Request, Responder,
 };
@@ -31,7 +32,7 @@ use crate::agent_journal::effects_rules::{check_effects, EffectsCtx};
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
 use crate::agent_journal::projection::Projection;
-use crate::agent_journal::record::{Envelope, ObservedRef, Record, SCHEMA_V3, SCHEMA_V4};
+use crate::agent_journal::record::{Envelope, Record, SCHEMA_V3, SCHEMA_V4};
 use crate::agent_journal::review::ReviewOp;
 use crate::agent_journal::schema_table::{label, receipt_min};
 use crate::agent_journal::writer::certificate::bind_to_parent;
@@ -254,16 +255,8 @@ fn stage_baseline(
     head: Option<RevisionId>,
     prep: &Prep,
 ) -> Result<(), TxnError> {
-    let (observed_parent, observed_preimage) = match head {
-        Some(revision) => (
-            ObservedRef::Revision { revision },
-            f.proj
-                .postimage_of(head)
-                .ok_or_else(|| TxnError::Invariant("head has no text".into()))?,
-        ),
-        None => (ObservedRef::Genesis, BlobHash::of_text("")),
-    };
     let provenance = prep.baseline_provenance.clone();
+    let (observed_parent, observed_preimage) = observed_base(&f.proj, doc, head, prep)?;
     if provenance.is_some() || !blobs_hold(blobs, &observed_preimage) {
         let pre = referenced_blob(blobs, &observed_preimage)?;
         if let Some(payload) = &provenance {

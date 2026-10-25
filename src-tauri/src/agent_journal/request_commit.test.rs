@@ -168,7 +168,7 @@ fn posing(page: &Page, as_: &Page) -> Page {
 fn prepared() -> (Rig, Page, TxnId) {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let txn = txn_of(&r.prepare(&a, &r.p(&a, None, "text")).expect("prepare"));
+    let txn = txn_of(&r.prepare(&a, &r.p_head(&a, "text")).expect("prepare"));
     (r, a, txn)
 }
 
@@ -241,7 +241,7 @@ fn commit_with_a_live_foreign_pair_is_invalid_request() {
 fn duplicate_prepare_reply_is_enveloped_from_the_receipt() {
     let r = rig();
     let a = r.page("doc-a", 1);
-    let p = r.p(&a, None, "text");
+    let p = r.p_head(&a, "text");
     let first = r.prepare(&a, &p).expect("prepare");
     let len = r.journal_len();
     let again = r.prepare(&a, &p).expect("an identical retry");
@@ -263,7 +263,7 @@ fn commit_and_abort_replies_echo_their_arguments() {
     assert_eq!(out["bind"], bind);
     assert_eq!(out["reply"]["applied"], json!(true));
 
-    let next = txn_of(&r.prepare(&a, &r.p(&a, None, "text!")).expect("prepare"));
+    let next = txn_of(&r.prepare(&a, &r.p_head(&a, "text!")).expect("prepare"));
     let out = r.abort(&a, next).expect("abort");
     let bind =
         json!({ "txn": next, "pageIdentity": a.identity, "webviewGeneration": a.generation });
@@ -292,7 +292,7 @@ fn commit_linearizes_at_the_table_lookup() {
 
     // Revoked inside the critical section, after the lookup: committed.
     let b = r.page("doc-a", 2);
-    let txn = txn_of(&r.prepare(&b, &r.p(&b, None, "text")).expect("prepare"));
+    let txn = txn_of(&r.prepare(&b, &r.p_head(&b, "text")).expect("prepare"));
     let (pages, label, fired) = (
         r.pages.clone(),
         b.label.clone(),

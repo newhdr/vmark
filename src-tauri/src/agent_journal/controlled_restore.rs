@@ -39,6 +39,7 @@ use crate::agent_journal::controlled_wire::decode;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance_field::{decode_field, ProvenanceField};
+use crate::agent_journal::record::ObservedRef;
 use crate::agent_journal::review::{RestoreSource, ReviewOp};
 use crate::agent_journal::review_rules::{check_prepare, restore_resolves, restore_text};
 use crate::agent_journal::writer::{Inner, Writer};
@@ -51,9 +52,12 @@ pub const RESTORE_TOOL: &str = "history.restore";
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RestorePrepareRequest {
     pub doc_key: String,
-    /// The revision the window last learned from the journal (CAS).
-    #[serde(default)]
+    /// The head the window expects (strict CAS); `null` means genesis.
+    #[serde(deserialize_with = "crate::agent_journal::wire::required")]
     pub parent: Option<RevisionId>,
+    /// The predecessor the frozen buffer was built on (`observedParent`).
+    #[serde(default)]
+    pub observed_parent: Option<ObservedRef>,
     /// The window's current buffer: the text the restore overwrites.
     pub preimage: String,
     pub source: RestoreSource,
@@ -139,6 +143,7 @@ pub fn prepare_restore_with(
 pub(crate) fn restore_prep(req: RestorePrepareRequest) -> Result<Prep, TxnError> {
     Ok(Prep {
         parent: req.parent,
+        observed_parent: req.observed_parent,
         preimage: req.preimage,
         actor: Actor::Human,
         initiator: Actor::Human,

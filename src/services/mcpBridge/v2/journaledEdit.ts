@@ -174,6 +174,7 @@ export async function runJournaledEdit<T>(
         tool: edit.tool,
         baselineProvenance: baseline.baselineProvenance,
         baselineTouched: baseline.baselineTouched,
+        ...(baseline.observedParent && { observedParent: baseline.observedParent }),
         ...(certificate ? { certificate } : {}),
         ...(baseline.capture && { capture: baseline.capture }),
       });

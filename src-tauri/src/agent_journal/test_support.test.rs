@@ -150,6 +150,15 @@ pub fn payload(
     .expect("payload")
 }
 
+/// The observed predecessor a window names when its buffer was built on
+/// `parent`: that revision, or genesis.
+pub fn observed_on(parent: Option<RevisionId>) -> ObservedRef {
+    match parent {
+        Some(revision) => ObservedRef::Revision { revision },
+        None => ObservedRef::Genesis,
+    }
+}
+
 pub fn basis(parent: Option<RevisionId>) -> String {
     crate::agent_journal::writer_epoch::basis_of(parent)
 }

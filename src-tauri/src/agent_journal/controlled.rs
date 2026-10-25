@@ -33,6 +33,7 @@ use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance::{Certificate, ProvenancePayload};
 use crate::agent_journal::provenance_field::decode_field;
+use crate::agent_journal::record::ObservedRef;
 use crate::agent_journal::review::ReviewOp;
 use crate::agent_journal::writer::{CommitRequest, Durability, Inner, LinearizeRequest, Writer};
 use crate::agent_journal::writer_derive::linearize_effects_in;
@@ -79,6 +80,7 @@ pub(crate) fn controlled_prep(req: ControlledPrepareRequest) -> Result<Prep, Txn
     req.actor.validate().map_err(TxnError::InvalidRequest)?;
     Ok(Prep {
         parent: req.parent,
+        observed_parent: req.observed_parent,
         preimage: req.preimage,
         actor: req.actor.clone(),
         initiator: req.actor,
@@ -99,6 +101,8 @@ pub(crate) fn reused_id() -> TxnError {
 /// What a controlled prepare needs, whoever drives it.
 pub(crate) struct Prep {
     pub(crate) parent: Option<RevisionId>,
+    /// The frozen buffer's predecessor; the baseline is recorded on it.
+    pub(crate) observed_parent: Option<ObservedRef>,
     pub(crate) preimage: String,
     pub(crate) actor: Actor,
     pub(crate) initiator: Actor,

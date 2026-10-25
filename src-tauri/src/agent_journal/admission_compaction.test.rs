@@ -115,11 +115,11 @@ fn compaction_expands_a_frame_that_linearizes_several_observations() {
     let dir = tmp();
     let (c, _) = controller(dir.path());
     let d = doc(&c);
-    human_save(&c.writer, d, "0\n");
+    let head = human_save(&c.writer, d, "0\n");
     observe(&c.writer, d, "0\n1\n", None);
     observe(&c.writer, d, "0\n1\n2\n", None);
     let t = c
-        .prepare(&body(None, "0\n1\n2\n3\n", Some(&request_id())).to_string())
+        .prepare(&body(Some(head), "0\n1\n2\n3\n", Some(&request_id())).to_string())
         .expect("prepare");
     let frame = c.writer.debug_records().pop().unwrap();
     let Record::Admission { items } = &frame.record else {

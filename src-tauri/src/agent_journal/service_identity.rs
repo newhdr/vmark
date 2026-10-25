@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::doc_registry::SourceExpectation;
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::ids::DocId;
+use crate::agent_journal::ids::{DocId, RevisionId};
 use crate::agent_journal::refusal::refusal;
 use crate::agent_journal::service::AgentJournalState;
 use crate::command_error::CommandError;
@@ -132,6 +132,22 @@ impl AgentJournalState {
         self.docs.find(&req.doc_key).map_err(|e| refusal(&e))
     }
 
+    /// The settled head of the document a key carries (`payload`: JSON
+    /// `{docKey}`), without minting one; `None` is genesis. A tab with no
+    /// expected head reads it here before a controlled write (R32): it is
+    /// the head that write's compare-and-set is checked against.
+    ///
+    /// # Errors
+    /// `INVALID_REQUEST` for a malformed payload or key; the off refusal
+    /// when the journal is not running (never a guessed genesis).
+    pub fn head(&self, payload: &str) -> Result<Option<RevisionId>, CommandError> {
+        let req: FindRequest = serde_json::from_str(payload)
+            .map_err(|e| refusal(&TxnError::InvalidRequest(e.to_string())))?;
+        let c = self.controller().ok_or_else(|| self.off_refusal())?;
+        let doc = self.docs.find(&req.doc_key).map_err(|e| refusal(&e))?;
+        Ok(doc.and_then(|d| c.writer.head(d)))
+    }
+
     /// The watcher saw renames naming `paths`. Returns how many documents
     /// followed.
     pub fn note_renames(&self, paths: &[PathBuf]) -> usize {
@@ -146,3 +162,7 @@ mod refusal_tests;
 #[cfg(test)]
 #[path = "identity_unreadable.test.rs"]
 mod unreadable_tests;
+
+#[cfg(test)]
+#[path = "journal_head.test.rs"]
+mod journal_head_tests;

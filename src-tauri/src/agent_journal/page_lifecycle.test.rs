@@ -23,7 +23,7 @@ fn stale(e: &crate::command_error::CommandError) {
 /// A prepared transaction of `KEY` owned by page 1 in `doc-a`.
 fn owned(l: &Life) -> (Page, crate::agent_journal::ids::TxnId) {
     let a = l.r.page("doc-a", 1);
-    let txn = txn_of(&l.r.prepare(&a, &l.r.p(&a, None, "text")).expect("prepare"));
+    let txn = txn_of(&l.r.prepare(&a, &l.r.p_head(&a, "text")).expect("prepare"));
     (a, txn)
 }
 
@@ -51,7 +51,7 @@ fn revoked_owner_commit_is_stale_page_and_the_worker_records_uncommitted() {
 fn destroy_before_begin_is_stale_generation_nothing_reserved() {
     let l = life();
     let a = l.r.page("doc-a", 1);
-    let p = l.r.p(&a, None, "text");
+    let p = l.r.p_head(&a, "text");
     l.destroyed(&a.label);
     l.idle();
     stale(&l.r.prepare(&a, &p).expect_err("a destroyed window"));
@@ -63,7 +63,7 @@ fn destroy_before_begin_is_stale_generation_nothing_reserved() {
 fn destroy_between_begin_and_admission_is_stale_generation_nothing_reserved() {
     let l = life();
     let a = l.r.page("doc-a", 1);
-    let p = l.r.p(&a, None, "text");
+    let p = l.r.p_head(&a, "text");
     let (held, go) = hold_original(&l.r, &a, &p);
     l.destroyed(&a.label);
     l.idle();
@@ -92,7 +92,7 @@ fn reload_with_a_prepared_txn_ends_uncommitted_and_schedules_the_drain() {
 fn a_delayed_old_generation_prepare_after_started_is_stale_generation() {
     let l = life();
     let a = l.r.page("doc-a", 1);
-    let p = l.r.p(&a, None, "text");
+    let p = l.r.p_head(&a, "text");
     l.started(&a.label);
     l.idle();
     stale(&l.r.prepare(&a, &p).expect_err("an old generation"));
@@ -141,7 +141,7 @@ fn destroy_then_a_delayed_registration_is_stale_generation_and_the_label_stays_c
 fn rebuilt_main_started_reopens_and_the_old_generation_is_stale() {
     let l = life();
     let old = l.r.page("main", 1);
-    let p = l.r.p(&old, None, "text");
+    let p = l.r.p_head(&old, "text");
     l.destroyed("main");
     l.started("main");
     let new = l.r.register("main", 2);
@@ -150,7 +150,7 @@ fn rebuilt_main_started_reopens_and_the_old_generation_is_stale() {
         &l.r.prepare(&old, &p)
             .expect_err("the old window's generation"),
     );
-    l.r.prepare(&new, &l.r.p(&new, None, "text"))
+    l.r.prepare(&new, &l.r.p_head(&new, "text"))
         .expect("the rebuilt window writes");
 }
 
@@ -158,7 +158,7 @@ fn rebuilt_main_started_reopens_and_the_old_generation_is_stale() {
 fn two_starteds_with_no_registration_between_leave_the_first_generation_dead() {
     let l = life();
     let a = l.r.page("doc-a", 1);
-    let p = l.r.p(&a, None, "text");
+    let p = l.r.p_head(&a, "text");
     l.started(&a.label);
     l.started(&a.label);
     l.idle();
@@ -250,7 +250,7 @@ fn three_reloads_with_fences_then_begin_purges_before_insert() {
     let l = life_held();
     for n in 1..=3 {
         let page = l.r.page("doc-a", n);
-        l.r.abandon(&page.label, &l.r.p(&page, None, "text"))
+        l.r.abandon(&page.label, &l.r.p_head(&page, "text"))
             .expect("fence an unknown id");
         assert_eq!(
             l.r.sizes(),
@@ -260,7 +260,7 @@ fn three_reloads_with_fences_then_begin_purges_before_insert() {
         l.started("doc-a");
     }
     let page = l.r.register("doc-a", 4);
-    l.r.prepare(&page, &l.r.p(&page, None, "text"))
+    l.r.prepare(&page, &l.r.p_head(&page, "text"))
         .expect("begin");
     assert_eq!(l.r.sizes(), (0, 0, 1, 1, 1), "purged before the insert");
     assert_eq!(l.spawns(), 1, "one worker task for all three reloads");
@@ -288,12 +288,12 @@ fn each_entry_changes_the_table_before_it_signals_the_worker() {
     assert_eq!(l.ended(), vec![(t1, OwnedEnd::Recorded)], "page load");
 
     let a = l.r.register("doc-a", 2);
-    let t2 = txn_of(&l.r.prepare(&a, &l.r.p(&a, None, "text!")).expect("prepare"));
+    let t2 = txn_of(&l.r.prepare(&a, &l.r.p_head(&a, "text!")).expect("prepare"));
     l.replace(&a, 3);
     assert_eq!(l.ended()[1..], [(t2, OwnedEnd::Recorded)], "replacement");
 
     let b = l.r.register("doc-a", 4);
-    let t3 = txn_of(&l.r.prepare(&b, &l.r.p(&b, None, "text!")).expect("prepare"));
+    let t3 = txn_of(&l.r.prepare(&b, &l.r.p_head(&b, "text!")).expect("prepare"));
     l.destroyed(&b.label);
     assert_eq!(l.ended()[2..], [(t3, OwnedEnd::Recorded)], "destroy");
 }

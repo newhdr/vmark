@@ -150,7 +150,8 @@ fn a_prepare_whose_baseline_map_does_not_certify_is_refused_with_field_provenanc
             insert: 1,
         }],
     );
-    let req = json!({ "docKey": "k", "parent": h, "preimage": "abc?", "actor": agent(), "tool": "document.write", "baselineProvenance": wrong });
+    let req = json!({ "docKey": "k", "parent": h, "preimage": "abc?", "actor": agent(), "tool": "document.write", "baselineProvenance": wrong,
+        "observedParent": observed_on(Some(h)) });
     let err = c.prepare(&req.to_string()).unwrap_err();
     assert_eq!(
         (journal_code(&err).as_str(), &err.detail().unwrap()["field"]),

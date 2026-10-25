@@ -7,7 +7,7 @@ vi.unmock("@/services/agentJournal/epochClient");
 
 import { invoke } from "@tauri-apps/api/core";
 import { captureSaveToJournal, type CaptureInput } from "../journalClient";
-import { armEpoch, bindDocument, closeEpoch, findDocument, releaseWindow } from "../epochClient";
+import { armEpoch, bindDocument, closeEpoch, findDocument, readJournalHead, releaseWindow } from "../epochClient";
 import { discardUncommitted, listUncommitted } from "../historyClient";
 import { forgetJournalCheckpoints, listJournalCheckpoints, resetJournalCheckpointClient } from "../checkpointClient";
 import { listDocumentHistory } from "../docHistoryClient";
@@ -40,6 +40,7 @@ const CASES: Array<[string, () => Promise<unknown>, unknown]> = [
   ["agent_journal_close_epoch", () => closeEpoch("path:/a.md", "1"), null],
   ["agent_journal_bind_document", () => bindDocument("path:/a.md", "path:/b.md"), DOC],
   ["agent_journal_find_document", () => findDocument("path:/a.md"), DOC],
+  ["agent_journal_head", () => readJournalHead("path:/a.md"), REV],
   ["agent_journal_release_window", () => releaseWindow("main/t1"), null],
   ["agent_journal_discard", () => discardUncommitted("path:/a.md", REV), { durable: true }],
   ["agent_journal_uncommitted", () => listUncommitted("path:/a.md"), []],

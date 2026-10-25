@@ -144,6 +144,7 @@ fn a_missing_restore_source_text_is_corruption() {
         source: RestoreSource::Revision { revision: one },
         baseline_provenance: None,
         baseline_touched: false,
+        observed_parent: None,
         request_id: None,
         capture: None,
     };
