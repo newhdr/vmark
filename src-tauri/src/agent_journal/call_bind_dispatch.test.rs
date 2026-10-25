@@ -19,7 +19,7 @@ use crate::agent_journal::{commands, commands_history, git_export};
 use crate::ipc_caller::{invoke_from, window};
 
 /// The commands bound by a call id, in the order they were converted.
-const CALL_BOUND: [&str; 14] = [
+const CALL_BOUND: [&str; 15] = [
     "agent_journal_capture",
     "agent_journal_arm_epoch",
     "agent_journal_close_epoch",
@@ -34,6 +34,7 @@ const CALL_BOUND: [&str; 14] = [
     "agent_journal_status",
     "agent_journal_git_export",
     "agent_journal_head",
+    "agent_journal_review_decide",
 ];
 
 const CALL: &str = "0123456789abcdef0123456789abcdef";
@@ -62,6 +63,7 @@ fn ready() -> Ready {
             commands_history::agent_journal_discard,
             commands_history::agent_journal_checkpoints,
             commands_history::agent_journal_checkpoints_forget,
+            commands_history::agent_journal_review_decide,
             git_export::command::agent_journal_git_export,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -201,6 +203,13 @@ fn a_missing_or_malformed_call_id_is_refused_before_the_command_runs() {
     calls.push((
         "agent_journal_git_export",
         payload(json!({ "docKey": key, "repository": "/nowhere" })),
+    ));
+    calls.push((
+        "agent_journal_review_decide",
+        payload(json!({
+            "docKey": key, "expectedHead": null, "action": "keep",
+            "items": [{ "hunkId": "h", "expectedReviewGen": "0" }],
+        })),
     ));
     for (command, args) in &calls {
         invoke_from(&caller, command, args.clone())

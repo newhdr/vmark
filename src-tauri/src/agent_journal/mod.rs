@@ -31,8 +31,8 @@
 //!   entry-spelling keys, the persisted key-to-UUID op log, and binds on Save As,
 //!   rename and an external rename.
 //! - `controlled_restore`, `controlled_revert`, `controller_history`, `controller_checkpoints`,
-//!   `controller_doc_history`, `commands_history` — restore, hunk revert, the uncommitted
-//!   list, the history panel's revision list and its checkpoints over IPC.
+//!   `controller_doc_history`, `commands_history` — restore, hunk revert, the uncommitted list,
+//!   the history panel's revisions, its checkpoints and its review decisions over IPC.
 //!   `generation_events` — the writer's broadcast as one coalesced Tauri
 //!   event, so every window's panel re-reads when the journal changes.
 //! - `gc_policy` — the collector's caps and warnings. `service_gc`, `service_legacy` — the

@@ -114,6 +114,7 @@ macro_rules! all_commands {
             agent_journal::commands::document::agent_journal_head,
             agent_journal::commands_history::agent_journal_restore_prepare,
             agent_journal::commands_history::agent_journal_revert_prepare,
+            agent_journal::commands_history::agent_journal_review_decide,
             agent_journal::commands_history::agent_journal_history,
             agent_journal::commands_history::agent_journal_uncommitted,
             agent_journal::commands_history::agent_journal_discard,

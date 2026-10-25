@@ -39,6 +39,7 @@ pub(crate) fn mock_app() -> tauri::App<MockRuntime> {
             commands::agent_journal_register_page,
             commands_history::agent_journal_restore_prepare,
             commands_history::agent_journal_revert_prepare,
+            commands_history::agent_journal_review_decide,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build mock app")

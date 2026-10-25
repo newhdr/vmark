@@ -5,7 +5,7 @@
 //! reservation was holding, and starts the background drainer whenever the
 //! touched document is left degraded (a failed `committed`, `aborted`,
 //! baseline or capture append) or a save failed to linearize, so neither
-//! waits for a restart.
+//! waits for a restart. The review panel's decisions live in `review`.
 //!
 //! @module agent_journal/controller
 
@@ -28,6 +28,9 @@ use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::refusal::refusal;
 use crate::agent_journal::writer::Writer;
 use crate::command_error::CommandError;
+
+#[path = "controller_review.rs"]
+pub mod review;
 
 /// Reply to an abort: `durable: false` means the `aborted` record is queued
 /// and the document stays reserved until the drainer lands it.

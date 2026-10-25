@@ -1,7 +1,8 @@
 //! Tauri commands of the history panel over the agent edit journal: prepare
 //! a restore or a hunk revert (committed or aborted through `agent_journal_commit` /
 //! `agent_journal_abort`), list a document's revisions, list or discard a document's uncommitted
-//! entries, and keep the panel's checkpoints (`controller_checkpoints`).
+//! entries, keep the panel's checkpoints (`controller_checkpoints`), and record
+//! the review panel's decisions (`controller::review`).
 //!
 //! Key decisions:
 //!   - Same contract as `commands`: `async` + `spawn_blocking`, JSON string
@@ -14,6 +15,7 @@ use crate::agent_journal::admission::bound::{bind_call, Bound, CallBind, Request
 use crate::agent_journal::commands::run;
 use crate::agent_journal::controlled_restore::RestorePrepared;
 use crate::agent_journal::controlled_revert::RevertReply;
+use crate::agent_journal::controller::review::ReviewDecided;
 use crate::agent_journal::controller::AbortReply;
 use crate::agent_journal::controller_checkpoints::CheckpointView;
 use crate::agent_journal::controller_doc_history::DocHistory;
@@ -65,6 +67,22 @@ pub async fn agent_journal_revert_prepare<R: tauri::Runtime>(
         c.revert_prepare_framed(&pages, &label, &payload)
     })
     .await
+}
+
+/// Record one review decision (JSON `{docKey, expectedHead, action,
+/// items: [{hunkId, expectedReviewGen}]}`; `action` is `keep`, `unkeep`,
+/// `markHandled` or `clearReviewed`); replies `{bind: {callId}, reply:
+/// {generation}}`.
+///
+/// # Errors
+/// A journal refusal (`detail.journalCode`), or the off refusal.
+#[tauri::command]
+pub async fn agent_journal_review_decide(
+    state: tauri::State<'_, AgentJournalState>,
+    payload: String,
+    call_id: String,
+) -> Result<Bound<CallBind, ReviewDecided>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.review_decide(&payload))).await
 }
 
 /// A document's revisions and blocked hunks (`payload`: JSON `{docKey}`).
