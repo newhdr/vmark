@@ -100,7 +100,8 @@
     "lint:provenance-ids": "node scripts/check-provenance-ids.mjs",
     "lint:adr-refs": "node scripts/check-adr-refs.mjs",
     "lint:feature-map": "node scripts/check-feature-map.mjs",
-    "gen:feature-ledger": "node scripts/gen-feature-ledger.mjs"
+    "gen:feature-ledger": "node scripts/gen-feature-ledger.mjs",
+    "gen:comment-anchor-goldens": "tsx scripts/gen-comment-anchor-goldens.ts"
   },
   "dependencies": {
     "@actions/workflow-parser": "0.3.61",

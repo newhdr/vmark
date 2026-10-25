@@ -15,6 +15,8 @@
  *   - `STALE_REQUEST` (a request that ended, was fenced, or names a stale
  *     writer or page) and `STALE_PAGE` (a commit or abort whose page
  *     registration is no longer live) are the request protocol's answers.
+ *   - `COMMENT_ANCHOR_TOO_LONG` refuses a comment anchor whose quote is
+ *     over 4,096 UTF-8 bytes; `detail` carries `bytes` and `limit`.
  *   - `JOURNAL_TIMEOUT` is never sent by the journal: the client raises
  *     it when a call outlives its deadline (`journalDeadline.ts`).
  *   - `uncertain` is true only when the journal said so: the caller cannot
@@ -46,6 +48,7 @@ export const JOURNAL_CODES = [
   "REVERT_REFUSED",
   "INVALID_REQUEST",
   "INVALID_TEXT",
+  "COMMENT_ANCHOR_TOO_LONG",
   "JOURNAL_IO",
   "INVARIANT_BROKEN",
   "JOURNAL_CORRUPT",

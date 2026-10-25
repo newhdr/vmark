@@ -992,7 +992,8 @@
         "src/services/agentJournal",
         "src/services/commands/journalExportCommands.ts",
         "src/services/commands/journalExportCommands.test.ts",
-        "src/test/agentJournalFake.ts"
+        "src/test/agentJournalFake.ts",
+        "src/test/commentAnchorGoldens.ts"
       ],
       "flag": null,
       "flagDefault": null,

@@ -59,6 +59,10 @@ pub enum TxnError {
     /// so the window can resend the same request without the map, as a
     /// `snapshotOnly` barrier, instead of losing the record.
     InvalidProvenance(String),
+    /// A comment anchor's quote, exact or widened to whole blocks, is over
+    /// the 4,096-byte UTF-8 bound. Refused, never truncated: a shorter
+    /// quote would be a different anchor.
+    CommentAnchorTooLong { bytes: usize, limit: usize },
     /// Text that is not well-formed Unicode (a lone surrogate, invalid
     /// UTF-8). Refused at the boundary, never replaced with U+FFFD.
     InvalidText(String),
@@ -94,6 +98,7 @@ impl TxnError {
             Self::StaleRegistration(_) => "STALE_REQUEST",
             Self::Request(r) => r.state.code(),
             Self::InvalidRequest(_) | Self::InvalidProvenance(_) => "INVALID_REQUEST",
+            Self::CommentAnchorTooLong { .. } => "COMMENT_ANCHOR_TOO_LONG",
             Self::InvalidText(_) => "INVALID_TEXT",
             Self::Io(_) | Self::Indeterminate(_) => "JOURNAL_IO",
             Self::Invariant(_) => "INVARIANT_BROKEN",

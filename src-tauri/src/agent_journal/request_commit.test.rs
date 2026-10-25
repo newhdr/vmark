@@ -51,6 +51,7 @@ fn every_refusal() -> Vec<TxnError> {
         TxnError::InvalidRequest(String::new()),
         TxnError::InvalidProvenance(String::new()),
         TxnError::InvalidText(String::new()),
+        TxnError::CommentAnchorTooLong { bytes: 0, limit: 0 },
         TxnError::Io(String::new()),
         TxnError::Indeterminate(String::new()),
         TxnError::Invariant(String::new()),
@@ -73,6 +74,7 @@ fn every_refusal() -> Vec<TxnError> {
             | TxnError::InvalidRequest(_)
             | TxnError::InvalidProvenance(_)
             | TxnError::InvalidText(_)
+            | TxnError::CommentAnchorTooLong { .. }
             | TxnError::Io(_)
             | TxnError::Indeterminate(_)
             | TxnError::Invariant(_)

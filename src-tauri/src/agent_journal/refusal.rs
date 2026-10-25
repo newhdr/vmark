@@ -46,9 +46,10 @@ fn class(e: &TxnError) -> ErrorCode {
             | RequestState::StaleGeneration
             | RequestState::Unavailable => ErrorCode::Conflict,
         },
-        TxnError::InvalidRequest(_) | TxnError::InvalidProvenance(_) | TxnError::InvalidText(_) => {
-            ErrorCode::InvalidInput
-        }
+        TxnError::InvalidRequest(_)
+        | TxnError::InvalidProvenance(_)
+        | TxnError::InvalidText(_)
+        | TxnError::CommentAnchorTooLong { .. } => ErrorCode::InvalidInput,
         TxnError::Io(_) | TxnError::Indeterminate(_) => ErrorCode::Io,
         TxnError::Invariant(_) | TxnError::Corrupt(_) => ErrorCode::Internal,
         TxnError::FutureFormat { .. } => ErrorCode::Unsupported,
@@ -67,6 +68,9 @@ fn detail(e: &TxnError) -> Value {
             json!({ "journalCode": e.code(), "hunk": hunk, "reason": reason })
         }
         TxnError::InvalidProvenance(_) => json!({ "journalCode": e.code(), "field": "provenance" }),
+        TxnError::CommentAnchorTooLong { bytes, limit } => {
+            json!({ "journalCode": e.code(), "bytes": bytes, "limit": limit })
+        }
         TxnError::Indeterminate(_) => {
             json!({ "journalCode": e.code(), "indeterminate": true, "uncertain": true })
         }
