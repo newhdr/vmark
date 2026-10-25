@@ -171,3 +171,16 @@ mod revert_commit_tests;
 #[cfg(test)]
 #[path = "../revert_controller.test.rs"]
 mod revert_controller_tests;
+
+#[cfg(test)]
+#[path = "../review_op_table.test.rs"]
+mod review_op_table_tests;
+#[cfg(test)]
+#[path = "../review_restart.test.rs"]
+mod review_restart_tests;
+#[cfg(test)]
+#[path = "../review_revert.test.rs"]
+mod review_revert_tests;
+#[cfg(test)]
+#[path = "../review_span_gc.test.rs"]
+mod review_span_gc_tests;
