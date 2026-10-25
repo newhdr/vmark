@@ -984,6 +984,7 @@
       "name": "MCP activity history",
       "paths": [
         "src/components/McpHistory",
+        "src/components/ReviewPanel",
         "src/stores/mcpStore.ts",
         "src/stores/journalRecordingStore.ts",
         "src/stores/__tests__/journalRecordingStore.test.ts",

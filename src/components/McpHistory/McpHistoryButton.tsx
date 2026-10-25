@@ -27,10 +27,13 @@
  *   - A history read that fails after a good one shows none of the old
  *     value — not in the badge, the status or the revisions — so a stale
  *     revision is never offered for restore (as in EarlierCheckpoints).
+ *   - The review panel (keep, revert, Clear reviewed) sits above the
+ *     revisions and shares their feed; an action re-reads it.
  *   - The popover uses position: fixed and the shared popup CSS tokens.
  *
  * @coordinates-with components/McpHistory/useJournalFeed.ts — live reads
  * @coordinates-with components/McpHistory/journalStatusLines.ts — attention
+ * @coordinates-with components/ReviewPanel/ReviewPanel.tsx — the changes to review
  * @coordinates-with components/McpHistory/DocumentHistoryList.tsx — revisions
  * @coordinates-with components/McpHistory/EarlierCheckpoints.tsx — earlier checkpoints
  * @coordinates-with components/McpHistory/UncommittedEntries.tsx — unrecorded writes
@@ -50,6 +53,7 @@ import { listDocumentHistory } from "@/services/agentJournal/docHistoryClient";
 import { FEED_POLL_MS } from "@/services/agentJournal/journalFeed";
 import { readJournalHealth, type JournalHealth } from "@/services/agentJournal/journalStatusClient";
 import { getCurrentWindowLabel } from "@/services/persistence/workspaceStorage";
+import { ReviewPanel } from "@/components/ReviewPanel/ReviewPanel";
 import { DocumentHistoryList } from "./DocumentHistoryList";
 import { EarlierCheckpoints } from "./EarlierCheckpoints";
 import { JournalStatusNotice } from "./JournalStatusNotice";
@@ -165,6 +169,7 @@ export function McpHistoryButton(): React.ReactElement {
           <div className="mcp-history-popover__body">
             <JournalStatusNotice {...status} />
             {tabId && docKey && <UncommittedEntries tabId={tabId} docKey={docKey} pollMs={historyPoll} />}
+            {tabId && docKey && <ReviewPanel tabId={tabId} docKey={docKey} history={visibleHistory} onChanged={history.refresh} />}
             {tabId && <DocumentHistoryList tabId={tabId} history={visibleHistory} failed={history.failed} />}
             <EarlierCheckpoints windowLabel={windowLabel} pollMs={historyPoll} />
           </div>
