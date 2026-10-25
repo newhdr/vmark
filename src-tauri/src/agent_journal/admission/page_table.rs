@@ -222,7 +222,9 @@ impl PageTable {
 
     /// Where `gen` stands for a request from `label` naming `identity`.
     pub(crate) fn liveness(&self, label: &str, gen: u64, identity: &PageIdentity) -> Liveness {
-        match self.lock().holder(gen) {
+        let table = self.lock();
+        let holder = table.holder(gen);
+        match holder {
             None => Liveness::Dead,
             Some((l, _)) if l != label => Liveness::OtherLabel,
             Some((_, held)) if held != identity => Liveness::OtherIdentity,

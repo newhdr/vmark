@@ -125,7 +125,8 @@ pub fn prepare_restore_with(
 ) -> Result<RestorePrepared, TxnError> {
     let request = Request::from_parts(req.request_id, digest)?;
     let prep = restore_prep(req)?;
-    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
+    let prepared = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
+    match prepared {
         PreparedResponse::Restore(p) => Ok(p),
         PreparedResponse::Controlled(_) => Err(reused_id()),
     }

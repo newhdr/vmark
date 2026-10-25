@@ -66,7 +66,8 @@ pub fn prepare_controlled_with(
 ) -> Result<ControlledPrepared, TxnError> {
     let request = Request::from_parts(req.request_id, digest)?;
     let prep = controlled_prep(req)?;
-    match prepare_admitted(w, &mut w.lock(), doc, prep, request)? {
+    let prepared = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
+    match prepared {
         PreparedResponse::Controlled(p) => Ok(p),
         PreparedResponse::Restore(_) => Err(reused_id()),
     }
