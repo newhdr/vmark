@@ -35,7 +35,7 @@ const {
   };
   return {
     mockListen: vi.fn(),
-    mockGlobalListen: vi.fn(() => Promise.resolve(() => {})),
+    mockGlobalListen: vi.fn((..._args: unknown[]) => Promise.resolve(() => {})),
     mockInvoke: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => undefined),
     mockHandleRequest: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
     mockBridgeLog: vi.fn(),
