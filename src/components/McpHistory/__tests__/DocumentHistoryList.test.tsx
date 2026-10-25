@@ -49,11 +49,15 @@ const live = (hunkId: string, from: number, to: number, over: Partial<LiveHunk> 
   target: "r2",
   baseRange: { from, to },
   targetRange: { from, to },
+  reviewGen: "0",
+  span: { from, to },
+  editedSince: false,
   ...over,
 });
 
 const history = (over: Partial<DocumentHistory> = {}): DocumentHistory => ({
   generation: "1",
+  head: "r3",
   rows: [
     row("r3", { parent: "r2", actor: { type: "human" }, kind: "observed", tool: null }),
     row("r2", { parent: "r1" }),

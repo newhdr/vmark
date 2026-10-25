@@ -115,6 +115,9 @@ describe("hunkLabel", () => {
     target: "r2",
     baseRange: { from: 0, to: 1 },
     targetRange: { from: 0, to: 1 },
+    reviewGen: "0",
+    span: { from: 0, to: 1 },
+    editedSince: false,
   });
 
   it("names the kind, the state and the span", () => {

@@ -190,6 +190,10 @@ fn a_blocked_live_hunk_reads_reason_and_origin_at_its_last_certified_revision() 
         .expect("a certified predecessor")
         .at;
     assert_eq!(blocked[0]["lastCertified"], certified.to_string());
+    // A blocked range is no evidence of where the hunk is: no current span.
+    let live = h["hunks"].as_array().unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0]["span"], serde_json::Value::Null, "{}", live[0]);
     let rows = h["rows"].as_array().unwrap();
     assert!(
         rows.iter().any(|r| r["revision"] == certified.to_string()),
@@ -460,4 +464,63 @@ fn an_unknown_key_lists_no_hunks() {
         history(&c, "path:/never.md")["hunks"],
         serde_json::json!([])
     );
+}
+
+// WI-AL2.3 — what the review panel decides against: each live hunk's
+// reviewGen (a decimal string), its mapped span and its edited-since flag,
+// as the projection holds them, and the document head the decision's CAS
+// names.
+#[test]
+fn a_hunk_row_carries_the_review_gen_span_and_edited_since_it_is_decided_against() {
+    let (_dir, c, w, docs) = controller();
+    let doc = docs.resolve(KEY).unwrap();
+    human_save(&w, doc, "abc");
+    let edit = Edit {
+        at: 2,
+        delete: 0,
+        insert: 1,
+    };
+    agent_change(&w, doc, "abc", "abXc", edit);
+    // A person retypes the agent's text: the span is edited since.
+    human_edit(
+        &w,
+        doc,
+        "abZc",
+        &[Edit {
+            at: 2,
+            delete: 1,
+            insert: 1,
+        }],
+    );
+    let s = w.snapshot().state;
+    let h = history(&c, KEY);
+    let rows = h["hunks"].as_array().unwrap();
+    assert!(!rows.is_empty(), "{h:#}");
+    for row in rows {
+        let id = row["hunkId"].as_str().unwrap();
+        let live = s.docs[&doc]
+            .hunks
+            .values()
+            .find(|l| l.hunk.id.0 == id)
+            .expect("listed hunk is live");
+        assert_eq!(row["reviewGen"], live.review_gen.to_string(), "{row:#}");
+        assert_eq!(row["span"], serde_json::to_value(live.span.range).unwrap());
+        assert_eq!(row["editedSince"], live.span.edited_since);
+    }
+    assert!(
+        rows.iter().any(|r| r["editedSince"] == true),
+        "the retyped span reads edited since: {h:#}"
+    );
+}
+
+#[test]
+fn the_reply_names_the_head_and_an_unknown_key_reads_null() {
+    let (_dir, c, w, docs) = controller();
+    let doc = docs.resolve(KEY).unwrap();
+    let saved = human_save(&w, doc, "abc");
+    assert_eq!(history(&c, KEY)["head"], saved.to_string());
+    assert_eq!(w.head(doc), Some(saved));
+    let unknown = history(&c, "path:/never.md");
+    assert!(unknown["head"].is_null(), "{unknown:#}");
+    assert!(unknown.as_object().unwrap().contains_key("head"));
 }

@@ -68,7 +68,7 @@ const agentRow = (revision: string, parent: string | null): HistoryRow => ({
   collected: false,
 });
 const humanRow = (revision: string, parent: string | null): HistoryRow => ({ ...agentRow(revision, parent), actor: { type: "human" }, kind: "observed", tool: null });
-const historyOf = (rows: HistoryRow[], over: Partial<DocumentHistory> = {}): DocumentHistory => ({ generation: "1", rows, truncated: false, hunks: [], blocked: [], degraded: false, ...over });
+const historyOf = (rows: HistoryRow[], over: Partial<DocumentHistory> = {}): DocumentHistory => ({ generation: "1", head: rows[0]?.revision ?? null, rows, truncated: false, hunks: [], blocked: [], degraded: false, ...over });
 
 function setup(filePath: string | null) {
   useTabStore.setState({

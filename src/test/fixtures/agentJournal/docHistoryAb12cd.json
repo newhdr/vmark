@@ -1,5 +1,6 @@
 {
   "generation": "7",
+  "head": "rev-3",
   "rows": [
     {
       "revision": "rev-3",
@@ -74,7 +75,13 @@
       "targetRange": {
         "from": 1,
         "to": 2
-      }
+      },
+      "reviewGen": "0",
+      "span": {
+        "from": 1,
+        "to": 2
+      },
+      "editedSince": false
     },
     {
       "hunkId": "hunk-2",
@@ -88,7 +95,13 @@
       "targetRange": {
         "from": 4,
         "to": 5
-      }
+      },
+      "reviewGen": "0",
+      "span": {
+        "from": 5,
+        "to": 6
+      },
+      "editedSince": false
     }
   ],
   "blocked": [],

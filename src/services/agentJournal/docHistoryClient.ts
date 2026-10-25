@@ -13,6 +13,10 @@
  *   - Live hunks pass through one per persisted hunk, in the journal's
  *     order, with its own geometry: the panel never regroups or re-diffs
  *     them.
+ *   - A hunk carries what a review decision is checked against (its
+ *     `reviewGen`, mapped span and edited-since flag) and the reply names
+ *     the head; a live span may be inverted, a hunk's own ranges may not,
+ *     and a blocked hunk has no span: the panel must not place it.
  *   - A blocked hunk's `lastCertified` stays `null` when the journal has
  *     none; the panel must not invent a location for it.
  *
@@ -50,6 +54,12 @@ export interface LiveHunk {
   baseRange: HunkRange;
   /** Its span in the target. */
   targetRange: HunkRange;
+  /** The generation a review decision on it names, decimal string. */
+  reviewGen: string;
+  /** Where it is in the head; may be inverted (`from > to`) after its text was deleted and re-typed; `null` once blocked. */
+  span: HunkRange | null;
+  /** An edit touched the span since the hunk was made. */
+  editedSince: boolean;
 }
 
 export interface HistoryRow {
@@ -82,6 +92,8 @@ export interface BlockedHunk {
 
 export interface DocumentHistory {
   generation: string;
+  /** The head a review decision names; `null` for genesis or a document the journal never saw. */
+  head: string | null;
   rows: HistoryRow[];
   truncated: boolean;
   /** Newest revision first, document order within a revision. */
@@ -129,13 +141,19 @@ function rowOf(r: unknown): HistoryRow {
 
 const isOffset = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 
-function rangeOf(v: unknown): HunkRange {
-  if (!isObject(v) || !isOffset(v.from) || !isOffset(v.to) || v.from > v.to) throw malformed(COMMAND);
+function offsetsOf(v: unknown): HunkRange {
+  if (!isObject(v) || !isOffset(v.from) || !isOffset(v.to)) throw malformed(COMMAND);
   return { from: v.from, to: v.to };
 }
 
+function rangeOf(v: unknown): HunkRange {
+  const r = offsetsOf(v);
+  if (r.from > r.to) throw malformed(COMMAND);
+  return r;
+}
+
 function hunkOf(h: unknown): LiveHunk {
-  if (!isObject(h) || !isString(h.hunkId) || !oneOf(HUNK_KINDS, h.kind) || !oneOf(HUNK_STATES, h.state) || !isString(h.target)) {
+  if (!isObject(h) || !isString(h.hunkId) || !oneOf(HUNK_KINDS, h.kind) || !oneOf(HUNK_STATES, h.state) || !isString(h.target) || !isDecimal(h.reviewGen) || typeof h.editedSince !== "boolean") {
     throw malformed(COMMAND);
   }
   return {
@@ -145,6 +163,9 @@ function hunkOf(h: unknown): LiveHunk {
     target: h.target,
     baseRange: rangeOf(h.baseRange),
     targetRange: rangeOf(h.targetRange),
+    reviewGen: h.reviewGen,
+    span: h.span === null ? null : offsetsOf(h.span),
+    editedSince: h.editedSince,
   };
 }
 
@@ -178,6 +199,7 @@ export async function listDocumentHistory(docKey: string): Promise<DocumentHisto
   if (
     !isObject(r) ||
     !isDecimal(r.generation) ||
+    !isNullableString(r.head) ||
     !Array.isArray(r.rows) ||
     typeof r.truncated !== "boolean" ||
     !Array.isArray(r.hunks) ||
@@ -188,6 +210,7 @@ export async function listDocumentHistory(docKey: string): Promise<DocumentHisto
   }
   return {
     generation: r.generation,
+    head: r.head,
     rows: r.rows.map(rowOf),
     truncated: r.truncated,
     hunks: r.hunks.map(hunkOf),

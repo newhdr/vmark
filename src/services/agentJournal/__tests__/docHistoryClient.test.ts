@@ -1,6 +1,7 @@
 // @vitest-environment node
 // WI-AL1.7 — the history panel's revision list client (`agent_journal_history`): rows newest first with the full actor (the four principal states, the connection id and the untrusted session label kept apart; human, system and legacy authors), the save's initiator, kind, tool, time and parent; blocked live hunks with reason, origin and lastCertified; the document's degraded flag; a malformed reply, an unknown reason, kind or principal state is refused as JOURNAL_UNAVAILABLE, never shown as something else
 // WI-AL2.1b — every live hunk as the writer persisted it (id, kind, state, target revision, base and target ranges), passed through in the journal's order and never regrouped; a malformed hunk row is refused
+// WI-AL2.3 — what a review decision is checked against: each hunk's reviewGen (a decimal string), its mapped span (which may be inverted after a delete and retype, and is null once the hunk is blocked) and its edited-since flag, and the document head (null for a key the journal never saw); a numeric or malformed reviewGen, a missing span, a non-boolean editedSince or a missing head is refused
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
@@ -46,10 +47,14 @@ const hunk = (over: Record<string, unknown> = {}) => ({
   target: R2,
   baseRange: { from: 2, to: 2 },
   targetRange: { from: 2, to: 3 },
+  reviewGen: "18446744073709551615",
+  span: { from: 2, to: 3 },
+  editedSince: false,
   ...over,
 });
 const reply = (over: Record<string, unknown> = {}) => ({
   generation: "42",
+  head: R2,
   rows: [row(), row({ revision: R1, kind: "observed", parent: null, actor: { type: "human" }, initiator: { type: "human" }, tool: null })],
   truncated: false,
   hunks: [hunk()],
@@ -66,6 +71,7 @@ describe("listDocumentHistory", () => {
     const h = await listDocumentHistory("path:/a.md");
     expect(invokeMock).toHaveBeenCalledWith("agent_journal_history", { payload: JSON.stringify({ docKey: "path:/a.md" }) });
     expect(h.generation).toBe("42");
+    expect(h.head).toBe(R2);
     expect(h.degraded).toBe(true);
     expect(h.truncated).toBe(true);
     expect(h.rows[0]).toEqual({
@@ -90,8 +96,21 @@ describe("listDocumentHistory", () => {
   });
 
   it("returns an empty list for a document the journal never saw", async () => {
-    invokeMock.mockResolvedValueOnce({ generation: "0", rows: [], truncated: false, hunks: [], blocked: [], degraded: false });
-    expect((await listDocumentHistory("tab:main/t1")).rows).toEqual([]);
+    invokeMock.mockResolvedValueOnce({ generation: "0", head: null, rows: [], truncated: false, hunks: [], blocked: [], degraded: false });
+    const h = await listDocumentHistory("tab:main/t1");
+    expect(h.rows).toEqual([]);
+    expect(h.head).toBeNull();
+  });
+
+  it("keeps a hunk's reviewGen as a string and an inverted span as the journal mapped it", async () => {
+    const h = hunk({ span: { from: 5, to: 2 }, editedSince: true, reviewGen: "7" });
+    invokeMock.mockResolvedValueOnce(reply({ hunks: [h] }));
+    expect((await listDocumentHistory("path:/a.md")).hunks[0]).toEqual(h);
+  });
+
+  it("keeps a blocked hunk's span null, never a location", async () => {
+    invokeMock.mockResolvedValueOnce(reply({ hunks: [hunk({ span: null })] }));
+    expect((await listDocumentHistory("path:/a.md")).hunks[0].span).toBeNull();
   });
 
   it("passes every persisted hunk through in the journal's order, touching ones included, never merged", async () => {
@@ -114,6 +133,15 @@ describe("listDocumentHistory", () => {
     ["a negative range", reply({ hunks: [hunk({ baseRange: { from: -1, to: 1 } })] })],
     ["an inverted range", reply({ hunks: [hunk({ targetRange: { from: 3, to: 2 } })] })],
     ["a range with no end", reply({ hunks: [hunk({ baseRange: { from: 1 } })] })],
+    ["a numeric reviewGen", reply({ hunks: [hunk({ reviewGen: 7 })] })],
+    ["a malformed reviewGen", reply({ hunks: [hunk({ reviewGen: "07" })] })],
+    ["a missing reviewGen", reply({ hunks: [hunk({ reviewGen: undefined })] })],
+    ["a missing span", reply({ hunks: [hunk({ span: undefined })] })],
+    ["a negative span", reply({ hunks: [hunk({ span: { from: -1, to: 2 } })] })],
+    ["a fractional span", reply({ hunks: [hunk({ span: { from: 1, to: 2.5 } })] })],
+    ["a non-boolean editedSince", reply({ hunks: [hunk({ editedSince: "no" })] })],
+    ["a missing head", reply({ head: undefined })],
+    ["a numeric head", reply({ head: 3 })],
     ["a numeric generation", reply({ generation: 42 })],
     ["a numeric seq", reply({ rows: [row({ seq: 7 })] })],
     ["an unknown kind", reply({ rows: [row({ kind: "merged" })] })],

@@ -17,6 +17,9 @@
 //!     was cut; a revision a blocked hunk names rides past the cap, so its
 //!     highlight is never cut off. A key the journal has never seen lists
 //!     nothing and is not minted: a read never makes a document.
+//!   - A hunk row carries what a review decision is checked against: its
+//!     `reviewGen`, its mapped span (none once blocked) and edited-since
+//!     flag; the reply names the document head the decision's CAS expects.
 //!   - Each row names its linear parent, so "restore what came before" is a
 //!     restore of that revision; `degraded` says the document has a record
 //!     queued that has not reached the disk yet.
@@ -91,6 +94,15 @@ pub struct HunkRow {
     pub target: RevisionId,
     pub base_range: Range,
     pub target_range: Range,
+    /// The generation a review decision on this hunk must name.
+    #[serde(with = "crate::agent_journal::u64_wire")]
+    pub review_gen: u64,
+    /// Where the hunk is in the head's text; may be inverted (`from > to`)
+    /// when its text was deleted and re-typed. `None` once the hunk is
+    /// blocked: its mapped range is then no evidence of where it is.
+    pub span: Option<Range>,
+    /// The span was touched by an edit since the hunk was made.
+    pub edited_since: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -98,6 +110,9 @@ pub struct HunkRow {
 pub struct DocHistory {
     #[serde(with = "crate::agent_journal::u64_wire")]
     pub generation: u64,
+    /// The head a review decision names; `None` for genesis or a key the
+    /// journal has never seen.
+    pub head: Option<RevisionId>,
     pub rows: Vec<HistoryRow>,
     /// Older revisions exist beyond `rows`.
     pub truncated: bool,
@@ -189,6 +204,9 @@ fn hunks_of(p: &Projection, doc: DocId) -> Vec<HunkRow> {
             target: h.hunk.target,
             base_range: h.hunk.base_range,
             target_range: h.hunk.target_range,
+            review_gen: h.review_gen,
+            span: h.span.block.is_none().then_some(h.span.range),
+            edited_since: h.span.edited_since,
         })
         .collect();
     rows.sort_by_key(|r| (std::cmp::Reverse(seq(&r.target)), r.target_range.start));
@@ -216,6 +234,7 @@ impl Controller {
         };
         Ok(DocHistory {
             generation: p.generation,
+            head: doc.and_then(|d| p.head(d)),
             rows,
             truncated,
             hunks,

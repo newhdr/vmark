@@ -49,7 +49,7 @@ const CASES: Array<[string, () => Promise<unknown>, unknown]> = [
   [
     "agent_journal_history",
     () => listDocumentHistory("path:/a.md"),
-    { generation: "0", rows: [], truncated: false, hunks: [], blocked: [], degraded: false },
+    { generation: "0", head: null, rows: [], truncated: false, hunks: [], blocked: [], degraded: false },
   ],
   ["agent_journal_status", () => readJournalHealth(), STATUS],
   [
