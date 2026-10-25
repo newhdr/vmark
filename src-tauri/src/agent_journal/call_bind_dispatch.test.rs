@@ -97,10 +97,19 @@ fn answerable(key: &str) -> Vec<(&'static str, Value)> {
         ),
         ("agent_journal_status", json!({})),
         ("agent_journal_checkpoints", json!({})),
-        ("agent_journal_checkpoints_forget", payload(json!({ "ids": [] }))),
+        (
+            "agent_journal_checkpoints_forget",
+            payload(json!({ "ids": [] })),
+        ),
         ("agent_journal_history", payload(json!({ "docKey": key }))),
-        ("agent_journal_uncommitted", payload(json!({ "docKey": key }))),
-        ("agent_journal_find_document", payload(json!({ "docKey": key }))),
+        (
+            "agent_journal_uncommitted",
+            payload(json!({ "docKey": key })),
+        ),
+        (
+            "agent_journal_find_document",
+            payload(json!({ "docKey": key })),
+        ),
         (
             "agent_journal_find_document",
             payload(json!({ "docKey": "path:/never.md" })),
@@ -109,7 +118,10 @@ fn answerable(key: &str) -> Vec<(&'static str, Value)> {
             "agent_journal_bind_document",
             payload(json!({ "from": key, "to": "path:/moved.md" })),
         ),
-        ("agent_journal_release_window", json!({ "window": "main/t1" })),
+        (
+            "agent_journal_release_window",
+            json!({ "window": "main/t1" }),
+        ),
     ]
 }
 
@@ -122,7 +134,11 @@ fn each_call_bound_command_echoes_its_call_id_around_the_unchanged_reply() {
             .unwrap_or_else(|e| panic!("{command}: {e}"));
         assert_eq!(out["bind"], json!({ "callId": CALL }), "{command}: {out}");
         assert!(out.get("reply").is_some(), "{command}: {out}");
-        assert_eq!(out.as_object().map(|o| o.len()), Some(2), "{command}: {out}");
+        assert_eq!(
+            out.as_object().map(|o| o.len()),
+            Some(2),
+            "{command}: {out}"
+        );
     }
 
     // An epoch armed and then closed: the unit reply is enveloped too.
@@ -144,7 +160,10 @@ fn each_call_bound_command_echoes_its_call_id_around_the_unchanged_reply() {
         ),
     )
     .expect("close");
-    assert_eq!(closed, json!({ "bind": { "callId": other }, "reply": null }));
+    assert_eq!(
+        closed,
+        json!({ "bind": { "callId": other }, "reply": null })
+    );
 }
 
 #[test]
@@ -167,10 +186,7 @@ fn a_missing_or_malformed_call_id_is_refused_before_the_command_runs() {
     let upper = "A".repeat(32);
     let not_hex = "g".repeat(32);
     let mut calls = answerable(key);
-    calls.push((
-        "agent_journal_arm_epoch",
-        payload(json!({ "docKey": key })),
-    ));
+    calls.push(("agent_journal_arm_epoch", payload(json!({ "docKey": key }))));
     calls.push((
         "agent_journal_discard",
         payload(json!({ "docKey": key, "txn": "x" })),
@@ -190,7 +206,10 @@ fn a_missing_or_malformed_call_id_is_refused_before_the_command_runs() {
                 "{command}/{bad:?}: {err}"
             );
             assert!(
-                err["message"].as_str().unwrap_or_default().contains("callId"),
+                err["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("callId"),
                 "{command}/{bad:?}: {err}"
             );
         }
@@ -202,7 +221,11 @@ fn a_missing_or_malformed_call_id_is_refused_before_the_command_runs() {
         with_call(payload(json!({ "docKey": key })), CALL),
     )
     .expect("find");
-    assert_eq!(found["reply"], Value::Null, "no refused call minted a document");
+    assert_eq!(
+        found["reply"],
+        Value::Null,
+        "no refused call minted a document"
+    );
 }
 
 /// The source of a module, by its path in `all_commands!`.
@@ -239,7 +262,10 @@ fn every_journal_command_reply_is_bound() {
             (module, name)
         })
         .collect();
-    assert!(entries.len() >= 19, "the registry lists the journal commands");
+    assert!(
+        entries.len() >= 19,
+        "the registry lists the journal commands"
+    );
 
     let mut call_bound = Vec::new();
     for (module, name) in &entries {
@@ -260,8 +286,14 @@ fn every_journal_command_reply_is_bound() {
             // R98: the abandon's answers name the request id, which the client validates.
             "agent_journal_abandon" => {}
             _ => {
-                assert!(sig.contains("call_id: String"), "{name} takes no callId: {sig}");
-                assert!(returns.contains("Bound<CallBind"), "{name} does not echo its callId: {sig}");
+                assert!(
+                    sig.contains("call_id: String"),
+                    "{name} takes no callId: {sig}"
+                );
+                assert!(
+                    returns.contains("Bound<CallBind"),
+                    "{name} does not echo its callId: {sig}"
+                );
                 call_bound.push(*name);
             }
         }
@@ -269,5 +301,8 @@ fn every_journal_command_reply_is_bound() {
     let mut want = CALL_BOUND.to_vec();
     want.sort_unstable();
     call_bound.sort_unstable();
-    assert_eq!(call_bound, want, "the call-bound commands are exactly these");
+    assert_eq!(
+        call_bound, want,
+        "the call-bound commands are exactly these"
+    );
 }

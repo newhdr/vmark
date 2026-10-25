@@ -106,7 +106,10 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
     let calls: [(&str, Value); 16] = [
         ("agent_journal_history", call(json!({"payload": "{}"}))),
         ("agent_journal_checkpoints", call(json!({}))),
-        ("agent_journal_checkpoints_forget", call(json!({"payload": "{}"}))),
+        (
+            "agent_journal_checkpoints_forget",
+            call(json!({"payload": "{}"})),
+        ),
         ("agent_journal_uncommitted", call(json!({"payload": "{}"}))),
         ("agent_journal_discard", call(json!({"payload": "{}"}))),
         ("agent_journal_restore_prepare", json!({"payload": "{}"})),
@@ -127,7 +130,10 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
         ("agent_journal_capture", call(json!({"payload": "{}"}))),
         ("agent_journal_arm_epoch", call(json!({"payload": "{}"}))),
         ("agent_journal_close_epoch", call(json!({"payload": "{}"}))),
-        ("agent_journal_release_window", call(json!({"window": "doc-1"}))),
+        (
+            "agent_journal_release_window",
+            call(json!({"window": "doc-1"})),
+        ),
         ("agent_journal_git_export", call(json!({"payload": "{}"}))),
     ];
     for (command, args) in calls {

@@ -103,5 +103,9 @@ pub async fn agent_journal_checkpoints_forget(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, ForgetReport>, CommandError> {
-    bind_call(&call_id, run(&state, move |c| c.checkpoints_forget(&payload))).await
+    bind_call(
+        &call_id,
+        run(&state, move |c| c.checkpoints_forget(&payload)),
+    )
+    .await
 }

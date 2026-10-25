@@ -31,9 +31,11 @@ pub async fn agent_journal_bind_document<R: tauri::Runtime>(
     call_id: String,
 ) -> Result<Bound<CallBind, DocId>, CommandError> {
     bind_call(&call_id, async move {
-        tokio::task::spawn_blocking(move || app.state::<AgentJournalState>().bind_document(&payload))
-            .await
-            .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
+        tokio::task::spawn_blocking(move || {
+            app.state::<AgentJournalState>().bind_document(&payload)
+        })
+        .await
+        .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
     })
     .await
 }
@@ -51,9 +53,11 @@ pub async fn agent_journal_find_document<R: tauri::Runtime>(
     call_id: String,
 ) -> Result<Bound<CallBind, Option<DocId>>, CommandError> {
     bind_call(&call_id, async move {
-        tokio::task::spawn_blocking(move || app.state::<AgentJournalState>().find_document(&payload))
-            .await
-            .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
+        tokio::task::spawn_blocking(move || {
+            app.state::<AgentJournalState>().find_document(&payload)
+        })
+        .await
+        .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
     })
     .await
 }
