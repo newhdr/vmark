@@ -247,7 +247,14 @@ module.exports = [
     // journal status, document-identity and save-capture clients, which must
     // be loaded before the first edit so no edit goes unrecorded — landed the
     // chunk at 734.6 kB. Smallest raise that fits, as above.
-    limit: "735 kB",
+    // The agent write path then took it to 773.6 kB. 26.3 kB of that was the
+    // whole-text diff engine (diff-match-patch and the canonical diff), which
+    // only a whole-text agent write needs: it is now imported on first use and
+    // has a lazy chunk of its own. 735 → 747.5 kB for the rest, which runs on
+    // every agent write: the request coordinator, page registration, request
+    // ending and the selection certificate (#1591). Actual 747.3 kB; smallest
+    // raise that fits, as above.
+    limit: "747.5 kB",
     brotli: false,
   },
   {
@@ -266,14 +273,20 @@ module.exports = [
     // Rolldown names this chunk after one of its modules. When
     // contentApplied moved to services/editor (services may not import
     // components) it became the chunk's name; the members and the budget
-    // are unchanged (267,772 bytes).
-    path: "dist/assets/contentApplied-*.js",
+    // are unchanged (267,772 bytes). Then the WYSIWYG collector
+    // (services/agentJournal/collectors/wysiwyg) joined it and it took that
+    // name; contentApplied's glob matched nothing and size-limit failed loud.
+    path: "dist/assets/wysiwygCollector-*.js",
     // Ratcheted 283 kB -> 280 kB (re-measured to its size plus 5%): actual 265.8 kB.
     // The agent-edit ledger's provenance core then landed here and took the
     // chunk to 284,325 bytes. It now has its own chunk and budget (below), so
     // this one is back to 267,270. Its size plus 5% rounds to 281 kB, which
     // would RAISE the limit, so it stays at 280 kB (4.8% headroom).
-    limit: "280 kB",
+    // 280 → 281.5 kB (#1591): the WYSIWYG collector (block map, transaction
+    // ledger, step correspondence) and the serializer's span map, 13.6 kB,
+    // which must be loaded before the first WYSIWYG edit so none goes
+    // unrecorded, took it to 281,436 bytes. Smallest raise that fits.
+    limit: "281.5 kB",
     brotli: false,
   },
   {
@@ -292,7 +305,9 @@ module.exports = [
     // 18 → 19.5 kB: the decoder's hostile-input checks (exact keys at every
     // level, safe integers, the piece cap enforced during expansion) took it
     // to 19,040 bytes. Smallest raise that fits.
-    limit: "19.5 kB",
+    // 19.5 → 20 kB: the capture id a save names (captureId) took it to
+    // 19,785 bytes. Smallest raise that fits.
+    limit: "20 kB",
     brotli: false,
   },
 
