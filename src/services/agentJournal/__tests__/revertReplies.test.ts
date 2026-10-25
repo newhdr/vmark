@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL2.2b — a revert prepare's two replies are read losslessly or refused whole: an applied revert's patch needs safe non-negative UTF-16 offsets with from <= to, a string insert (empty allowed) and a sha256 postimage hash; a decision names conflicted or revertFoundBase with decimal reviewGen and generation and a nullable baseline and head; anything else throws JOURNAL_UNAVAILABLE as malformed
+// WI-AL2.2b — a revert prepare's two replies are read losslessly or refused whole: an applied revert's patch needs safe non-negative UTF-16 offsets with from <= to, a string insert (empty allowed) and a sha256 postimage hash; a decision names conflicted or revertFoundBase with decimal reviewGen and generation and a nullable baseline and head; a field either reply does not define, or one it lacks, is refused; anything else throws JOURNAL_UNAVAILABLE as malformed
 import { describe, expect, it } from "vitest";
 
 import { JournalRefusal } from "../journalRefusal";
@@ -47,6 +47,7 @@ describe("parseRevertPrepared", () => {
     ["a numeric reviewGen", { reviewGen: 7 }],
     ["a missing hunk", { hunk: undefined }],
     ["a missing txn", { txn: undefined }],
+    ["a field it does not define", { capture: "c" }],
   ])("refuses %s", (_name, patch) => {
     expect(refused(() => parseRevertPrepared(CMD, { ...PREPARED, ...patch })).journalCode).toBe("JOURNAL_UNAVAILABLE");
   });
@@ -63,8 +64,20 @@ describe("parseRevertDecided", () => {
     ["a numeric generation", { generation: 2 }],
     ["a missing head", { head: undefined }],
     ["an empty doc", { doc: "" }],
+    ["a field it does not define", { txn: "t" }],
   ])("refuses %s", (_name, patch) => {
     expect(refused(() => parseRevertDecided(CMD, { ...DECIDED, ...patch })).journalCode).toBe("JOURNAL_UNAVAILABLE");
+  });
+
+  it.each([
+    ["prepared", PREPARED, parseRevertPrepared],
+    ["decided", DECIDED, parseRevertDecided],
+  ] as const)("refuses a %s reply without one of its fields", (_name, reply, parse) => {
+    for (const key of Object.keys(reply)) {
+      const short: Record<string, unknown> = { ...reply };
+      delete short[key];
+      expect(refused(() => parse(CMD, short)).journalCode, key).toBe("JOURNAL_UNAVAILABLE");
+    }
   });
 
   it("refuses a non-object", () => {

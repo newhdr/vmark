@@ -10,7 +10,9 @@
  *   - A decision is a success without a transaction: it names the hunk's
  *     `reviewGen` after the decision, the decision's seq and the head it
  *     was recorded on, so the caller has nothing to commit or abort.
- *   - Anything else is `malformed`, never a partial reply.
+ *   - Each reply has exactly its fields, as the writer's structs (which
+ *     deny unknown fields) serialize them; a missing or extra one, or
+ *     anything else, is `malformed`, never a partial reply.
  *
  * @coordinates-with src-tauri/src/agent_journal/controlled_revert.rs — `RevertPrepared`, `RevertDecided`
  * @module services/agentJournal/revertReplies
@@ -46,6 +48,14 @@ export interface RevertDecided {
 }
 
 const ACTIONS: readonly string[] = ["conflicted", "revertFoundBase"];
+const PREPARED_KEYS = ["doc", "txn", "revision", "generation", "baseline", "hunk", "reviewGen", "from", "to", "insert", "postimageHash"];
+const DECIDED_KEYS = ["doc", "hunk", "action", "reviewGen", "generation", "baseline", "head"];
+
+/** Exactly `keys`, as the writer's `deny_unknown_fields` structs serialize them. */
+const hasExactly = (r: object, keys: readonly string[]): boolean => {
+  const own = Object.keys(r);
+  return own.length === keys.length && keys.every((k) => Object.hasOwn(r, k));
+};
 const isOffset = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isBlobHash = (v: unknown): v is string => typeof v === "string" && /^sha256-[0-9a-f]{64}$/.test(v);
 
@@ -54,6 +64,7 @@ export function parseRevertPrepared(command: string, r: unknown): PreparedRevert
   const prepared = parsePreparedTxn(command, r);
   if (
     !isObject(r) ||
+    !hasExactly(r, PREPARED_KEYS) ||
     !isString(r.hunk) ||
     !isDecimal(r.reviewGen) ||
     !isOffset(r.from) ||
@@ -79,6 +90,7 @@ export function parseRevertPrepared(command: string, r: unknown): PreparedRevert
 export function parseRevertDecided(command: string, r: unknown): RevertDecided {
   if (
     !isObject(r) ||
+    !hasExactly(r, DECIDED_KEYS) ||
     !isString(r.doc) ||
     !isString(r.hunk) ||
     typeof r.action !== "string" ||
