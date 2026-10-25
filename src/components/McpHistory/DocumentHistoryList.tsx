@@ -23,6 +23,9 @@
  *     range: touching hunks stay separate rows, nothing is regrouped or
  *     re-diffed. Hunks of a revision the list does not show are listed
  *     apart rather than dropped.
+ *   - A concurrent revision (a save that started from another version
+ *     than the one before it) says it was edited in two windows; its two
+ *     restore actions are the way back to either side.
  *   - Restores go through `restoreFromHistory`, one at a time; a second
  *     click while one is in flight is ignored. A restore the editor failed
  *     after applying warns (restored, check the document); one that could
@@ -166,6 +169,7 @@ function RevisionRow({ row: r, before, hunks, live, onRestore }: RowProps): Reac
           {t("mcpHistoryRequestedBy")} <ActorLabel actor={r.initiator} />
         </div>
       )}
+      {r.kind === "concurrent" && <div className="mcp-history-popover__note">{t("review.editedInTwoWindows")}</div>}
       {live && <HunkList hunks={live} label={t("mcpHistoryHunks")} />}
       {hunks?.map((hunk) => <BlockedLine key={hunk.hunkId} hunk={hunk} />)}
       <div className="mcp-history-popover__actions">
