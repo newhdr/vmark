@@ -83,6 +83,12 @@ describe("declared script on the prepare", () => {
     expect(committed()[2]).toBeUndefined();
   });
 
+  it("document.write of the buffer with a BOM and CRLF declares no change (WI-AL2.5)", async () => {
+    seed("t1", "line one\nline two\n", "/notes/a.md");
+    await write("﻿line one\r\nline two\r\n");
+    expect(prepared().certificate).toEqual(await declaredScriptCertificate("line one\nline two\n", "line one\nline two\n"));
+  });
+
   it("document.transform sends the script of the buffer and the transformed text", async () => {
     seed("t1", "测试ABC混合", "/notes/cjk.md");
     await handleDocumentTransform("x1", { tabId: "t1", kind: "cjk-spacing" }, TEST_WRITE_CONTEXT);
