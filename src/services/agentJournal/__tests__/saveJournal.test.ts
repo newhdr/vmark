@@ -1,9 +1,8 @@
 // @vitest-environment node
-// WI-AL1.4 — observational capture of a save from the window: author (the human, or the agent for document.write's own text) vs initiator (manual, autosave, MCP client), the journaled flag yes/pending/no, a save during a held prepare reported pending and linearized after the commit, the observed_parent chain naming the tab's own pending observation, the prepare basis dropped after a pending save, a capture failure answering journaled no without throwing, the observed base frozen when the save is submitted (an agent commit during the disk write is not the save's parent), outstanding saves chained in submission order, a cancelled save keeping the base, each tab and file saving under its own window name, and only document.write claiming the head it wrote (equal text alone never elides)
+// WI-AL1.4 — observational capture of a save from the window: author (the human, or the agent for document.write's own text) vs initiator (manual, autosave, MCP client), the journaled flag yes/pending/no, a save during a held prepare reported pending and linearized after the commit, the observed_parent chain naming the tab's own pending observation, the prepare basis dropped after a pending save, a capture failure answering journaled no without throwing, the observed base frozen when the save is submitted (an agent commit during the disk write is not the save's parent), outstanding saves chained in submission order, a cancelled save keeping the base, each tab and file saving under its own window name, and only document.write claiming the head it wrote (equal text alone never elides) | AL2.2g: the agent writes these saves race are driven on the journal fake directly; the window's request protocol is not under test here
 import { afterEach, describe, it, expect } from "vitest";
 import { agentJournalFake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
-import { prepareControlledWrite, commitControlledWrite } from "../journalClient";
 import { journalActorFor } from "../journalActor";
 import { journalBasis, journalObservedBase, rememberJournalBasis, windowNameFor } from "../documentIdentity";
 import { beginJournalSave, saveInitiatorFor } from "../saveJournal";
@@ -22,12 +21,12 @@ const journalSave = (tab: string, path: string, content: string, origin: SaveOri
 const DOC_WRITE: SaveOrigin = { saveType: "mcp", toolName: "document.write", actor: TEST_ATTRIBUTION };
 const WS_SAVE: SaveOrigin = { saveType: "mcp", toolName: "workspace.save", actor: TEST_ATTRIBUTION };
 
-/** An agent write committed as the head, as `document.*` leaves it. */
+/** An agent write committed as the head, as `document.*` leaves it, straight on the journal. */
 async function agentCommit(parent: string | null, preimage: string, text: string): Promise<string> {
-  const p = await prepareControlledWrite({
+  const p = await agentJournalFake.prepareControlledWrite({
     docKey: KEY, parent, preimage, actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write", baselineProvenance: null, baselineTouched: false,
   });
-  return (await commitControlledWrite(p.txn, text)).revision;
+  return (await agentJournalFake.commitControlledWrite(p.txn, text)).revision;
 }
 
 function lastCapture() {
@@ -119,7 +118,7 @@ describe("journalSave", () => {
   it("reports a save during a held prepare as pending, chains the next save on it, and drops the prepare basis", async () => {
     const base = await journalSave(TAB, PATH, "base", { saveType: "manual" });
     // Another window's agent write holds the document.
-    const p = await prepareControlledWrite({
+    const p = await agentJournalFake.prepareControlledWrite({
       docKey: KEY, parent: base.revision, preimage: "base", actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write", baselineProvenance: null, baselineTouched: false,
     });
     const b1 = await journalSave(TAB, PATH, "base 1", { saveType: "manual" });
@@ -131,7 +130,7 @@ describe("journalSave", () => {
     const b2 = await journalSave(TAB, PATH, "base 12", { saveType: "manual" });
     expect(b2.journaled).toBe("pending");
     expect(lastCapture().observedParent).toEqual({ ref: "pending", observation: b1Observation });
-    await commitControlledWrite(p.txn, "AGENT");
+    await agentJournalFake.commitControlledWrite(p.txn, "AGENT");
     // Both land after the commit, in order.
     expect(agentJournalFake.linearizedAs(b1Observation)).not.toBeNull();
     expect(agentJournalFake.doc(KEY).text).toBe("base 12");

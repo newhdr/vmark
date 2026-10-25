@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/services/mcpBridge/utils", () => ({ respond: vi.fn() }));
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
-vi.unmock("@/services/agentJournal/journalClient");
+vi.unmock("@/services/agentJournal/journalTransport");
 
 import { invoke } from "@tauri-apps/api/core";
 import { useTabStore } from "@/stores/tabStore";
@@ -52,7 +52,7 @@ function slowPayload(ms: number | null): void {
       touched: false, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(),
       payload: () => (ms === null ? never() : after<NamedPayload | null>(ms, null)),
       recorded: () => {},
-      invalidate: () => {},
+      invalidate: () => {}, release: () => {},
     }),
     fork: () => ({ recorded: () => {}, invalidate: () => {} }),
   });

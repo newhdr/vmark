@@ -9,6 +9,7 @@
 //!
 //! @module agent_journal/commands_history
 
+use crate::agent_journal::admission::bound::{Bound, RequestBind};
 use crate::agent_journal::commands::run;
 use crate::agent_journal::controlled_restore::RestorePrepared;
 use crate::agent_journal::controller::AbortReply;
@@ -19,17 +20,25 @@ use crate::agent_journal::service::AgentJournalState;
 use crate::agent_journal::writer_checkpoints::ForgetReport;
 use crate::command_error::CommandError;
 
-/// Prepare a restore (`payload`: JSON `{docKey, parent, preimage, source,
-/// baselineProvenance?, baselineTouched?}`); replies with the text to apply.
+/// Prepare a restore from a frozen payload (JSON `{docKey, parent,
+/// preimage, source, baselineProvenance?, baselineTouched?, requestId,
+/// incarnation, webviewGeneration, pageIdentity}`) for the invoking page;
+/// replies `{bind: {requestId, digest}, reply}` with the text to apply.
 ///
 /// # Errors
-/// A journal refusal (`detail.journalCode`), or `JOURNAL_UNAVAILABLE`.
+/// A journal refusal (`detail.journalCode`), or the off refusal.
 #[tauri::command]
-pub async fn agent_journal_restore_prepare(
+pub async fn agent_journal_restore_prepare<R: tauri::Runtime>(
+    webview: tauri::Webview<R>,
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<RestorePrepared, CommandError> {
-    run(&state, move |c| c.restore_prepare(&payload)).await
+) -> Result<Bound<RequestBind, RestorePrepared>, CommandError> {
+    let pages = state.pages().clone();
+    let label = webview.label().to_owned();
+    run(&state, move |c| {
+        c.restore_prepare_framed(&pages, &label, &payload)
+    })
+    .await
 }
 
 /// A document's revisions and blocked hunks (`payload`: JSON `{docKey}`).

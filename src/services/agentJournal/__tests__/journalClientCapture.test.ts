@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { stubProvenancePayload } from "@/test/provenancePayloadFixture";
 
-vi.unmock("@/services/agentJournal/journalClient");
+vi.unmock("@/services/agentJournal/journalTransport");
 import { invoke } from "@tauri-apps/api/core";
 import { JournalRefusal } from "../journalRefusal";
 import { captureSaveToJournal, type CaptureInput } from "../journalClient";

@@ -3,7 +3,8 @@
 //! journal token rides in `detail.journalCode`, with the current head for
 //! `STALE_PARENT` and `field: "provenance"` for a map that does not certify
 //! its texts (the window resends without it), and `indeterminate: true`
-//! for a prepare whose frame may or may not be durable; a request answer
+//! with `uncertain: true` for a prepare whose frame may or may not be
+//! durable (the client treats it as any uncertain answer); a request answer
 //! adds `uncertain` and `request` (`admission::answer`); a registration
 //! for a window that is not open adds `uncertain` and `state`. Messages are for agents and logs, never shown to a user.
 //!
@@ -62,7 +63,9 @@ fn detail(e: &TxnError) -> Value {
             json!({ "journalCode": e.code(), "hunk": hunk, "block": block })
         }
         TxnError::InvalidProvenance(_) => json!({ "journalCode": e.code(), "field": "provenance" }),
-        TxnError::Indeterminate(_) => json!({ "journalCode": e.code(), "indeterminate": true }),
+        TxnError::Indeterminate(_) => {
+            json!({ "journalCode": e.code(), "indeterminate": true, "uncertain": true })
+        }
         TxnError::StaleRegistration(_) => {
             json!({ "journalCode": e.code(), "uncertain": true, "state": "staleGeneration" })
         }

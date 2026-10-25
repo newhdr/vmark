@@ -1,13 +1,12 @@
 // @vitest-environment node
-// WI-AL1.7 — "history not recorded": every save and controlled agent write reports its journal outcome to the recording store under its document key, ordered by submission. A refused capture is refused (with its code), a capture that never answers is a timeout, a capture the journal only queued is queued, a save past the outstanding cap is refused JOURNAL_DEGRADED, a cancelled save reports nothing; a controlled write applied with durable false is queued, a durable one clears the document; an older outcome settling late never overwrites a newer one
+// WI-AL1.7 — "history not recorded": every save and controlled agent write reports its journal outcome to the recording store under its document key, ordered by submission. A refused capture is refused (with its code), a capture that never answers is a timeout, a capture the journal only queued is queued, a save past the outstanding cap is refused JOURNAL_DEGRADED, a cancelled save reports nothing; a controlled write applied with durable false is queued, a durable one clears the document; an older outcome settling late never overwrites a newer one | AL2.2g: the write's prepare is the request spec the coordinator sends
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
-import { prepareControlledWrite, type CapturedSave } from "../journalClient";
+import { controlledPrepare, type CapturedSave } from "../journalClient";
 import { journalActorFor } from "../journalActor";
 import { JOURNAL_DEADLINE_MS } from "../journalDeadline";
 import { MAX_OUTSTANDING_SAVES, beginJournalSave } from "../saveJournal";
-import { prepareWithBaselineRetry } from "../controlledMutation";
 import { runJournaledMutation, type JournaledOutcome } from "../journaledMutation";
 import { journalTabLife, resetJournalBases } from "../documentIdentity";
 import { resetUnsavedProvenanceSources } from "../unsavedProvenance";
@@ -31,7 +30,7 @@ function agentWrite(text: string) {
     docKey: KEY,
     preimage: "",
     retryHint: "retry",
-    prepare: (b) => prepareWithBaselineRetry({ ...b, actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write" }, prepareControlledWrite),
+    prepare: (b) => controlledPrepare({ ...b, actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write" }),
     verify: () => null,
     apply: () => ({ postimage: text, value: null }),
     recover: () => text,

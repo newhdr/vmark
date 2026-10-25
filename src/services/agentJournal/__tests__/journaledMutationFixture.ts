@@ -6,8 +6,7 @@ import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
 import { useDocumentStore } from "@/stores/documentStore";
 import { journalActorFor } from "../journalActor";
-import { prepareControlledWrite, type PreparedTxn } from "../journalClient";
-import { prepareWithBaselineRetry } from "../controlledMutation";
+import { controlledPrepare, type PreparedTxn } from "../journalClient";
 import { journalTabLife, resetJournalBases } from "../documentIdentity";
 import { resetUnsavedProvenanceSources } from "../unsavedProvenance";
 import type { JournaledMutation, JournaledOutcome } from "../journaledMutation";
@@ -29,7 +28,7 @@ export function mutation(overrides: Partial<Mutation> = {}): Mutation {
     docKey: KEY,
     preimage: content() ?? "",
     retryHint: "retry",
-    prepare: (baseline) => prepareWithBaselineRetry({ ...baseline, actor, tool: "test.tool" }, prepareControlledWrite),
+    prepare: (baseline) => controlledPrepare({ ...baseline, actor, tool: "test.tool" }),
     verify: () => null,
     apply: () => {
       useDocumentStore.getState().setEditorContent(TAB, "after");

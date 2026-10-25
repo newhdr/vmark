@@ -251,7 +251,7 @@ changing nothing, with `JOURNAL_BUSY` (another write to the same document is
 being recorded — two windows showing one file share one document; retry
 shortly), `STALE_PARENT` (another window wrote the document after this tab
 last did; re-read and retry), `JOURNAL_UNAVAILABLE` (the journal is not
-running), `INVALID_TEXT` (`content` holds a lone UTF-16 surrogate) or
+running or does not answer in time), `INVALID_TEXT` (`content` holds a lone UTF-16 surrogate) or
 `REVIEW_BACKLOG_FULL`. If the user edits the document, closes the tab, starts
 composing with an input method or moves the selection (or switches tabs, when
 no `tabId` was given) while the write is being recorded, it is refused with

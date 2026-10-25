@@ -1,12 +1,13 @@
 // @vitest-environment node
-// WI-AL1.6 — a history restore is a controlled mutation: the overwritten buffer goes to the prepare (recorded first as a baseline), the restored text is applied only after re-verifying the tab (edited or closed during the prepare aborts and applies nothing), the commit carries the applied text, the tab's basis advances to the restore's revision, a tab that became another document (Save As) during the prepare aborts as closed, and a restore of an uncommitted entry reports what it resolves
+// WI-AL1.6 — a history restore is a controlled mutation: the overwritten buffer goes to the prepare (recorded first as a baseline), the restored text is applied only after re-verifying the tab (edited or closed during the prepare aborts and applies nothing), the commit carries the applied text, the tab's basis advances to the restore's revision, a tab that became another document (Save As) during the prepare aborts as closed, and a restore of an uncommitted entry reports what it resolves | AL2.2g: the restore prepare carries the frozen identity payload and is answered with a reply bound to it; a refusal is a notAdmitted request answer
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// The journal client is the shared in-memory fake (`src/test/globalTestHooks.ts`);
-// the restore prepare is answered at the IPC boundary, as the real
-// `historyClient.prepareRestore` parses it.
+// The journal transport is the shared wire fake (`src/test/globalTestHooks.ts`);
+// the restore prepare is answered at the IPC boundary with a bound reply, as
+// the real restore request parses it.
 import { invoke } from "@tauri-apps/api/core";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
+import { answerPrepare } from "@/test/agentJournalWireFake";
 import type { PrepareInput } from "../journalClient";
 import type { PreparedRestore, RestorePrepareInput } from "../historyClient";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
@@ -26,15 +27,16 @@ const prepareRestoreCalls = (): RestorePrepareInput[] =>
     .mock.calls.filter(([command]) => command === RESTORE)
     .map(([, args]) => JSON.parse((args as { payload: string }).payload) as RestorePrepareInput);
 
-/** The fake's prepare, plus the source text the journal hands back, on the restore command's wire. */
+/** The fake's prepare, plus the source text the journal hands back, on the restore command's bound wire. */
 function journalWith(text: string, resolves: string | null = null, during?: () => void) {
   vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
     if (command !== RESTORE) return undefined;
-    const { source: _source, ...rest } = JSON.parse((args as { payload: string }).payload) as RestorePrepareInput;
-    const p = await fake.prepareControlledWrite({ ...rest, tool: "history.restore" } as unknown as PrepareInput);
-    during?.();
-    const prepared: PreparedRestore = { ...p, text, resolves };
-    return prepared;
+    return answerPrepare(args, async ({ source: _source, ...rest }) => {
+      const p = await fake.prepareControlledWrite({ ...rest, tool: "history.restore" } as unknown as PrepareInput);
+      during?.();
+      const prepared: PreparedRestore = { ...p, text, resolves };
+      return prepared;
+    });
   });
 }
 

@@ -16,23 +16,30 @@
  *     writer or page) and `STALE_PAGE` (a commit or abort whose page
  *     registration is no longer live) are the request protocol's answers.
  *   - `JOURNAL_TIMEOUT` is never sent by the journal: the client raises
- *     it when a call on the save path outlives its deadline
- *     (`journalDeadline.ts`).
+ *     it when a call outlives its deadline (`journalDeadline.ts`).
+ *   - `uncertain` is true only when the journal said so: the caller cannot
+ *     know whether the request was admitted. A prepare's full answer is
+ *     validated into `settlement` by `journalSettlement.ts`; every other
+ *     command's refusal stays this lossy read.
+ *   - `AMBIGUOUS_REVERT` carries the refused `hunk` and its sticky `block`
+ *     (`{reason, origin}`, or `null` when coverage is unbounded).
  *
  * @coordinates-with src-tauri/src/agent_journal/refusal.rs — the Rust mapping
  * @module services/agentJournal/journalRefusal
  */
 
 import { parseCommandError } from "@/services/commands/commandError";
+import type { JournalSettlement } from "./journalSettlementTypes";
 
 /** Every token a journal command can refuse with. */
-const JOURNAL_CODES = [
+export const JOURNAL_CODES = [
   "JOURNAL_BUSY",
   "STALE_PARENT",
   "JOURNAL_DEGRADED",
   "STALE_REVIEW",
   "REVIEW_BACKLOG_FULL",
   "REVIEW_STATE_EXHAUSTED",
+  "AMBIGUOUS_REVERT",
   "INVALID_REQUEST",
   "INVALID_TEXT",
   "JOURNAL_IO",
@@ -47,8 +54,22 @@ const JOURNAL_CODES = [
 
 export type JournalCode = (typeof JOURNAL_CODES)[number];
 
-function isJournalCode(value: unknown): value is JournalCode {
+export function isJournalCode(value: unknown): value is JournalCode {
   return typeof value === "string" && (JOURNAL_CODES as readonly string[]).includes(value);
+}
+
+/** The provenance break that blocks an automatic revert. */
+export interface RevertBlock {
+  reason: string;
+  origin: string;
+}
+
+/** What a refusal carries beyond its code, message, head and field. */
+export interface RefusalExtras {
+  uncertain?: boolean;
+  settlement?: JournalSettlement | null;
+  hunk?: string | null;
+  block?: RevertBlock | null;
 }
 
 /** A journal command refused; nothing was recorded for this request. */
@@ -58,30 +79,55 @@ export class JournalRefusal extends Error {
   readonly head: string | null;
   /** The request field refused (`provenance`), or `null` for the whole request. */
   readonly field: string | null;
+  /** The journal said the request's fate is unknown. */
+  readonly uncertain: boolean;
+  /** A prepare's or abandon's validated answer; `null` for other commands. */
+  readonly settlement: JournalSettlement | null;
+  /** The refused hunk, for `AMBIGUOUS_REVERT`. */
+  readonly hunk: string | null;
+  /** The break blocking the revert, for `AMBIGUOUS_REVERT`. */
+  readonly block: RevertBlock | null;
 
-  constructor(journalCode: JournalCode, message: string, head: string | null = null, field: string | null = null) {
+  constructor(
+    journalCode: JournalCode,
+    message: string,
+    head: string | null = null,
+    field: string | null = null,
+    extras: RefusalExtras = {},
+  ) {
     super(message);
     this.name = "JournalRefusal";
     this.journalCode = journalCode;
     this.head = head;
     this.field = field;
+    this.uncertain = extras.uncertain ?? false;
+    this.settlement = extras.settlement ?? null;
+    this.hunk = extras.hunk ?? null;
+    this.block = extras.block ?? null;
   }
+}
+
+const stringOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+
+function revertBlock(v: unknown): RevertBlock | null {
+  if (!isRecord(v) || typeof v.reason !== "string" || typeof v.origin !== "string") return null;
+  return { reason: v.reason, origin: v.origin };
 }
 
 /** Read any `invoke` rejection as a journal refusal. */
 export function toJournalRefusal(error: unknown): JournalRefusal {
   if (error instanceof JournalRefusal) return error;
   const parsed = parseCommandError(error);
-  const code = parsed?.detail?.journalCode;
+  const detail = parsed?.detail;
+  const code = detail?.journalCode;
   if (parsed && isJournalCode(code)) {
-    const head = parsed.detail?.head;
-    const field = parsed.detail?.field;
-    return new JournalRefusal(
-      code,
-      parsed.message,
-      typeof head === "string" ? head : null,
-      typeof field === "string" ? field : null,
-    );
+    return new JournalRefusal(code, parsed.message, stringOrNull(detail?.head), stringOrNull(detail?.field), {
+      uncertain: detail?.uncertain === true,
+      hunk: stringOrNull(detail?.hunk),
+      block: revertBlock(detail?.block),
+    });
   }
   const message = parsed?.message ?? (error instanceof Error ? error.message : String(error));
   return new JournalRefusal("JOURNAL_UNAVAILABLE", `the agent edit journal did not answer: ${message}`);

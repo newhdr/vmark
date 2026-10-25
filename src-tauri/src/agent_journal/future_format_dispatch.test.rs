@@ -46,6 +46,8 @@ fn journal_app() -> tauri::App<MockRuntime> {
             commands::agent_journal_arm_epoch,
             commands::agent_journal_close_epoch,
             commands::agent_journal_release_window,
+            commands::agent_journal_abandon,
+            commands::agent_journal_register_page,
             commands_history::agent_journal_restore_prepare,
             commands_history::agent_journal_history,
             commands_history::agent_journal_uncommitted,
@@ -89,7 +91,12 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
     assert!(error.starts_with("JOURNAL_FUTURE_FORMAT"), "{status}");
 
     let txn = TxnId::new().to_string();
-    let calls: [(&str, Value); 14] = [
+    let pair = |mut v: Value| {
+        v["pageIdentity"] = json!("0".repeat(32));
+        v["webviewGeneration"] = json!("1");
+        v
+    };
+    let calls: [(&str, Value); 16] = [
         ("agent_journal_history", json!({"payload": "{}"})),
         ("agent_journal_checkpoints", json!({})),
         ("agent_journal_checkpoints_forget", json!({"payload": "{}"})),
@@ -97,8 +104,19 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
         ("agent_journal_discard", json!({"payload": "{}"})),
         ("agent_journal_restore_prepare", json!({"payload": "{}"})),
         ("agent_journal_prepare", json!({"payload": "not json"})),
-        ("agent_journal_commit", json!({"txn": txn, "payload": "{}"})),
-        ("agent_journal_abort", json!({"txn": txn, "reason": "x"})),
+        (
+            "agent_journal_commit",
+            pair(json!({"txn": txn, "payload": "{}"})),
+        ),
+        (
+            "agent_journal_abort",
+            pair(json!({"txn": txn, "reason": "x"})),
+        ),
+        ("agent_journal_abandon", json!({"payload": "not json"})),
+        (
+            "agent_journal_register_page",
+            json!({"pageIdentity": "0".repeat(32)}),
+        ),
         ("agent_journal_capture", json!({"payload": "{}"})),
         ("agent_journal_arm_epoch", json!({"payload": "{}"})),
         ("agent_journal_close_epoch", json!({"payload": "{}"})),

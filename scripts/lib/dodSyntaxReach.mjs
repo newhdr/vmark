@@ -71,6 +71,17 @@ export function tsCaseReach(sf, source, roots, call) {
   return keepOnly(tsCode(sf, source, { keepStrings: true }), tsEvidenceSpans(sf, one));
 }
 
+/**
+ * A JavaScript file reduced to what ONE non-vitest root reads and executes:
+ * `root`'s own text (its nested functions blank) and the function `body` it
+ * runs, with what that reaches — an e2e journey's default export and its
+ * `run`. `root` must not be a call: it is read, never registered.
+ */
+export function tsRootReach(sf, source, root, body) {
+  const one = { cases: [root], suiteTitles: [], hooks: [], bodies: new Map([[root, body]]) };
+  return keepOnly(tsCode(sf, source, { keepStrings: true }), tsEvidenceSpans(sf, one));
+}
+
 /** A Rust test file reduced to what the ONE root `fn` (from `rustReachRoots`) reads and executes. */
 export function rustFnReach(source, fn) {
   return keepOnly(rustCode(source, { keepStrings: true }), reach([fn]).flatMap((it) => it.spans));

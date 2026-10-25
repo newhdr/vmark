@@ -1,4 +1,4 @@
-// WI-AL2.0 — The WYSIWYG net-zero regression end to end, through the real provenance session, the journaled-mutation coordinator and the journal fake: agent `x → a`, the person deletes and retypes `a`, a distant agent write through the production write path (its target capture and re-checks flush the editor; the test never does), a certified disjoint human edit. The distant write's prepare is touched and records a baseline whose map blocks the retyped hunk; the later save maps the disjoint agent hunk exactly; with a save and an editor/session restart after the retype, the save carries the break instead; a net-zero edit arms the epoch (a crash leaves it open); the same delete-and-retype in Source mode is touched too.
+// WI-AL2.0 — The WYSIWYG net-zero regression end to end, through the real provenance session, the journaled-mutation coordinator and the journal fake: agent `x → a`, the person deletes and retypes `a`, a distant agent write through the production write path (its target capture and re-checks flush the editor; the test never does), a certified disjoint human edit. The distant write's prepare is touched and records a baseline whose map blocks the retyped hunk; the later save maps the disjoint agent hunk exactly; with a save and an editor/session restart after the retype, the save carries the break instead; a net-zero edit arms the epoch (a crash leaves it open); the same delete-and-retype in Source mode is touched too. | AL2.2g: the agent write's prepare is the request spec the coordinator sends; its prepared transaction is read at the re-verify.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
@@ -17,8 +17,7 @@ import type { DocumentTab } from "@/stores/tabStoreTypes";
 import { registerWysiwygFlusher } from "@/utils/wysiwygFlush";
 import { runJournaledEdit } from "@/services/mcpBridge/v2/journaledEdit";
 import { journalActorFor } from "../journalActor";
-import { prepareControlledWrite, type PreparedTxn } from "../journalClient";
-import { prepareWithBaselineRetry } from "../controlledMutation";
+import { controlledPrepare, type PreparedTxn } from "../journalClient";
 import { journalBasis, journalTabLife, rememberJournalBasis } from "../documentIdentity";
 import { runJournaledMutation, type JournaledOutcome } from "../journaledMutation";
 import { provenanceSessionFor, startProvenanceSessions } from "../provenanceSessions";
@@ -60,8 +59,11 @@ async function agentWrite(editor: Editor, post: string): Promise<PreparedTxn> {
     docKey: KEY,
     preimage,
     retryHint: "retry",
-    prepare: async (baseline) => (prepared = await prepareWithBaselineRetry({ ...baseline, actor, tool: "document.write" }, prepareControlledWrite)),
-    verify: () => null,
+    prepare: (baseline) => controlledPrepare({ ...baseline, actor, tool: "document.write" }),
+    verify: (p) => {
+      prepared = p;
+      return null;
+    },
     apply: () => {
       store().setEditorContent("t1", post);
       return { postimage: post, value: "ok" };

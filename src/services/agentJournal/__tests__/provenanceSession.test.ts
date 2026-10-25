@@ -124,6 +124,23 @@ describe("ProvenanceSession — certified windows", () => {
     expect(await s.freeze("abc").payload(null)).toBeNull();
   });
 
+  it("a released freeze settles like an invalidate: first settlement wins, the next window is uncertifiable", async () => {
+    const { s } = session("abc");
+    const c = fresh(s, "source");
+    c.edit("abc", ins(3, "d"), "abcd");
+    const f = s.freeze("abcd");
+    f.release();
+    f.recorded("obs-late");
+    expect(await f.payload(HEAD)).toBeNull();
+    expect(await s.freeze("abcd").payload("obs-late")).toBeNull();
+  });
+
+  it("an over-cap freeze can be released", () => {
+    const { s } = session("abc", { maxFrozen: 0 });
+    fresh(s, "source");
+    expect(() => s.freeze("abc").release()).not.toThrow();
+  });
+
   it.each([
     ["while the epoch is arming", 0],
     ["while the texts are hashing", 5],

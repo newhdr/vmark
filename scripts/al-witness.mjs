@@ -2,7 +2,7 @@
 /**
  * Purpose: the named-witness check of the agent-edit-ledger phase gate — one
  *   Definition-of-Done row, one test that proves it (scripts/al-witnesses.json).
- *   Called by al_witnesses (scripts/lib/al-witness.sh); three subcommands:
+ *   Called by al_witnesses (scripts/lib/al-witness.sh); four subcommands:
  *
  *   check <manifest> <phase>      (cwd: the tree under test)
  *     Validates the WHOLE manifest first and exits 2 when it is malformed, so
@@ -24,6 +24,12 @@
  *     module's name is not known here, so cargo's `--exact` cannot be used;
  *     this reads the per-test lines instead, which also catches an ignored
  *     witness and a filter that ran nothing.
+ *   e2e-report <output> <journey name> <exit code>
+ *     Exit 0 only when e2e/run-journeys.mjs exited 0 and its output holds
+ *     exactly one `PASS <name>` line, no FAIL line, and no SKIP of the
+ *     witness. An e2e witness needs a live debug build (e2e/README.md): with
+ *     none running the runner exits non-zero and the row is red, so a phase
+ *     with e2e rows passes only after the native step has run.
  *
  * @coordinates-with scripts/lib/al-witness.sh — runs these and reports each row
  * @coordinates-with scripts/lib/alWitnessCase.mjs — the one-case selection and reach
@@ -31,13 +37,15 @@
  * @module scripts/al-witness
  */
 import { existsSync, readFileSync } from "node:fs";
-import { tsWitnessCase, rustWitnessCase } from "./lib/alWitnessCase.mjs";
+import { e2eWitnessCase, tsWitnessCase, rustWitnessCase } from "./lib/alWitnessCase.mjs";
 
 const RUNNER_PATHS = {
   vitest: (f) => /^src\/.+\.test\.tsx?$/.test(f) && !/\.(webkit|soak)\.test\./.test(f),
   webkit: (f) => /^src\/.+\.webkit\.test\.tsx?$/.test(f),
   cargo: (f) => /^src-tauri\/src\/.+\.test\.rs$/.test(f),
+  e2e: (f) => /^e2e\/journeys\/[0-9]{2}-[a-z0-9-]+\.mjs$/.test(f),
 };
+const JOURNEY_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const WI = /^WI-[A-Z]+[0-9]+(\.[0-9]+)*[a-z]?$/;
 const RUST_FN = /^[a-z_][a-z0-9_]*$/;
 const CONTROL = /[\t\n\r]/;
@@ -57,10 +65,12 @@ function manifestErrors(doc) {
       if (names.has(r.row)) bad("a duplicate row");
       names.add(r.row);
       if (typeof r.wi !== "string" || !WI.test(r.wi)) bad("`wi` must be a work-item id such as WI-AL2.1a");
-      if (!Object.hasOwn(RUNNER_PATHS, r.runner)) return bad("`runner` must be vitest, webkit or cargo");
+      if (!Object.hasOwn(RUNNER_PATHS, r.runner)) return bad("`runner` must be vitest, webkit, cargo or e2e");
       if (typeof r.file !== "string" || !RUNNER_PATHS[r.runner](r.file)) bad(`\`file\` is not a ${r.runner} test path`);
       if (typeof r.title !== "string" || r.title === "" || CONTROL.test(r.title)) bad("`title` must be a one-line test title");
       else if (r.runner === "cargo" && !RUST_FN.test(r.title)) bad("a cargo `title` must be the test fn's name");
+      else if (r.runner === "e2e" && !JOURNEY_NAME.test(r.title)) bad("an e2e `title` must be the journey's kebab-case name");
+      if (r.runner === "e2e" && [...cases].some((c) => c.startsWith(`${r.file}\0`))) bad("a journey file holds one journey, so it witnesses one row");
       if (cases.has(`${r.file}\0${r.title}`)) bad("the same test witnesses two rows");
       cases.add(`${r.file}\0${r.title}`);
       if (!Array.isArray(r.assert) || r.assert.length === 0) return bad("`assert` must list at least one regex");
@@ -91,7 +101,8 @@ function rowFailure(r) {
   if (!existsSync(r.file)) return `the witness file does not exist yet: ${r.file}`;
   const source = readFileSync(r.file, "utf8");
   if (!linked(source, r.wi)) return `the header (first 30 lines) of ${r.file} does not name ${r.wi}`;
-  const found = r.runner === "cargo" ? rustWitnessCase(source, r.title) : tsWitnessCase(r.file, source, r.title);
+  const found =
+    r.runner === "cargo" ? rustWitnessCase(source, r.title) : r.runner === "e2e" ? e2eWitnessCase(r.file, source, r.title) : tsWitnessCase(r.file, source, r.title);
   if (found.error) return `${r.file}: ${found.error}`;
   const missing = r.assert.filter((re) => !new RegExp(re).test(found.reach));
   if (missing.length > 0) return `${r.file} "${r.title}": the code this case reaches is missing ${missing.map((re) => `/${re}/`).join(", ")} (comments and unreached code do not count)`;
@@ -115,7 +126,7 @@ function check(manifestPath, phase) {
       failed++;
       console.log(`fail\t${r.row}\t${oneLine(why)}`);
     } else {
-      const pattern = r.runner === "cargo" ? r.title : `(^| )${escapeRegex(r.title)}$`;
+      const pattern = r.runner === "cargo" || r.runner === "e2e" ? r.title : `(^| )${escapeRegex(r.title)}$`;
       console.log(`ok\t${r.row}\t${r.runner}\t${r.file}\t${r.title}\t${pattern}`);
     }
   }
@@ -165,10 +176,23 @@ function cargoReport(outPath, prefix, fn, rc) {
   return verdict(errors, `1 passed: ${mine[0]?.path}`);
 }
 
+function e2eReport(outPath, name, rc) {
+  const text = existsSync(outPath) ? readFileSync(outPath, "utf8") : "";
+  const lines = [...text.matchAll(/^\s*(PASS|FAIL|SKIP)\s+(\S+)/gm)].map((m) => ({ status: m[1], name: m[2] }));
+  const mine = lines.filter((l) => l.name === name);
+  const errors = [];
+  if (rc !== "0") errors.push(`e2e/run-journeys.mjs exited ${rc} (an e2e witness needs a live debug build)`);
+  if (mine.length !== 1) errors.push(`${mine.length} results for journey ${name} — the witness must run exactly once`);
+  else if (mine[0].status !== "PASS") errors.push(`the witness was ${mine[0].status === "SKIP" ? "skipped" : "failed"}`);
+  const failed = lines.filter((l) => l.status === "FAIL");
+  if (failed.length > 0) errors.push(`${failed.length} journey(s) failed: ${failed.map((l) => l.name).join(", ")}`);
+  return verdict(errors, `1 passed: ${name}`);
+}
+
 const [cmd, ...args] = process.argv.slice(2);
-const COMMANDS = { check: [check, 2], "vitest-report": [vitestReport, 3], "cargo-report": [cargoReport, 4] };
+const COMMANDS = { check: [check, 2], "vitest-report": [vitestReport, 3], "cargo-report": [cargoReport, 4], "e2e-report": [e2eReport, 3] };
 if (!Object.hasOwn(COMMANDS, cmd) || args.length !== COMMANDS[cmd][1]) {
-  console.error("usage: al-witness.mjs check <manifest> <phase> | vitest-report <json> <title> <rc> | cargo-report <out> <prefix> <fn> <rc>");
+  console.error("usage: al-witness.mjs check <manifest> <phase> | vitest-report <json> <title> <rc> | cargo-report <out> <prefix> <fn> <rc> | e2e-report <out> <name> <rc>");
   process.exit(64);
 }
 process.exit(COMMANDS[cmd][0](...args));

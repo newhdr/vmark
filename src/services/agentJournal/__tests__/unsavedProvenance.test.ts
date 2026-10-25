@@ -10,7 +10,7 @@ import {
 } from "../unsavedProvenance";
 import type { ProvenanceFork, ProvenanceFreeze } from "../provenance/session";
 
-const FREEZE: ProvenanceFreeze = { touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(), payload: async () => null, recorded: () => {}, invalidate: () => {} };
+const FREEZE: ProvenanceFreeze = { touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(), payload: async () => null, recorded: () => {}, invalidate: () => {}, release: () => {} };
 const FORK: ProvenanceFork = { recorded: () => {}, invalidate: () => {} };
 
 function source() {

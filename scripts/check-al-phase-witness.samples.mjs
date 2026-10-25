@@ -6,7 +6,8 @@
  *   assertion missing (the self-test checks both facts before it uses them).
  *
  * TypeScript lines run inside an `async` case body; Rust lines inside a
- * `#[test] fn`. Strings are the text written to the fixture file verbatim.
+ * `#[test] fn`; e2e lines inside a journey's `async run(client, ctx)`.
+ * Strings are the text written to the fixture file verbatim.
  *
  * @coordinates-with scripts/check-al-phase-witness.test.mjs — builds the fixture trees from these lines
  * @coordinates-with scripts/al-witnesses.json — the rows and regexes these lines answer
@@ -151,7 +152,17 @@ export const SAMPLES = {
   ],
   "uncertainty contract: the freeze is released only on a confirmed clean refusal": [
     "expect(release).toHaveBeenCalled();", "expect(releaseOnRetry).not.toHaveBeenCalled();", "expect(invalidate).toHaveBeenCalled();",
-    "expect(out).toMatchObject({ indeterminate: true });",
+    "expect(out).toMatchObject({ uncertain: true });",
+  ],
+  "identity on the wire: every live journal command refuses a request missing an identity field": [
+    'let err = invoke_from(&page.win, command, args).unwrap_err();', 'assert_eq!(err["detail"]["journalCode"], "INVALID_REQUEST");',
+    'assert!(text.contains("missing required key pageIdentity"));', "assert_eq!(a.journal_len(), before);",
+  ],
+  "Tauri's IPC fallback re-executes a command whose response body failed, with its payload byte for byte": [
+    'expect([first.via, second.via]).toEqual(["customProtocol", "postMessage"]);', "expect(effects).toBe(2);", "expect(second.body).toBe(first.body);",
+  ],
+  "a reloaded page's old prepare and commit replies cannot confirm the successor's write": [
+    "harness.reload();", "harness.deliver(ids[1], reply);", 'expect(content()).toBe("before");', "expect(await out).toMatchObject({ refusal: { uncertain: true } });",
   ],
   "uncertainty contract: every Rust refusal code has its TypeScript journal code": [
     'const rust = readFileSync("src-tauri/src/agent_journal/refusal.rs", "utf8");', "const codes = JOURNAL_CODES;",
@@ -160,6 +171,45 @@ export const SAMPLES = {
   "writer-bound certificate: a dirty-buffer write is certified and reverts an unaffected hunk exactly": [
     "let dirty = edit_buffer(&w, doc);", "assert!(write.certified);", "w.revert_hunk(doc, other).unwrap();",
     String.raw`assert_eq!(text(&w, doc), "intro\nkept\n");`,
+  ],
+  "stale page: a commit refused STALE_PAGE is applied, not durable, never retried, and the registration renews with replaces = the old pair": [
+    "wire.on(COMMIT, stalePage);", 'expect(out).toMatchObject({ status: "applied", durable: false });', "expect(wire.argsOf(COMMIT)).toHaveLength(1);",
+    "expect(fresh.replaces).toEqual(old);",
+  ],
+  "stale page: an abort refused STALE_PAGE ends the request and the registration renews": [
+    "wire.on(ABORT, stalePage);", 'expect(out).toMatchObject({ status: "aborted" });', "expect(wire.argsOf(COMMIT)).toEqual([]);",
+    "expect(fresh.replaces).toEqual(old);",
+  ],
+  "sealed and revoked staleGeneration answers recover identically: drain, then one fresh registration naming the old pair": [
+    'const sealed = await recover("sealed");', 'const revoked = await recover("revoked");', 'const answer = { state: "staleGeneration" };',
+    "expect(r.registeredBeforeDrain).toBe(1);", "expect(r.slots).toBe(1);",
+  ],
+  "a pagehide while committing leaves the commit and its outcome unchanged": [
+    "pagehide(true);", 'expect(await out).toMatchObject({ status: "applied", durable: true });', "expect(wire.argsOf(ABANDON)).toEqual([]);",
+  ],
+  "a registration that never answers ends JOURNAL_TIMEOUT with zero prepares and no timer left": [
+    'expect(await out).toMatchObject({ refusal: { journalCode: "JOURNAL_TIMEOUT" } });', "expect(wire.payloadsOf(PREPARE)).toEqual([]);",
+    "expect(vi.getTimerCount()).toBe(0);",
+  ],
+  "a budget spent after the dispatch ends JOURNAL_TIMEOUT, uncertain, and abandons the original payload": [
+    'expect(out).toMatchObject({ refusal: { journalCode: "JOURNAL_TIMEOUT", uncertain: true } });', "expect(abandons()).toEqual(prepares());",
+  ],
+  // e2e journeys: these lines run inside the journey's `run(client, ctx)`.
+  "native: a reload during a held prepare leaves the held txn uncommitted, and the new page's first write succeeds": [
+    'await evalJs(client, `holdCommand("agent_journal_commit")`);', 'await evalJs(client, "location.reload()");',
+    'const after = await journalOf(client, filePath);', 'if (after.uncommitted.length !== 1) throw new Error("not one uncommitted");',
+    'if (!written.durable) throw new Error("not recorded");',
+  ],
+  "native: a hash change and a pushState keep the page's registration live": [
+    'await evalJs(client, `location.hash = "#j"`);', 'await evalJs(client, `history.pushState({}, "", "/j")`);',
+    'const registers = await countCalls(client, "agent_journal_register_page");', 'if (!written.durable) throw new Error("not recorded");',
+  ],
+  "native: an iframe load keeps the page's registration live": [
+    'await evalJs(client, `document.body.append(document.createElement("iframe"))`);',
+    'const registers = await countCalls(client, "agent_journal_register_page");', 'if (!written.durable) throw new Error("not recorded");',
+  ],
+  "native: five rapid reloads, each followed by an agent write that succeeds": [
+    'await evalJs(client, "location.reload()");', "const RELOADS = 5;", 'if (!written.durable) throw new Error("not recorded");',
   ],
   // Phase 3
   "duplicated passage → ambiguous": ["let r = resolve(&doc, &anchor);", "assert_eq!(r, Resolution::Ambiguous);"],

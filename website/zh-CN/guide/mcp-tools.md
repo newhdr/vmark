@@ -238,7 +238,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 
 当用户在显示该标签页的所见即所得编辑器中用输入法（IME）组字时，写入会以 `BUSY` 被拒绝，且不做任何改动：正在组字的文本在确认之前归输入法所有。请稍后重试。在源码模式下写入会被接受，并在组字结束后显示在编辑器中。
 
-每次写入在任何改动发生之前，都会先记入 VMark 的智能体编辑日志。成功响应包含 `applied: true` 和 `durable`：`durable: false` 表示内容已写入，但其日志记录尚未能保存——VMark 会在后台重试，在此之前对该文档的下一次写入会以 `JOURNAL_DEGRADED` 被拒绝。如果日志直接拒绝该记录，写入仍保持已应用，并作为未记录写入记入日志，下一次写入照常进行。以下情况写入会被拒绝且不做任何改动：同一文档的另一次写入正在记录时返回 `JOURNAL_BUSY`（显示同一文件的两个窗口共享一个文档）；另一个窗口在本标签页上次写入之后写过该文档时返回 `STALE_PARENT`（请重新读取后重试）；日志未运行时返回 `JOURNAL_UNAVAILABLE`；`content` 含有孤立的 UTF-16 代理项时返回 `INVALID_TEXT`。如果在记录写入期间用户编辑了文档、关闭了标签页、开始用输入法组字，或移动了选区（未指定 `tabId` 时则是切换了标签页），写入会以 `ABORTED` 及 `reason`（`edited`、`closed`、`composing`、`selection`）被拒绝，且不做任何改动；请重新读取后重试。带有 `applied: true` 的 `INTERNAL` 错误则不同：写入已改动文档之后编辑器出错，此时文档中的文本已被记录（`durable` 含义同上，`current_revision` 为文档的修订版本）；再次写入前请重新读取。写入失败后不带 `applied` 的 `INTERNAL` 错误表示文档可能已被部分改动，同样请重新读取。
+每次写入在任何改动发生之前，都会先记入 VMark 的智能体编辑日志。成功响应包含 `applied: true` 和 `durable`：`durable: false` 表示内容已写入，但其日志记录尚未能保存——VMark 会在后台重试，在此之前对该文档的下一次写入会以 `JOURNAL_DEGRADED` 被拒绝。如果日志直接拒绝该记录，写入仍保持已应用，并作为未记录写入记入日志，下一次写入照常进行。以下情况写入会被拒绝且不做任何改动：同一文档的另一次写入正在记录时返回 `JOURNAL_BUSY`（显示同一文件的两个窗口共享一个文档）；另一个窗口在本标签页上次写入之后写过该文档时返回 `STALE_PARENT`（请重新读取后重试）；日志未运行或未能及时响应时返回 `JOURNAL_UNAVAILABLE`；`content` 含有孤立的 UTF-16 代理项时返回 `INVALID_TEXT`。如果在记录写入期间用户编辑了文档、关闭了标签页、开始用输入法组字，或移动了选区（未指定 `tabId` 时则是切换了标签页），写入会以 `ABORTED` 及 `reason`（`edited`、`closed`、`composing`、`selection`）被拒绝，且不做任何改动；请重新读取后重试。带有 `applied: true` 的 `INTERNAL` 错误则不同：写入已改动文档之后编辑器出错，此时文档中的文本已被记录（`durable` 含义同上，`current_revision` 为文档的修订版本）；再次写入前请重新读取。写入失败后不带 `applied` 的 `INTERNAL` 错误表示文档可能已被部分改动，同样请重新读取。
 
 ### `transform`
 

@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { useRevisionStore, useDocumentStore } from "@/stores/documentStore";
-import type { PreparedTxn } from "../journalClient";
+import type { PreparedTxn, PrepareSpec } from "../journalClient";
 import {
   isJournalBasisEvicted,
   journalBasis,
@@ -37,7 +37,7 @@ describe("runJournaledMutation — the pipeline", () => {
 
   it("hands the prepare adapter the baseline: key, the tab's basis as parent, preimage, provenance", async () => {
     rememberJournalBasis(TAB, KEY, "rev-known");
-    const prepare = vi.fn((): Promise<PreparedTxn> => Promise.reject(new Error("stop")));
+    const prepare = vi.fn((): Promise<PrepareSpec<PreparedTxn>> => Promise.reject(new Error("stop")));
     await runJournaledMutation(mutation({ prepare }));
     expect(prepare).toHaveBeenCalledWith({
       docKey: KEY,
@@ -85,7 +85,7 @@ describe("runJournaledMutation — adapter failure points", () => {
     rememberJournalBasis(TAB, KEY, "rev-old");
     for (let i = 0; i <= JOURNAL_IDENTITY_BUDGET; i++) rememberJournalBasis(`o-${i}`, `path:/o${i}.md`, "r");
     expect(isJournalBasisEvicted(TAB, KEY)).toBe(true);
-    const prepare = vi.fn((): Promise<PreparedTxn> => Promise.reject(new Error("unreachable")));
+    const prepare = vi.fn((): Promise<PrepareSpec<PreparedTxn>> => Promise.reject(new Error("unreachable")));
     const out = await runJournaledMutation(mutation({ prepare, retryHint: "re-read and retry" }));
     expect(out).toMatchObject({ status: "refused", refusal: { journalCode: "STALE_PARENT" } });
     expect(out.status === "refused" && out.refusal.message).toBe("the tab's journal basis was evicted; re-read and retry");

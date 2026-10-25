@@ -15,8 +15,8 @@
  * be refused `field: "provenance"` (the window then resends without it), and
  * an equal-text prepare records a baseline when it is marked touched.
  *
- * Use: `vi.mock("@/services/agentJournal/journalClient", () => import("@/test/agentJournalFake").then((m) => m.journalClientModule()))`
- * and drive `agentJournalFake` from the test.
+ * The journal's wire is answered over it by `agentJournalWireFake.ts`, which
+ * the global setup installs; drive `agentJournalFake` from the test.
  *
  * @module test/agentJournalFake
  */
@@ -280,13 +280,3 @@ function createFake() {
 
 /** The shared fake; reset it in `beforeEach`. */
 export const agentJournalFake = createFake();
-
-/** The module object for `vi.mock("@/services/agentJournal/journalClient", …)`. */
-export function journalClientModule() {
-  return {
-    prepareControlledWrite: agentJournalFake.prepareControlledWrite,
-    commitControlledWrite: agentJournalFake.commitControlledWrite,
-    abortControlledWrite: agentJournalFake.abortControlledWrite,
-    captureSaveToJournal: agentJournalFake.captureSaveToJournal,
-  };
-}

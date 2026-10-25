@@ -1,4 +1,4 @@
-// WI-AL2.2f — commit and abort are bound to the page that owns the transaction: a revoked registration is refused STALE_PAGE before any state change and the sweep ends the transaction uncommitted; a live foreign pair is INVALID_REQUEST; the check linearizes at the table lookup and the table lock is never held across the append; success replies are enveloped with their own arguments; restores are owned like agent writes; and every journal token the writer can refuse with is declared on the TypeScript side
+// WI-AL2.2f — commit and abort are bound to the page that owns the transaction: a revoked registration is refused STALE_PAGE before any state change and the sweep ends the transaction uncommitted; a live foreign pair is INVALID_REQUEST; the check linearizes at the table lookup and the table lock is never held across the append; success replies are enveloped with their own arguments; restores are owned like agent writes; and every journal token the writer can refuse with is declared on the TypeScript side | AL2.2g: AMBIGUOUS_REVERT is in JOURNAL_CODES too, so every Rust code has a TypeScript twin; its detail (hunk, block with a real break reason, or null) is pinned to the literal the TypeScript round-trip reads
 //! R91, R98, R99 rule 1 and R101, through the `Controller` core methods.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -118,15 +118,37 @@ fn the_stale_page_code_is_declared_on_both_sides() {
     let mut codes: Vec<&str> = every_refusal().iter().map(TxnError::code).collect();
     codes.extend(every_state().iter().map(RequestState::code));
     assert!(codes.contains(&"STALE_PAGE") && codes.contains(&"STALE_REQUEST"));
-    for code in codes.into_iter().filter(|c| *c != "AMBIGUOUS_REVERT") {
+    for code in codes {
         assert!(
             ts.iter().any(|c| c == code),
             "{code} is not in JOURNAL_CODES"
         );
     }
-    // AMBIGUOUS_REVERT never reaches the TypeScript list today; its
-    // parity is the client switch's work item, not this one.
-    assert!(!ts.iter().any(|c| c == "AMBIGUOUS_REVERT"));
+}
+
+#[test]
+fn ambiguous_revert_detail_is_what_the_client_reads() {
+    use crate::agent_journal::provenance::{Block, BreakReason};
+    use crate::agent_journal::refusal::refusal;
+    // The same detail literals are read back by journalCodeParity.test.ts.
+    let block = Block::new(BreakReason::SnapshotOnly, "window-main").expect("block");
+    for (block, wire) in [
+        (
+            Some(block),
+            json!({ "reason": "snapshotOnly", "origin": "window-main" }),
+        ),
+        (None, Value::Null),
+    ] {
+        let e = TxnError::AmbiguousRevert {
+            hunk: HunkId("h-1".into()),
+            block,
+        };
+        let v = serde_json::to_value(refusal(&e)).expect("serializes");
+        assert_eq!(
+            v["detail"],
+            json!({ "journalCode": "AMBIGUOUS_REVERT", "hunk": "h-1", "block": wire })
+        );
+    }
 }
 
 /// `page`'s label with another page's pair.

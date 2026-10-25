@@ -53,6 +53,13 @@ export interface ProvenanceFreeze {
   recorded(id: string): void;
   /** Nothing was recorded, or not what was frozen. Terminal. */
   invalidate(): void;
+  /**
+   * The journal confirmed it admitted nothing for this freeze (a clean
+   * refusal), so the frozen window could carry into the next one. Terminal.
+   * Until windows can be merged, a release drops the segment exactly like
+   * `invalidate()`; callers still say which one they mean.
+   */
+  release(): void;
 }
 
 export interface ProvenanceFork {

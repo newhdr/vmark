@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL1.7 — restoring an earlier (pre-journal) checkpoint from the global list: a file checkpoint restores into that file's tab when it is open, opens the file first when it is not, stops when the user cancels the open, and falls back to a new untitled document (naming the path and why) when the file cannot be opened; an untitled checkpoint always restores into a new untitled document; the restore itself is the legacyCheckpoint controlled restore
+// WI-AL1.7 — restoring an earlier (pre-journal) checkpoint from the global list: a file checkpoint restores into that file's tab when it is open, opens the file first when it is not, stops when the user cancels the open, and falls back to a new untitled document (naming the path and why) when the file cannot be opened; an untitled checkpoint always restores into a new untitled document; the restore itself is the legacyCheckpoint controlled restore | AL2.2g: the restore prepare is answered with a reply bound to its frozen identity payload
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const openFileInNewTabCore = vi.hoisted(() => vi.fn());
@@ -7,11 +7,12 @@ const createUntitledTab = vi.hoisted(() => vi.fn());
 vi.mock("@/services/navigation/fileOpen", () => ({ openFileInNewTabCore }));
 vi.mock("@/services/navigation/newFile", () => ({ createUntitledTab }));
 
-// The restore is the real controlled restore over the shared journal fake
+// The restore is the real controlled restore over the shared journal wire fake
 // (`src/test/globalTestHooks.ts`); its prepare is answered at the IPC
-// boundary, as the real `historyClient.prepareRestore` parses it.
+// boundary with a bound reply, as the real restore request parses it.
 import { invoke } from "@tauri-apps/api/core";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
+import { answerPrepare } from "@/test/agentJournalWireFake";
 import { useTabStore } from "@/stores/tabStore";
 import { useDocumentStore } from "@/stores/documentStore";
 import { resetJournalBases } from "../documentIdentity";
@@ -60,10 +61,11 @@ beforeEach(() => {
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
     if (command !== RESTORE) return undefined;
-    const { source: _source, ...rest } = JSON.parse((args as { payload: string }).payload) as RestorePrepareInput;
-    const p = await fake.prepareControlledWrite({ ...rest, tool: "history.restore" } as unknown as PrepareInput);
-    const prepared: PreparedRestore = { ...p, text: "old", resolves: null };
-    return prepared;
+    return answerPrepare(args, async ({ source: _source, ...rest }) => {
+      const p = await fake.prepareControlledWrite({ ...rest, tool: "history.restore" } as unknown as PrepareInput);
+      const prepared: PreparedRestore = { ...p, text: "old", resolves: null };
+      return prepared;
+    });
   });
 });
 
@@ -163,8 +165,11 @@ describe("restoreEarlierCheckpoint", () => {
       throw new Error("not reached");
     });
     const out = await restoreEarlierCheckpoint(checkpoint(null), WIN);
-    expect(out).toMatchObject({ status: "restored", outcome: { status: "refused" } });
+    // The lost reply is retried once with the same payload; the retry is
+    // admitted, and the typing it finds aborts the restore as edited.
+    expect(out).toMatchObject({ status: "restored", outcome: { status: "aborted", reason: "edited" } });
     expect(tabIds()).toHaveLength(1);
+    expect(content(tabIds()[0])).toBe("typed");
   });
 
   /** The restore prepare runs `during` on the created tab, then fails. */

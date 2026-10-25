@@ -63,19 +63,11 @@ export function journalTimeout(what: string, ms: number): JournalRefusal {
  * rejection passes through unchanged.
  */
 export function settleWithin<T>(running: Promise<T>, ms: number): Promise<{ value: T } | null> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => resolve(null), Math.max(0, ms));
-    running.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve({ value });
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), Math.max(0, ms));
   });
+  return Promise.race([running.then((value) => ({ value })), expired]).finally(() => clearTimeout(timer));
 }
 
 /**

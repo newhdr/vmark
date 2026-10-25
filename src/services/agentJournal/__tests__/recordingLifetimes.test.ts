@@ -1,12 +1,11 @@
 // @vitest-environment node
-// WI-AL1.7 — the "history not recorded" entries are bounded by document lifetime: an entry is kept only while its document key is open in a tab or a save to it is outstanding; two tabs of one file share the key until the last closes; a cancelled save releases its key; Save As drops the abandoned key; and an outcome from a retired incarnation of a key never recreates its entry or touches the document reopened under it
+// WI-AL1.7 — the "history not recorded" entries are bounded by document lifetime: an entry is kept only while its document key is open in a tab or a save to it is outstanding; two tabs of one file share the key until the last closes; a cancelled save releases its key; Save As drops the abandoned key; and an outcome from a retired incarnation of a key never recreates its entry or touches the document reopened under it | AL2.2g: the write's prepare is the request spec the coordinator sends
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
-import { prepareControlledWrite, type CapturedSave, type CommittedTxn } from "../journalClient";
+import { controlledPrepare, type CapturedSave, type CommittedTxn } from "../journalClient";
 import { journalActorFor } from "../journalActor";
 import { beginJournalSave } from "../saveJournal";
-import { prepareWithBaselineRetry } from "../controlledMutation";
 import { runJournaledMutation, type JournaledOutcome } from "../journaledMutation";
 import { journalTabLife, resetJournalBases } from "../documentIdentity";
 import { resetUnsavedProvenanceSources } from "../unsavedProvenance";
@@ -48,7 +47,7 @@ function agentWrite(path: string, text: string) {
     docKey: key(path),
     preimage: "",
     retryHint: "retry",
-    prepare: (b) => prepareWithBaselineRetry({ ...b, actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write" }, prepareControlledWrite),
+    prepare: (b) => controlledPrepare({ ...b, actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write" }),
     verify: () => null,
     apply: () => ({ postimage: text, value: null }),
     recover: () => text,

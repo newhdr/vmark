@@ -343,7 +343,7 @@
         "file": "src/services/agentJournal/__tests__/journalUncertainty.test.ts",
         "title": "the freeze is released only on a confirmed clean refusal",
         "runner": "vitest",
-        "assert": ["expect\\([^;]*release\\w*\\)\\.toHaveBeenCalled", "expect\\([^;]*release\\w*\\)\\.not\\.toHaveBeenCalled", "expect\\([^;]*invalidate\\w*\\)\\.toHaveBeenCalled", "indeterminate:\\s*true"]
+        "assert": ["expect\\([^;]*release\\w*\\)\\.toHaveBeenCalled", "expect\\([^;]*release\\w*\\)\\.not\\.toHaveBeenCalled", "expect\\([^;]*invalidate\\w*\\)\\.toHaveBeenCalled", "uncertain:\\s*true"]
       },
       {
         "row": "uncertainty contract: every Rust refusal code has its TypeScript journal code",
@@ -352,6 +352,110 @@
         "title": "every Rust journal refusal code is a TypeScript journal code",
         "runner": "vitest",
         "assert": ["[\"'][^\"']*(?:refusal|errors)\\.rs[\"']", "\\bJOURNAL_CODES\\b", "[\"']AMBIGUOUS_REVERT[\"']"]
+      },
+      {
+        "row": "identity on the wire: every live journal command refuses a request missing an identity field",
+        "wi": "WI-AL2.2g",
+        "file": "src-tauri/src/agent_journal/commands_dispatch.test.rs",
+        "title": "each_live_command_refuses_a_request_missing_an_identity_field",
+        "runner": "cargo",
+        "assert": ["\\binvoke_from\\(", "\"INVALID_REQUEST\"", "missing required key", "assert_eq!\\([^;]*journal_len"]
+      },
+      {
+        "row": "Tauri's IPC fallback re-executes a command whose response body failed, with its payload byte for byte",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/tauriIpcReplies.test.ts",
+        "title": "tauri_ipc_fallback_repeats_an_executed_command",
+        "runner": "vitest",
+        "assert": ["\\.toEqual\\(\\[[\"']customProtocol[\"'],\\s*[\"']postMessage[\"']\\]\\)", "expect\\(effects\\)\\.toBe\\(2\\)", "expect\\(second\\.body\\)\\.toBe\\(first\\.body\\)"]
+      },
+      {
+        "row": "a reloaded page's old prepare and commit replies cannot confirm the successor's write",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/tauriIpcReplies.test.ts",
+        "title": "old_prepare_and_commit_replies_cannot_confirm_successor_write",
+        "runner": "vitest",
+        "assert": ["\\.reload\\(\\)", "\\.deliver\\(", "expect\\(content\\(\\)\\)\\.toBe\\([\"']before[\"']\\)", "uncertain:\\s*true"]
+      },
+      {
+        "row": "stale page: a commit refused STALE_PAGE is applied, not durable, never retried, and the registration renews with replaces = the old pair",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/journalPageEnds.test.ts",
+        "title": "a stale-page commit reports durable false and never retries",
+        "runner": "vitest",
+        "assert": ["wire\\.on\\(COMMIT,\\s*stalePage\\)", "durable:\\s*false", "argsOf\\(COMMIT\\)\\)\\.toHaveLength\\(1\\)", "replaces\\)\\.toEqual\\("]
+      },
+      {
+        "row": "stale page: an abort refused STALE_PAGE ends the request and the registration renews",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/journalPageEnds.test.ts",
+        "title": "a stale-page abort ends the request and renews the registration",
+        "runner": "vitest",
+        "assert": ["wire\\.on\\(ABORT,\\s*stalePage\\)", "status:\\s*\\\"aborted\\\"", "argsOf\\(COMMIT\\)\\)\\.toEqual\\(\\[\\]\\)", "replaces\\)\\.toEqual\\("]
+      },
+      {
+        "row": "sealed and revoked staleGeneration answers recover identically: drain, then one fresh registration naming the old pair",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/journalPageEnds.test.ts",
+        "title": "sealed_and_revoked_stale_answers_recover_identically",
+        "runner": "vitest",
+        "assert": ["recover\\([\\\"']sealed[\\\"']\\)", "recover\\([\\\"']revoked[\\\"']\\)", "staleGeneration", "registeredBeforeDrain\\)\\.toBe\\(1\\)", "slots\\)\\.toBe\\(1\\)"]
+      },
+      {
+        "row": "a pagehide while committing leaves the commit and its outcome unchanged",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/journalPageEnds.test.ts",
+        "title": "pagehide during committing → the commit continues, outcome unchanged",
+        "runner": "vitest",
+        "assert": ["pagehide\\(true\\)", "status:\\s*\\\"applied\\\",\\s*durable:\\s*true", "argsOf\\(ABANDON\\)\\)\\.toEqual\\(\\[\\]\\)"]
+      },
+      {
+        "row": "a registration that never answers ends JOURNAL_TIMEOUT with zero prepares and no timer left",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/journalPageEnds.test.ts",
+        "title": "a hanging register ends JOURNAL_TIMEOUT with zero prepare invokes",
+        "runner": "vitest",
+        "assert": ["journalCode:\\s*\\\"JOURNAL_TIMEOUT\\\"", "payloadsOf\\(PREPARE\\)\\)\\.toEqual\\(\\[\\]\\)", "getTimerCount\\(\\)\\)\\.toBe\\(0\\)"]
+      },
+      {
+        "row": "a budget spent after the dispatch ends JOURNAL_TIMEOUT, uncertain, and abandons the original payload",
+        "wi": "WI-AL2.2g",
+        "file": "src/services/agentJournal/__tests__/journalRequest.test.ts",
+        "title": "budget_expiry_abandon_sends_original_payload when the budget ends between prepared and apply",
+        "runner": "vitest",
+        "assert": ["journalCode:\\s*\\\"JOURNAL_TIMEOUT\\\",\\s*uncertain:\\s*true", "abandons\\(\\)\\)\\.toEqual\\(prepares\\(\\)\\)"]
+      },
+      {
+        "row": "native: a reload during a held prepare leaves the held txn uncommitted, and the new page's first write succeeds",
+        "wi": "WI-AL2.2g",
+        "file": "e2e/journeys/49-journal-reload-held-prepare.mjs",
+        "title": "journal-reload-held-prepare",
+        "runner": "e2e",
+        "assert": ["agent_journal_commit", "location\\.reload\\(", "journalOf\\(", "\\.uncommitted\\.length\\s*!==\\s*1", "durable"]
+      },
+      {
+        "row": "native: a hash change and a pushState keep the page's registration live",
+        "wi": "WI-AL2.2g",
+        "file": "e2e/journeys/50-journal-same-document-navigation.mjs",
+        "title": "journal-same-document-navigation",
+        "runner": "e2e",
+        "assert": ["location\\.hash\\s*=", "history\\.pushState\\(", "agent_journal_register_page", "durable"]
+      },
+      {
+        "row": "native: an iframe load keeps the page's registration live",
+        "wi": "WI-AL2.2g",
+        "file": "e2e/journeys/51-journal-iframe-load.mjs",
+        "title": "journal-iframe-load",
+        "runner": "e2e",
+        "assert": ["createElement\\(\\s*[\\\"']iframe[\\\"']\\s*\\)", "agent_journal_register_page", "durable"]
+      },
+      {
+        "row": "native: five rapid reloads, each followed by an agent write that succeeds",
+        "wi": "WI-AL2.2g",
+        "file": "e2e/journeys/52-journal-rapid-reloads.mjs",
+        "title": "journal-rapid-reloads",
+        "runner": "e2e",
+        "assert": ["location\\.reload\\(", "\\b5\\b", "durable"]
       },
       {
         "row": "writer-bound certificate: a dirty-buffer write is certified and reverts an unaffected hunk exactly",

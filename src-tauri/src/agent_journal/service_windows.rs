@@ -20,8 +20,12 @@ use tauri::Manager;
 
 use super::AgentJournalState;
 use crate::agent_journal::admission::cleanup_worker::Pass;
-use crate::agent_journal::admission::page_events::{page_destroyed, page_started, sweep_pass};
+use crate::agent_journal::admission::page_events::{
+    page_destroyed, page_started, register_page, sweep_pass,
+};
+use crate::agent_journal::admission::page_table::Registration;
 use crate::agent_journal::writer::Writer;
+use crate::command_error::CommandError;
 
 fn writer<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<std::sync::Arc<Writer>> {
     app.try_state::<AgentJournalState>()
@@ -77,6 +81,34 @@ pub fn page_load_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>, label: &s
     }
 }
 
+/// Register `page_identity` for the page in `label`'s webview, replacing
+/// the caller's own pair `replaces` when given; a replacement signals the
+/// cleanup worker. Takes the page table's lock and the worker's, never the
+/// writer's.
+///
+/// # Errors
+/// The journal's off refusal (`JOURNAL_UNAVAILABLE`, or
+/// `JOURNAL_FUTURE_FORMAT`) before anything is minted while no writer is
+/// open; `PageTable::register`'s refusals otherwise.
+pub fn register_window_page<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    label: &str,
+    page_identity: &str,
+    replaces: Option<(&str, &str)>,
+) -> Result<Registration, CommandError> {
+    let state = app.state::<AgentJournalState>();
+    let writer = state.writer().ok_or_else(|| state.off_refusal())?;
+    register_page(
+        &state.pages,
+        &state.cleanup,
+        Some(&writer),
+        label,
+        page_identity,
+        replaces,
+        cleanup_pass(app),
+    )
+}
+
 /// The worker's pass: the sweep over the app's journal, once ready.
 fn cleanup_pass<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Pass {
     let app = app.clone();
@@ -87,6 +119,9 @@ fn cleanup_pass<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Pass {
     })
 }
 
+#[cfg(test)]
+#[path = "page_traces.test.rs"]
+mod page_traces_tests;
 #[cfg(all(test, not(target_os = "windows")))]
 #[path = "service_pages.test.rs"]
 mod service_pages_tests;

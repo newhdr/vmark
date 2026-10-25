@@ -283,7 +283,9 @@ impl AgentJournalState {
 
 #[path = "service_windows.rs"]
 mod windows;
-pub use windows::{page_load_started, release_window_label, reopen_window_label};
+pub use windows::{
+    page_load_started, register_window_page, release_window_label, reopen_window_label,
+};
 #[path = "service_off.rs"]
 mod off;
 pub use off::StartFailure;

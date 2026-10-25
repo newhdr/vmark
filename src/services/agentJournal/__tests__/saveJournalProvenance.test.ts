@@ -36,6 +36,7 @@ function source(payload: ProvenancePayload | null = stubProvenancePayload()) {
         // Terminal, the first settlement wins (`ProvenanceFreeze`): a later one is not recorded.
         recorded: (id) => void (f.settled.length === 0 && f.settled.push(`recorded:${id}`)),
         invalidate: () => void (f.settled.length === 0 && f.settled.push("invalidated")),
+        release: () => void (f.settled.length === 0 && f.settled.push("released")),
       };
     },
     fork: () => ({ recorded: () => {}, invalidate: () => {} }),
@@ -84,7 +85,7 @@ describe("a save's provenance", () => {
         // The session knows the window's basis though the tab's identity has none.
         payload: async () => ({ basis: "rev-window", payload: stubProvenancePayload() }),
         recorded: () => {},
-        invalidate: () => {},
+        invalidate: () => {}, release: () => {},
       }),
       fork: () => ({ recorded: () => {}, invalidate: () => {} }),
     });
@@ -154,7 +155,7 @@ describe("the save deadline", () => {
   it("a map still hashing when the deadline passes: the save is never sent", async () => {
     let hashed: (v: null) => void = () => {};
     registerUnsavedProvenanceSource(TAB, {
-      freeze: (): ProvenanceFreeze => ({ touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(), payload: () => new Promise((r) => (hashed = r)), recorded: () => {}, invalidate: () => {} }),
+      freeze: (): ProvenanceFreeze => ({ touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(), payload: () => new Promise((r) => (hashed = r)), recorded: () => {}, invalidate: () => {}, release: () => {} }),
       fork: () => ({ recorded: () => {}, invalidate: () => {} }),
     });
     const record = beginJournalSave(TAB, PATH, "a", MANUAL).record();

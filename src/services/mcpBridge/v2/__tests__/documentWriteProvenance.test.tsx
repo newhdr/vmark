@@ -1,7 +1,8 @@
-// WI-AL1.3, WI-AL1.4 — document.write and the agent edit ledger's pending provenance: the tab's window is frozen at the exact preimage before the prepare and its certified map (and whether a person touched it) rides the prepare (null and untouched with no collector, so the baseline is snapshot-only); the apply forks the window onto the applied text so the agent's change is never certified as a person's, recorded at the committed revision and invalidated when the commit is refused; an abort records the freeze at the baseline its prepare recorded; an evicted basis refuses STALE_PARENT before anything is sent; and every refused prepare answers its token with content and revision untouched and the freeze invalidated.
+// WI-AL1.3, WI-AL1.4 — document.write and the agent edit ledger's pending provenance: the tab's window is frozen at the exact preimage before the prepare and its certified map (and whether a person touched it) rides the prepare (null and untouched with no collector, so the baseline is snapshot-only); the apply forks the window onto the applied text so the agent's change is never certified as a person's, recorded at the committed revision and invalidated when the commit is refused; an abort records the freeze at the baseline its prepare recorded; an evicted basis refuses STALE_PARENT before anything is sent; and every refused prepare answers its token with content and revision untouched and the freeze invalidated. AL2.2g: a clean (not admitted) refusal releases the freeze instead; a journal that stays unavailable is retried once, abandoned, and the freeze invalidated.
 //
-// A real Tiptap editor and the real stores; the journal IPC client is the
-// in-memory fake (src/test/agentJournalFake.ts) with the writer's semantics.
+// A real Tiptap editor and the real stores; the journal transport is the
+// wire fake (src/test/agentJournalWireFake.ts) over the in-memory journal
+// (src/test/agentJournalFake.ts) with the writer's semantics.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { stubProvenancePayload } from "@/test/provenancePayloadFixture";
@@ -11,8 +12,8 @@ import StarterKit from "@tiptap/starter-kit";
 
 vi.mock("@/services/mcpBridge/utils", () => ({ respond: vi.fn() }));
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
-vi.mock("@/services/agentJournal/journalClient", () =>
-  import("@/test/agentJournalFake").then((m) => m.journalClientModule()),
+vi.mock("@/services/agentJournal/journalTransport", () =>
+  import("@/test/agentJournalWireFake").then((m) => m.journalTransportModule()),
 );
 
 import { useTabStore } from "@/stores/tabStore";
@@ -31,6 +32,7 @@ import {
   type UnsavedProvenanceSource,
 } from "@/services/agentJournal/unsavedProvenance";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
+import { abandonSpy } from "@/test/agentJournalWireFake";
 import { TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
 
 const MAP = stubProvenancePayload();
@@ -70,6 +72,7 @@ function collector(map: ProvenancePayload | null = MAP, touched = true) {
         },
         recorded: (id) => settle("recorded", id),
         invalidate: () => settle("invalidate", null),
+        release: () => settle("release", null),
       };
     },
     fork: (text) => {
@@ -248,23 +251,28 @@ describe("document.write — synchronization echo", () => {
 });
 
 describe("document.write — refused prepares change nothing", () => {
-  const cases: Array<[JournalCode, string]> = [
-    ["STALE_PARENT", "STALE_PARENT"],
-    ["JOURNAL_BUSY", "JOURNAL_BUSY"],
-    ["JOURNAL_DEGRADED", "JOURNAL_DEGRADED"],
-    ["JOURNAL_UNAVAILABLE", "JOURNAL_UNAVAILABLE"],
-    ["INVALID_REQUEST", "INTERNAL"],
+  // A clean refusal (the request was not admitted) releases the freeze; a
+  // journal that stays unavailable is uncertain: retried once, abandoned, and
+  // the freeze invalidated.
+  const cases: Array<[JournalCode, string, number, "freeze.release" | "freeze.invalidate"]> = [
+    ["STALE_PARENT", "STALE_PARENT", 1, "freeze.release"],
+    ["JOURNAL_BUSY", "JOURNAL_BUSY", 1, "freeze.release"],
+    ["JOURNAL_DEGRADED", "JOURNAL_DEGRADED", 1, "freeze.release"],
+    ["JOURNAL_UNAVAILABLE", "JOURNAL_UNAVAILABLE", 2, "freeze.invalidate"],
+    ["INVALID_REQUEST", "INTERNAL", 1, "freeze.release"],
   ];
-  it.each(cases)("%s answers %s with content and revision untouched, and the freeze invalidated", async (code, answer) => {
+  it.each(cases)("%s answers %s with content and revision untouched, after %i prepare(s): %s", async (code, answer, sends, settled) => {
     seed([tab("t1")], "t1");
     useDocumentStore.getState().setEditorContent("t1", "typed\n");
     const calls = collector();
     const before = { content: content("t1"), revision: revision("t1") };
-    fake.refuseNextPrepares(code);
+    fake.refuseNextPrepares(...Array.from({ length: sends }, () => code));
     await write("r1", { content: "AI\n" });
     expect(refusal("r1")).toMatchObject({ error: answer });
     expect({ content: content("t1"), revision: revision("t1") }).toEqual(before);
-    expect(calls.map((x) => x.call)).toEqual(["freeze", "payload", "freeze.invalidate"]);
+    expect(calls.map((x) => x.call)).toEqual(["freeze", "payload", settled]);
+    expect(fake.prepareControlledWrite).toHaveBeenCalledTimes(sends);
+    expect(abandonSpy).toHaveBeenCalledTimes(sends - 1);
     expect(fake.log.map((e) => e.op)).toEqual([]);
     expect(fake.doc(`tab:main/t1`)).toMatchObject({ head: null, text: "", reservedBy: null });
   });

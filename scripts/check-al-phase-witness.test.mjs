@@ -1,4 +1,4 @@
-// WI-AL2.0g — every phase 2 and phase 3 Definition-of-Done row maps to one named executable witness: the named test exists under exactly that title in a file linked to its work item, is not skipped, focused or a table, its own code matches every assertion, and it runs alone to exactly one pass
+// WI-AL2.0g — every phase 2 and phase 3 Definition-of-Done row maps to one named executable witness: the named test exists under exactly that title in a file linked to its work item, is not skipped, focused or a table, its own code matches every assertion, and it runs alone to exactly one pass | AL2.2g: an e2e journey witnesses a native row by its exported name, and its run step needs the journey runner's one PASS (red with no live app)
 /**
  * Runs the REAL `scripts/check-al-phase.sh <2|3>` against fixture trees
  * (`--root`) built from scripts/al-witnesses.json and the per-assertion
@@ -42,13 +42,25 @@ function write(root, rel, body) {
   writeFileSync(path.join(root, rel), body);
 }
 
-// pnpm: a `--reporter=json` run writes a report for the title its `-t`
-// pattern names, shaped by SHIM_VITEST (pass, skip, dup, fail, none); any
-// other run exits 0. cargo: a run whose filter is a fn name prints that
-// test's line, shaped by SHIM_CARGO (ok, ignored, dup, none); a module filter
-// prints a 3-test result, as in scripts/check-al-phase.test.mjs.
+// pnpm: `e2e:journeys --only <name>` prints the journey runner's line for
+// that name, shaped by SHIM_E2E (pass, skip, fail, none: no app running); a
+// `--reporter=json` run writes a report for the title its `-t` pattern names,
+// shaped by SHIM_VITEST (pass, skip, dup, fail, none); any other run exits 0.
+// cargo: a run whose filter is a fn name prints that test's line, shaped by
+// SHIM_CARGO (ok, ignored, dup, none); a module filter prints a 3-test
+// result, as in scripts/check-al-phase.test.mjs.
 const STUB = `#!/usr/bin/env bash
 echo "$(basename "$0") $*" >> "$STUB_LOG"
+if [[ "$(basename "$0")" == pnpm && "$1" == e2e:journeys ]]; then
+  name="$3"
+  case "\${SHIM_E2E:-pass}" in
+    pass) echo "  PASS  $name (1ms)"; echo "JOURNEYS PASSED — 1 passed, 0 failed" ;;
+    skip) echo "  SKIP  $name (1ms) — no workspace"; echo "JOURNEYS PASSED — 0 passed, 0 failed" ;;
+    fail) echo "  FAIL  $name (1ms)"; echo "JOURNEYS FAILED — 0 passed, 1 failed"; exit 1 ;;
+    none) echo "could not connect to the automation bridge"; exit 1 ;;
+  esac
+  exit 0
+fi
 if [[ "$(basename "$0")" == pnpm ]]; then
   out=""; pat=""; prev=""
   for a in "$@"; do
@@ -94,9 +106,12 @@ function stubReport(write, out, pat, mode) {
 }
 
 const isRust = (row) => row.runner === "cargo";
+const isJourney = (row) => row.runner === "e2e";
 const indent = (lines) => lines.map((l) => `  ${l}`).join("\n");
 const tsCase = (row, lines, how = "it") => `${how}(${JSON.stringify(row.title)}, async () => {\n${indent(lines)}\n});\n`;
 const rustCase = (row, lines, attrs = "#[test]\n") => `${attrs}fn ${row.title}() {\n${indent(lines)}\n}\n`;
+const journeyCase = (row, lines, run = `  async run(client, ctx) {\n${lines.map((l) => `    ${l}`).join("\n")}\n  },\n`) =>
+  `export default {\n  name: ${JSON.stringify(row.title)},\n${run}};\n`;
 const mountLine = (file) => `#[cfg(test)]\n#[path = "${path.basename(file)}"]\nmod ${path.basename(file, ".test.rs")}_tests;\n`;
 
 /**
@@ -118,10 +133,10 @@ function tree({ drop, cases = {}, headers = {}, skip = [], unmounted = [] } = {}
   for (const [file, rows] of files) {
     if (skip.includes(file)) continue;
     const header = headers[file] ?? `// ${[...new Set(rows.map((r) => r.wi))].join(" ")} — witness fixture\n`;
-    const prelude = file.endsWith(".rs") ? "" : 'import { describe, expect, it } from "vitest";\n';
+    const prelude = file.endsWith(".rs") || file.endsWith(".mjs") ? "" : 'import { describe, expect, it } from "vitest";\n';
     const body = rows.map((r) => {
       const lines = SAMPLES[r.row].filter((_, i) => i !== drop);
-      return (cases[r.row] ?? (isRust(r) ? rustCase : tsCase))(r, lines);
+      return (cases[r.row] ?? (isRust(r) ? rustCase : isJourney(r) ? journeyCase : tsCase))(r, lines);
     });
     write(root, file, `${header}${prelude}\n${body.join("\n")}`);
     if (file.endsWith(".rs") && !unmounted.includes(file)) mounts.push(mountLine(file));
@@ -237,6 +252,12 @@ describe("check-al-phase.sh 2 — each variant fails its own row and no other", 
     { row: "trust boundary: a capture seq regression is refused", why: /missing/,
       cases: (r) => `fn helper() {\n  ${lines(r)[2]}\n}\n\n${rustCase(r, lines(r).slice(0, 2))}` },
     { row: "keep B of {A, B}, restart → only A pending", why: /not a #\[test\]/, cases: (r) => rustCase(r, lines(r), "") },
+    { row: "native: a hash change and a pushState keep the page's registration live", why: /named "journal-other"/,
+      cases: (r) => journeyCase({ title: "journal-other" }, lines(r)) },
+    { row: "native: an iframe load keeps the page's registration live", why: /inline `run`/,
+      cases: (r) => `async function run(client, ctx) {\n${indent(lines(r))}\n}\n${journeyCase(r, [], "  run,\n")}` },
+    { row: "native: five rapid reloads, each followed by an agent write that succeeds", why: /missing/,
+      cases: (r) => `function unused() { ${lines(r)[0]} }\n${journeyCase(r, lines(r).slice(1))}` },
   ];
   const FILE_VARIANTS = [
     { row: "WYSIWYG widening shown: the production collector's blocked hunk carries the panel indicator", why: /header/,
@@ -301,6 +322,27 @@ describe("check-al-phase.sh — each witness runs alone, to exactly one pass", (
     }
   });
 
+  it("phase 2: an e2e witness runs its journey alone through pnpm e2e:journeys and reads its PASS line", () => {
+    const { out, log } = run(2, tree(), { exec: true });
+    for (const r of ROWS.filter((x) => x.phase === "2" && isJourney(x))) {
+      expect(runLine(out, r), out).toMatch(/^\s*✓.*ran green/);
+      expect(runs(log, `pnpm e2e:journeys --only ${r.title}`), log).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    { e2e: "skip", why: /skipped/ },
+    { e2e: "fail", why: /failed/ },
+    { e2e: "none", why: /live debug build/ },
+  ])("phase 2 with the journey runner answering $e2e: every e2e witness is red, and only those", ({ e2e, why }) => {
+    const { out } = run(2, tree(), { exec: true, env: { SHIM_E2E: e2e } });
+    for (const r of ROWS.filter((x) => x.phase === "2" && isJourney(x))) {
+      expect(runLine(out, r), out).toMatch(/^\s*✗/);
+      expect(out.slice(out.indexOf(runLine(out, r))).split("\n").slice(0, 8).join("\n"), out).toMatch(why);
+    }
+    for (const r of ROWS.filter((x) => x.phase === "2" && !isJourney(x) && x.runner !== "cargo")) expect(runLine(out, r), out).toMatch(/^\s*✓/);
+  });
+
   it("phase 2: the WebKit witness runs under the browser config", () => {
     const { log } = run(2, tree(), { exec: true });
     const wk = ROWS.find((r) => r.runner === "webkit");
@@ -330,6 +372,12 @@ describe("al-witness.mjs — the manifest is validated and the reports are read 
     ["a title with a tab", [{ ...ROW, title: "a\tb" }]],
     ["a cargo title that is not a fn name", [{ ...ROW, runner: "cargo", file: "src-tauri/src/a.test.rs", title: "not a name" }]],
     ["a malformed work item", [{ ...ROW, wi: "AL2.1" }]],
+    ["an e2e witness outside e2e/journeys", [{ ...ROW, runner: "e2e", file: "e2e/lib/a.mjs", title: "a-journey" }]],
+    ["an e2e title that is not a journey name", [{ ...ROW, runner: "e2e", file: "e2e/journeys/60-a.mjs", title: "A journey" }]],
+    ["one journey file witnessing two rows", [
+      { ...ROW, runner: "e2e", file: "e2e/journeys/60-a.mjs", title: "a-journey" },
+      { ...ROW, row: "s", runner: "e2e", file: "e2e/journeys/60-a.mjs", title: "b-journey" },
+    ]],
   ])("a manifest with %s is refused, exit 2", (_, rows) => {
     const dir = manifest(rows);
     const r = cli(["check", path.join(dir, "m.json"), "2"], dir);
@@ -369,6 +417,20 @@ describe("al-witness.mjs — the manifest is validated and the reports are read 
     const file = report();
     writeFileSync(file, text);
     const r = cli(["cargo-report", file, prefix, "f", String(rc)]);
+    expect(r.status, r.stdout + r.stderr).toBe(want);
+  });
+
+  it.each([
+    ["one PASS for the journey", "  PASS  j (5ms)\n  PASS  j-two (5ms)\nJOURNEYS PASSED\n", 0, 0],
+    ["the journey skipped", "  SKIP  j (5ms) — workspace open\n", 0, 1],
+    ["no line for it", "JOURNEYS PASSED — 0 passed\n", 0, 1],
+    ["another journey failing beside it", "  PASS  j (5ms)\n  FAIL  j-two (5ms)\n", 0, 1],
+    ["the journey run twice", "  PASS  j (5ms)\n  PASS  j (5ms)\n", 0, 1],
+    ["a nonzero exit (no app running)", "  PASS  j (5ms)\n", 1, 1],
+  ])("e2e-report: %s", (_, text, rc, want) => {
+    const file = report();
+    writeFileSync(file, text);
+    const r = cli(["e2e-report", file, "j", String(rc)]);
     expect(r.status, r.stdout + r.stderr).toBe(want);
   });
 });

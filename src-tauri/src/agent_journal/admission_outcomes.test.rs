@@ -91,6 +91,10 @@ fn an_admission_fsync_failure_is_indeterminate_and_reopens_cleanly() {
             err.detail().expect("detail")["indeterminate"] == json!(true),
             "indeterminate: {err:?}"
         );
+        assert!(
+            err.detail().expect("detail")["uncertain"] == json!(true),
+            "an fsync failure is uncertain for the client: {err:?}"
+        );
         assert_eq!(journal_code(err), "JOURNAL_IO");
         assert_eq!(outcome(&out), "indeterminate");
         let poisoned = c.writer.health().expect_err("poisoned writer");

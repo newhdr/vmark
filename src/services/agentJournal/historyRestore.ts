@@ -34,9 +34,8 @@ import { useDocumentStore } from "@/stores/documentStore";
 import { canonicalizeLineEndings } from "@/utils/editorText";
 import { getCurrentWindowLabel } from "@/services/persistence/workspaceStorage";
 import type { AbortReason } from "./journalClient";
-import { prepareWithBaselineRetry } from "./controlledMutation";
 import { runJournaledMutation, type JournaledOutcome } from "./journaledMutation";
-import { prepareRestore, type PreparedRestore, type RestoreSource } from "./historyClient";
+import { restorePrepare, type PreparedRestore, type RestoreSource } from "./historyClient";
 import type { JournalRefusal } from "./journalRefusal";
 import { docKeyFor, isJournalTabLive, journalTabLife } from "./documentIdentity";
 
@@ -74,18 +73,15 @@ export async function restoreFromHistory(tabId: string, source: RestoreSource): 
     preimage,
     retryHint: "retry",
     prepare: (baseline) =>
-      prepareWithBaselineRetry(
-        {
-          docKey: baseline.docKey,
-          parent: baseline.parent,
-          preimage: baseline.preimage,
-          source,
-          baselineProvenance: baseline.baselineProvenance,
-          baselineTouched: baseline.baselineTouched,
-          ...(baseline.capture && { capture: baseline.capture }),
-        },
-        prepareRestore,
-      ),
+      restorePrepare({
+        docKey: baseline.docKey,
+        parent: baseline.parent,
+        preimage: baseline.preimage,
+        source,
+        baselineProvenance: baseline.baselineProvenance,
+        baselineTouched: baseline.baselineTouched,
+        ...(baseline.capture && { capture: baseline.capture }),
+      }),
     verify: () => {
       const now = contentOf(tabId);
       if (now === undefined || keyOf(tabId, life) !== docKey) return "closed";

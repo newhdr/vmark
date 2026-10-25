@@ -1,9 +1,10 @@
 // @vitest-environment node
-// WI-AL2.2a — the journaled-mutation coordinator hands its prepare the capture id of the freeze it took, unchanged, and every controlled prepare that freezes sends it (an agent write's and a history restore's, the restore with its own requestId), inside the freeze's send turn, so it waits for an earlier freeze of its session (a save still writing to disk) to be answered, and for one that never answers only until that one's deadline; with no provenance source there is no freeze and no capture is sent; whichever way the mutation or restore ends, its freeze is settled, so a later freeze of the session can send
+// WI-AL2.2a — the journaled-mutation coordinator hands its prepare the capture id of the freeze it took, unchanged, and every controlled prepare that freezes sends it (an agent write's and a history restore's, the restore with its own requestId), inside the freeze's send turn, so it waits for an earlier freeze of its session (a save still writing to disk) to be answered, and for one that never answers only until that one's deadline; with no provenance source there is no freeze and no capture is sent; whichever way the mutation or restore ends, its freeze is settled, so a later freeze of the session can send | AL2.2g: the restore prepare is answered with a reply bound to its frozen payload; a released send reaches the journal after its registration and payload digest, so it is awaited rather than timed
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
+import { answerPrepare } from "@/test/agentJournalWireFake";
 import type { PrepareInput } from "../journalClient";
 import { restoreFromHistory } from "../historyRestore";
 import { registerUnsavedProvenanceSource } from "../unsavedProvenance";
@@ -22,7 +23,7 @@ const CAPTURE: CaptureId = { view: "main/t-1", session: "0f8e2a4c-1b3d-4e5f-8a9b
 
 function source(): void {
   registerUnsavedProvenanceSource(TAB, {
-    freeze: () => ({ touched: false, capture: CAPTURE, inTurn: (send) => send(), payload: async () => null, recorded: vi.fn(), invalidate: vi.fn() }),
+    freeze: () => ({ touched: false, capture: CAPTURE, inTurn: (send) => send(), payload: async () => null, recorded: vi.fn(), invalidate: vi.fn(), release: vi.fn() }),
     fork: () => ({ recorded: vi.fn(), invalidate: vi.fn() }),
   });
 }
@@ -62,8 +63,8 @@ describe("runJournaledMutation — capture id", () => {
       expect(fake.prepareControlledWrite).not.toHaveBeenCalled();
       answerSave();
       await saveSent;
-      await vi.advanceTimersByTimeAsync(0);
-      expect(fake.prepareControlledWrite).toHaveBeenCalledOnce();
+      // The send registers the page and digests the payload: real async work, not timers.
+      await vi.waitFor(() => expect(fake.prepareControlledWrite).toHaveBeenCalledOnce());
       expect(await run).toMatchObject({ status: "applied" });
       expect(fake.prepareControlledWrite.mock.calls[0][0]).toMatchObject({ capture: { seq: "2" } });
     } finally {
@@ -82,7 +83,7 @@ describe("runJournaledMutation — capture id", () => {
       await vi.advanceTimersByTimeAsync(JOURNAL_DEADLINE_MS - 1000 - 1);
       expect(fake.prepareControlledWrite).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(fake.prepareControlledWrite).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(fake.prepareControlledWrite).toHaveBeenCalledOnce());
       expect(await hung).toMatchObject({ status: "refused", refusal: { journalCode: "JOURNAL_TIMEOUT" } });
       expect(await later).toMatchObject({ status: "applied" });
       expect(fake.prepareControlledWrite.mock.calls[0][0]).toMatchObject({ capture: { seq: "2" } });
@@ -133,9 +134,10 @@ describe("restoreFromHistory — capture id", () => {
     source();
     vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
       if (command !== "agent_journal_restore_prepare") return undefined;
-      const { source: _source, ...rest } = JSON.parse((args as { payload: string }).payload) as Record<string, unknown>;
-      const p = await fake.prepareControlledWrite({ ...rest, tool: "history.restore" } as unknown as PrepareInput);
-      return { ...p, text: "restored", resolves: null };
+      return answerPrepare(args, async ({ source: _source, ...rest }) => {
+        const p = await fake.prepareControlledWrite({ ...rest, tool: "history.restore" } as unknown as PrepareInput);
+        return { ...p, text: "restored", resolves: null };
+      });
     });
     expect(await restoreFromHistory(TAB, { from: "revision", revision: "rev-old" })).toMatchObject({ status: "applied" });
     const [, args] = vi.mocked(invoke).mock.calls.find(([c]) => c === "agent_journal_restore_prepare") ?? [];

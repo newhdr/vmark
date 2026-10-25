@@ -6,7 +6,8 @@
  *   - Refusals the agent can act on keep their journal token
  *     (JOURNAL_BUSY, STALE_PARENT, JOURNAL_DEGRADED, INVALID_TEXT,
  *     REVIEW_BACKLOG_FULL). A journal that cannot record anything —
- *     not running, an I/O failure, a damaged or newer-format file — is
+ *     not running, an I/O failure, a damaged or newer-format file, or no
+ *     answer in time (nothing was applied either way) — is
  *     JOURNAL_UNAVAILABLE. Anything else is a defect: INTERNAL.
  *   - An abort is ABORTED with the reason, so the agent can tell typing
  *     from a closed tab without parsing prose.
@@ -59,6 +60,7 @@ const UNAVAILABLE = new Set<JournalRefusal["journalCode"]>([
   "JOURNAL_IO",
   "JOURNAL_CORRUPT",
   "JOURNAL_FUTURE_FORMAT",
+  "JOURNAL_TIMEOUT",
 ]);
 
 /** The answer for a write the journal refused before anything changed. */

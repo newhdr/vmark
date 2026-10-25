@@ -167,7 +167,7 @@ export class ProvenanceSession {
     this.#window = openWindow(buffer, over ? { kind: "invalid" } : { kind: "pending" }, this.#cap);
     if (over) {
       this.#warn("provenance: too many unsettled saves; this one and the next window are snapshot-only");
-      return { touched: true, capture, inTurn: turn.run, payload: async () => null, recorded: turn.settle, invalidate: turn.settle };
+      return { touched: true, capture, inTurn: turn.run, payload: async () => null, recorded: turn.settle, invalidate: turn.settle, release: turn.settle };
     }
     this.#frozen++;
     void this.#lease.ensure();
@@ -185,8 +185,8 @@ export class ProvenanceSession {
       capture,
       inTurn: turn.run,
       payload: (expected) => this.#payload(frozen, buffer, expected, () => settled),
-      recorded: (id) => settle(id),
-      invalidate: () => settle(null),
+      recorded: settle,
+      invalidate: () => settle(null), release: () => settle(null),
     };
   }
 

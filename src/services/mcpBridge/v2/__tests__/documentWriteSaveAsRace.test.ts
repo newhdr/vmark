@@ -6,8 +6,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("@/services/mcpBridge/utils", () => ({ respond: vi.fn() }));
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
-vi.mock("@/services/agentJournal/journalClient", () =>
-  import("@/test/agentJournalFake").then((m) => m.journalClientModule()),
+vi.mock("@/services/agentJournal/journalTransport", () =>
+  import("@/test/agentJournalWireFake").then((m) => m.journalTransportModule()),
 );
 // The two boundaries under the real bridgeSave: the path guard and the save
 // pipeline both reach Tauri. The pipeline's path argument is where the save went.

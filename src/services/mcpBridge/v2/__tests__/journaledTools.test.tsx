@@ -412,6 +412,7 @@ describe("selection.set — an apply that throws before it changed the editor", 
           payload: async () => null,
           recorded: (id) => settle("recorded", id),
           invalidate: () => settle("invalidate", null),
+          release: () => settle("release", null),
         };
       },
       fork: (text) => {

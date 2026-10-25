@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL1.3 — the controlled-mutation runner: prepare → re-verify → apply → commit. A re-verify failure (edited, closed, ime composition, selection) appends aborted and nothing is applied; apply runs synchronously after re-verify with no await between; a commit failure is applied with durable false, never an error; a failed aborted append still refuses (the reservation is kept, retries drain it); prepare refusals (JOURNAL_BUSY, STALE_PARENT, JOURNAL_DEGRADED) apply nothing; a key whose bind failed is refused before any prepare until a bind there lands
+// WI-AL1.3 — the controlled-mutation runner: prepare → re-verify → apply → commit. A re-verify failure (edited, closed, ime composition, selection) appends aborted and nothing is applied; apply runs synchronously after re-verify with no await between; a commit failure is applied with durable false, never an error; a failed aborted append still refuses (the reservation is kept, retries drain it); prepare refusals (JOURNAL_BUSY, STALE_PARENT, JOURNAL_DEGRADED) apply nothing; a key whose bind failed is refused before any prepare until a bind there lands | AL2.2g: the uncertified-map fallback is the request coordinator's (one resend under a new request with no map); a clean refusal is not resent
 // The protocol (`runPreparedWrite`) is driven through its one production
 // entry, the journaled-mutation coordinator; the tab's basis is read from the
 // identity table the coordinator settles. Cases the coordinator suite already
@@ -12,8 +12,7 @@ import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
 import { useDocumentStore } from "@/stores/documentStore";
 import { journalActorFor } from "../journalActor";
-import { prepareWithBaselineRetry } from "../controlledMutation";
-import { prepareControlledWrite, type AbortReason, type PreparedTxn } from "../journalClient";
+import { controlledPrepare, type AbortReason, type PreparedTxn } from "../journalClient";
 import { journalBasis, rememberJournalBasis } from "../documentIdentity";
 import { runJournaledMutation } from "../journaledMutation";
 import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
@@ -243,7 +242,7 @@ describe("the controlled-mutation protocol, through the coordinator", () => {
     fake.refuseNextProvenance(2);
     type("typed");
     const out = await run({
-      prepare: (b) => prepareWithBaselineRetry({ ...b, actor, tool: "document.write", baselineProvenance: map }, prepareControlledWrite),
+      prepare: (b) => controlledPrepare({ ...b, actor, tool: "document.write", baselineProvenance: map }),
     });
     expect(out.status).toBe("applied");
     expect(fake.prepareControlledWrite.mock.calls.map(([input]) => input.baselineProvenance)).toEqual([map, null]);
@@ -252,8 +251,7 @@ describe("the controlled-mutation protocol, through the coordinator", () => {
   it("any other refusal is not retried", async () => {
     fake.refuseNextPrepares("JOURNAL_BUSY");
     const out = await run({
-      prepare: (b) =>
-        prepareWithBaselineRetry({ ...b, actor, tool: "document.write", baselineProvenance: stubProvenancePayload() }, prepareControlledWrite),
+      prepare: (b) => controlledPrepare({ ...b, actor, tool: "document.write", baselineProvenance: stubProvenancePayload() }),
     });
     expect(out).toMatchObject({ status: "refused" });
     expect(fake.prepareControlledWrite).toHaveBeenCalledTimes(1);

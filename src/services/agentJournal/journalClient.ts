@@ -15,10 +15,12 @@
  *   - A prepare and a commit answer whether a selection certificate was
  *     used; a fallback to the whole-document barrier is logged here, once
  *     for every caller, and the journal counts it in its status.
- *   - Each call of `prepareControlledWrite` is one logical request: it mints
- *     one `requestId` and freezes the payload once (`freezePreparePayload`).
- *     The journal answers an identical retry from its receipt, so a prepare
- *     reply is decoded losslessly, every field in wire order.
+ *   - A prepare is described here (`controlledPrepare`) and sent by the
+ *     request coordinator (`journalRequest.ts`), which freezes its payload
+ *     and checks the reply's bind. The journal answers an identical retry
+ *     from its receipt, so a prepare reply is decoded losslessly.
+ *   - A commit and an abort name the page pair the request was sent for,
+ *     and their reply's bind (txn and pair) is checked before its fields.
  *
  * @coordinates-with src-tauri/src/agent_journal/commands.rs — the commands
  * @module services/agentJournal/journalClient
@@ -28,16 +30,8 @@ import type { JournalMcpActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
 import type { SelectionCertificate } from "./selectionCertificate";
 import type { CaptureId } from "./provenance/captureId";
-import {
-  callJournal as call,
-  freezePreparePayload,
-  isNullableString,
-  isObject,
-  isString,
-  malformed,
-  mintRequestId,
-  parsePreparedTxn,
-} from "./journalIpc";
+import { callJournal as call, isNullableString, isObject, isString, malformed, parseBound, parsePreparedTxn } from "./journalIpc";
+import type { PagePair } from "./pageRegistration";
 import { journalWarn } from "@/utils/debug";
 
 /** Why re-verification refused to apply. */
@@ -49,6 +43,15 @@ export type AbortReason = "edited" | "closed" | "composing" | "selection" | "app
  * never refused anything.
  */
 export type JournalAbortReason = AbortReason | "timedOut";
+
+/** What a prepare sends and how its reply is read (run by `journalRequest.ts`). */
+export interface PrepareSpec<P> {
+  command: "agent_journal_prepare" | "agent_journal_restore_prepare";
+  /** The request's fields, without `requestId` and the page identity. */
+  fields: { readonly baselineProvenance: unknown };
+  /** Read the bound reply's `reply`. Throws `malformed`. */
+  parse: (command: string, reply: unknown) => P;
+}
 
 export interface PrepareInput {
   /** `path:<file>` or `tab:<window>/<tab>` (see `documentIdentity.ts`). */
@@ -172,25 +175,30 @@ function checkCertification(command: string, r: Record<string, unknown>, doc: st
 /** Read `command`'s reply as a controlled prepare, losslessly. Throws `malformed`. */
 export function parseControlledPrepared(command: string, r: unknown): ControlledPrepared {
   const { doc, txn, revision, generation, baseline } = parsePreparedTxn(command, r);
-  const reply = r as Record<string, unknown>;
-  checkCertification(command, reply, doc);
-  const fallbackReason = isFallbackReason(reply.fallbackReason) ? reply.fallbackReason : null;
-  return { doc, txn, revision, generation, baseline, certified: reply.certified === true, fallbackReason };
+  if (!isObject(r)) throw malformed(command);
+  checkCertification(command, r, doc);
+  const fallbackReason = isFallbackReason(r.fallbackReason) ? r.fallbackReason : null;
+  return { doc, txn, revision, generation, baseline, certified: r.certified === true, fallbackReason };
 }
 
-/** Prepare a controlled write, as one new logical request. Rejects with a `JournalRefusal`. */
-export async function prepareControlledWrite(input: PrepareInput): Promise<ControlledPrepared> {
-  const command = "agent_journal_prepare";
-  const payload = freezePreparePayload(input, mintRequestId());
-  return parseControlledPrepared(command, await call(command, { payload }));
+/** A controlled write's prepare request, for the request coordinator (`journalRequest.ts`). */
+export function controlledPrepare(input: PrepareInput): PrepareSpec<ControlledPrepared> {
+  return { command: "agent_journal_prepare", fields: input, parse: parseControlledPrepared };
 }
+
+/** The bind a commit's or abort's reply must carry: its txn and the request's frozen pair. */
+const pairBind = (txn: string, { pageIdentity, webviewGeneration }: PagePair) => ({ txn, pageIdentity, webviewGeneration });
 
 /**
  * Commit an open transaction with the applied text and any `extras` (which
- * never replace the postimage). Rejects with a `JournalRefusal`.
+ * never replace the postimage), for the page pair that prepared it. The
+ * reply's bind is checked before its fields. Rejects with a `JournalRefusal`.
  */
-export async function commitControlledWrite(txn: string, postimage: string, extras?: CommitExtras): Promise<CommittedTxn> {
-  const r = await call("agent_journal_commit", { txn, payload: JSON.stringify({ ...extras, postimage }) });
+export async function commitControlledWrite(txn: string, postimage: string, pair: PagePair, extras?: CommitExtras): Promise<CommittedTxn> {
+  const command = "agent_journal_commit";
+  const bind = pairBind(txn, pair);
+  const args = { ...bind, payload: JSON.stringify({ ...extras, postimage }) };
+  const r = parseBound(command, await call(command, args), bind);
   if (
     !isObject(r) ||
     !isString(r.doc) ||
@@ -204,9 +212,11 @@ export async function commitControlledWrite(txn: string, postimage: string, extr
   return { doc: r.doc, revision: r.revision, applied: r.applied, durable: r.durable };
 }
 
-/** Abort an open transaction. `durable: false` = queued, the document stays reserved. */
-export async function abortControlledWrite(txn: string, reason: JournalAbortReason): Promise<{ durable: boolean }> {
-  const r = await call("agent_journal_abort", { txn, reason });
+/** Abort an open transaction for the pair that prepared it. `durable: false` = queued, the document stays reserved. */
+export async function abortControlledWrite(txn: string, reason: JournalAbortReason, pair: PagePair): Promise<{ durable: boolean }> {
+  const command = "agent_journal_abort";
+  const bind = pairBind(txn, pair);
+  const r = parseBound(command, await call(command, { ...bind, reason }), bind);
   if (!isObject(r) || typeof r.durable !== "boolean") throw malformed("agent_journal_abort");
   return { durable: r.durable };
 }

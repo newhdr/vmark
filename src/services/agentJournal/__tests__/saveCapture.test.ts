@@ -75,6 +75,7 @@ describe("capture", () => {
       payload: async () => ({ basis: "genesis", payload: {} as never }),
       recorded: vi.fn(),
       invalidate: vi.fn(),
+      release: vi.fn(),
     };
     agentJournalFake.captureSaveToJournal.mockImplementationOnce(async () => {
       expect(turns).toEqual(["open"]);

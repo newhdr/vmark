@@ -1,5 +1,5 @@
 // @vitest-environment node
-// The bridge answers for journal refusals and aborts: INVALID_TEXT before any prepare, each actionable token kept, unavailability folded, an abort carrying its reason — and an envelope type that only lets ABORTED carry a reason.
+// The bridge answers for journal refusals and aborts: INVALID_TEXT before any prepare, each actionable token kept, unavailability folded, an abort carrying its reason — and an envelope type that only lets ABORTED carry a reason. | AL2.2g: a journal timeout, clean or uncertain, folds into JOURNAL_UNAVAILABLE (nothing was made), not INTERNAL
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { JournalRefusal } from "@/services/agentJournal/journalRefusal";
 import type { AbortReason } from "@/services/agentJournal/journalClient";
@@ -18,6 +18,11 @@ describe("journalV2Error", () => {
 
   it("folds a journal that cannot record into JOURNAL_UNAVAILABLE", () => {
     expect(journalRefusalError(new JournalRefusal("JOURNAL_IO", "disk")).error).toBe("JOURNAL_UNAVAILABLE");
+  });
+
+  it.each([false, true])("folds a journal that did not answer in time (uncertain: %s) into JOURNAL_UNAVAILABLE: nothing was made", (uncertain) => {
+    const refusal = new JournalRefusal("JOURNAL_TIMEOUT", "the agent edit journal did not confirm the prepare in time", null, null, { uncertain });
+    expect(journalRefusalError(refusal)).toMatchObject({ error: "JOURNAL_UNAVAILABLE", message: expect.stringMatching(/in time/) });
   });
 
   it.each(["edited", "closed", "composing", "selection", "applyRefused"] as const)("an abort carries its reason %s", (reason) => {

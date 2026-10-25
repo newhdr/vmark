@@ -132,7 +132,7 @@ describe("Save As in the save journal", () => {
     noteJournalDocument("path:/h.md", "doc-h");
     const settled: string[] = [];
     registerUnsavedProvenanceSource("s5", {
-      freeze: (): ProvenanceFreeze => ({ touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(), payload: async () => null, recorded: (id) => void (settled.length === 0 && settled.push(`recorded:${id}`)), invalidate: () => void (settled.length === 0 && settled.push("invalidated")) }), // the first settlement wins
+      freeze: (): ProvenanceFreeze => ({ touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: (send) => send(), payload: async () => null, recorded: (id) => void (settled.length === 0 && settled.push(`recorded:${id}`)), invalidate: () => void (settled.length === 0 && settled.push("invalidated")), release: () => void (settled.length === 0 && settled.push("released")) }), // the first settlement wins
       fork: () => ({ recorded: () => {}, invalidate: () => {} }),
     });
     agentJournalEpochFake.failNextBinds(1);

@@ -14,7 +14,8 @@
 #     (scripts/al-witness.mjs).
 #   `phase N witness run — <row>`  that one test, run alone (assert_exec, so
 #     `--no-exec` reports it UNVERIFIED): exactly one pass and the witness not
-#     skipped, read from vitest's JSON report or cargo's per-test lines. A row
+#     skipped, read from vitest's JSON report, cargo's per-test lines or the
+#     e2e journey runner's PASS/FAIL/SKIP lines (a live debug build). A row
 #     whose static check failed is not run.
 # A keyword pre-check (al_tests_cover) is cheaper and coarser; these rows are
 # what a phase is accepted on.
@@ -43,6 +44,20 @@ _al_cargo_witness() {
   return "$status"
 }
 
+# _al_e2e_witness <journey name>: the journey alone (`--only` is a substring
+# filter, so the report demands exactly one PASS for this name and no FAIL),
+# against the live debug build e2e/README.md describes. With no build running
+# the runner exits non-zero and the row is red.
+_al_e2e_witness() {
+  local name="$1" out rc status
+  out="$(mktemp "$AL_SCRATCH/witness.XXXXXX")" || return 70
+  pnpm e2e:journeys --only "$name" >"$out" 2>&1; rc=$?
+  node "$AL_WITNESS_CLI" e2e-report "$out" "$name" "$rc" >"$out.verdict"; status=$?
+  (( status == 0 )) || tail -n 5 "$out"
+  cat "$out.verdict"
+  return "$status"
+}
+
 # al_witnesses <phase>: both lines for every row the manifest lists for it.
 al_witnesses() {
   local phase="$1" out rc verdict row a b c d cfg
@@ -64,6 +79,9 @@ al_witnesses() {
           fi
           ok "phase $phase witness — $row ($b: $c)"
           assert_exec "phase $phase witness run — $row" _al_cargo_witness "$_AL_FILTER" "$c"
+        elif [[ "$a" == e2e ]]; then
+          ok "phase $phase witness — $row ($b: $c)"
+          assert_exec "phase $phase witness run — $row" _al_e2e_witness "$c"
         else
           ok "phase $phase witness — $row ($b: $c)"
           cfg=""

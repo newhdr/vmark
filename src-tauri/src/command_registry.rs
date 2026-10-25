@@ -103,6 +103,8 @@ macro_rules! all_commands {
             agent_journal::commands::agent_journal_prepare,
             agent_journal::commands::agent_journal_commit,
             agent_journal::commands::agent_journal_abort,
+            agent_journal::commands::agent_journal_abandon,
+            agent_journal::commands::agent_journal_register_page,
             agent_journal::commands::agent_journal_capture,
             agent_journal::commands::agent_journal_arm_epoch,
             agent_journal::commands::agent_journal_close_epoch,

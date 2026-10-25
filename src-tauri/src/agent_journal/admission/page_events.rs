@@ -11,6 +11,11 @@
 //!     follows sees the revocation.
 //!   - A pass with no writer yet does nothing: no transaction can be owned
 //!     before the writer exists.
+//!   - Each entry leaves a debug trace naming its label, and a registration
+//!     the identity, generation and replaced pair, so a native run can
+//!     correlate a document's identity with the events Rust saw. A refusal
+//!     logs only its journal code: the identity it refused is unvalidated
+//!     webview text.
 //!
 //! @module agent_journal/admission/page_events
 
@@ -24,12 +29,14 @@ use crate::command_error::CommandError;
 
 /// A page load started in `label`: revoke what it held, then signal.
 pub fn page_started(pages: &PageTable, worker: &CleanupWorker, label: &str, pass: Pass) {
+    log::debug!("[agent_journal] page load started in {label}");
     pages.started(label);
     worker.signal(pass);
 }
 
 /// `label`'s window is gone: remove it, then signal.
 pub fn page_destroyed(pages: &PageTable, worker: &CleanupWorker, label: &str, pass: Pass) {
+    log::debug!("[agent_journal] window destroyed: {label}");
     pages.destroy(label);
     worker.signal(pass);
 }
@@ -49,7 +56,26 @@ pub fn register_page(
     replaces: Option<(&str, &str)>,
     pass: Pass,
 ) -> Result<Registration, CommandError> {
-    let reg = pages.register(writer, label, page_identity, replaces)?;
+    let reg = pages
+        .register(writer, label, page_identity, replaces)
+        .inspect_err(|e| {
+            let code = e
+                .detail()
+                .and_then(|d| d.get("journalCode"))
+                .and_then(|c| c.as_str());
+            log::debug!(
+                "[agent_journal] page registration refused in {label}: {}",
+                code.unwrap_or("no journal code")
+            );
+        })?;
+    let replaced = replaces.map_or_else(String::new, |(id, gen)| {
+        format!("; replaces {id} generation {gen}")
+    });
+    log::debug!(
+        "[agent_journal] page registered in {label}: {} generation {}{replaced}",
+        reg.page_identity.as_str(),
+        reg.webview_generation
+    );
     if replaces.is_some() {
         worker.signal(pass);
     }

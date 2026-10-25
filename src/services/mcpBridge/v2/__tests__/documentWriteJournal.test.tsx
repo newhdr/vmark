@@ -9,8 +9,8 @@ import StarterKit from "@tiptap/starter-kit";
 
 vi.mock("@/services/mcpBridge/utils", () => ({ respond: vi.fn() }));
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
-vi.mock("@/services/agentJournal/journalClient", () =>
-  import("@/test/agentJournalFake").then((m) => m.journalClientModule()),
+vi.mock("@/services/agentJournal/journalTransport", () =>
+  import("@/test/agentJournalWireFake").then((m) => m.journalTransportModule()),
 );
 
 import { useTabStore } from "@/stores/tabStore";

@@ -32,53 +32,42 @@
  *   - A failed or rejected abort still ends as `aborted`: the request is
  *     refused either way, and the journal keeps the reservation until its
  *     drainer lands the queued record.
- *   - Every journal call is bounded (`journalDeadline.ts`). Readiness and
- *     the prepare are one attempt under the smaller of the per-call deadline
- *     and the caller's remaining budget; past it the write refuses
- *     `JOURNAL_TIMEOUT` and applies nothing. The attempt re-checks its clock
- *     right before the prepare, so a timed-out attempt never dispatches
- *     late, and a prepare that answers late is aborted `timedOut`. A commit
- *     past its deadline is not durable on the pre-write basis, with no retry
- *     and no abort; its late acknowledgement is logged and ignored. An abort
- *     past its deadline is logged; the reservation waits for it to land.
- *   - A prepare refused for its baseline map (`field: provenance`, recorded
- *     nothing) is resent once without it: the baseline is then a
- *     `snapshotOnly` barrier, which never certifies more than was seen.
- *   - The prepare is sent in its capture's turn (`turn`, `captureId.ts`),
- *     after readiness; the clock is re-checked inside the turn.
- *   - The prepare waits for a running bind of its key
- *     (`journalDocumentReady`), so a write never lands on the fresh document
- *     a Save As or rename is about to replace; a key whose bind failed
- *     refuses the write unprepared, since the journal holds the document
- *     under another key until a bind there lands.
+ *   - The prepare is one request of the journal's protocol, run by
+ *     `journalRequest.ts`: frozen payload, page identity, bounded attempts,
+ *     one retry, abandon, the provenance fallback, and the freeze
+ *     disposition a refusal carries (`release` only when the journal proved
+ *     nothing was admitted, or nothing was sent).
+ *   - Commit and abort name the page pair the request was sent for. A
+ *     commit past its deadline is not durable on the pre-write basis, with
+ *     no retry and no abort; its late acknowledgement is logged and
+ *     ignored. A `STALE_PAGE` commit (the page that prepared it is gone) is
+ *     not durable and never retried, and the registration is renewed.
  *   - A commit acknowledgement that names another document or revision, or
  *     says nothing was applied, is not trusted: the write is reported not
- *     durable on the pre-write basis.
+ *     durable on the pre-write basis. The reply's bind (txn and pair) is
+ *     checked before that, in `journalClient.ts`.
  *   - An applied write's durability is reported to the recording store
  *     under `docKey` (`recordingReport.ts`): not durable reads "history not
  *     recorded" in the panel.
  *
  * @coordinates-with services/agentJournal/journalClient.ts — the IPC calls
+ * @coordinates-with services/agentJournal/journalRequest.ts — the prepare request
  * @coordinates-with services/agentJournal/journaledMutation.ts — every tab mutation, through `runPreparedWrite`
  * @module services/agentJournal/controlledMutation
  */
 
-import {
-  abortControlledWrite,
-  commitControlledWrite,
-  type AbortReason,
-  type CommitExtras,
-  type JournalAbortReason,
-  type PreparedTxn,
-} from "./journalClient";
-import { JOURNAL_DEADLINE_MS, journalTimeout, withJournalDeadline, type JournalBudget } from "./journalDeadline";
-import { journalDocumentReady } from "./documentBinding";
-import { JournalRefusal, toJournalRefusal } from "./journalRefusal";
+import { commitControlledWrite, type AbortReason, type CommitExtras, type PreparedTxn, type PrepareSpec } from "./journalClient";
+import { JOURNAL_DEADLINE_MS, withJournalDeadline, type JournalBudget } from "./journalDeadline";
+import { JournalRefusal } from "./journalRefusal";
+import { runPrepareRequest, type RequestDisposition } from "./journalRequest";
+import { abortTxn } from "./requestEnding";
+import { noteStalePage, type PagePair } from "./pageRegistration";
 import { journalWarn } from "@/utils/debug";
 import { beginWriteReport } from "./recordingReport";
 
 export type ControlledOutcome<T> =
-  | { status: "refused"; refusal: JournalRefusal }
+  /** `disposition`: what the caller does with the freeze it took (`journalRequest.ts`). */
+  | { status: "refused"; refusal: JournalRefusal; disposition: RequestDisposition }
   /**
    * `basis` is the revision the tab's buffer now derives from: the baseline
    * the prepare recorded for its unjournaled text, else the parent it
@@ -108,41 +97,6 @@ export type ControlledOutcome<T> =
    */
   | { status: "recoveryRequired"; error: unknown; txn: string };
 
-/**
- * Append `aborted`, bounded. Whether it landed is not reported: an append
- * that failed or was rejected leaves the reservation to the journal's
- * degraded queue, which refuses the next write until it drains; one not
- * answered in time is logged (see the header).
- */
-async function abort(txn: string, reason: JournalAbortReason): Promise<void> {
-  try {
-    await withJournalDeadline("an abort", () => abortControlledWrite(txn, reason));
-  } catch (error) {
-    // Refused either way; the reservation and the degraded queue carry it.
-    if (error instanceof JournalRefusal && error.journalCode === "JOURNAL_TIMEOUT") {
-      journalWarn(`the abort of ${txn} was not answered in time; the document stays reserved until it lands`);
-    }
-  }
-}
-
-/**
- * Prepare; a refused baseline map is dropped and the prepare resent once.
- * Shared by every controlled prepare that carries `baselineProvenance`.
- */
-export async function prepareWithBaselineRetry<I extends { baselineProvenance: unknown }, P>(
-  input: I,
-  send: (input: I) => Promise<P>,
-): Promise<P> {
-  try {
-    return await send(input);
-  } catch (error) {
-    const refusal = toJournalRefusal(error);
-    if (refusal.field !== "provenance" || input.baselineProvenance === null) throw refusal;
-    journalWarn("baseline provenance refused; recording the baseline snapshot-only:", refusal.message);
-    return send({ ...input, baselineProvenance: null });
-  }
-}
-
 /** A controlled write; its prepare is the caller's (an MCP edit, a restore). */
 export interface PreparedWrite<T, P extends PreparedTxn> {
   /** The parent the prepare states; the basis when it records no baseline. */
@@ -151,7 +105,8 @@ export interface PreparedWrite<T, P extends PreparedTxn> {
   preimage: string;
   /** The document's journal key, so an applied write's durability is reported. */
   docKey?: string;
-  prepare: () => Promise<P>;
+  /** The prepare request; built inside its first attempt's deadline. */
+  prepare: () => Promise<PrepareSpec<P>> | PrepareSpec<P>;
   verify: (prepared: P) => AbortReason | null;
   apply: (prepared: P) => { postimage: string; value: T } | { refused: AbortReason };
   /** After an apply that threw: settle the document and return its text; throw when it cannot be read. */
@@ -164,18 +119,24 @@ export interface PreparedWrite<T, P extends PreparedTxn> {
   turn?: <R>(send: () => Promise<R>) => Promise<R>;
 }
 
+/** What a commit needs beyond its text: the transaction, the pair it was prepared for, the basis, the report. */
+interface CommitContext {
+  prepared: PreparedTxn;
+  pair: PagePair;
+  basis: string | null;
+  report: (durable: boolean) => void;
+}
+
 /** Commit `postimage`: whether it landed durably, and the tab's basis afterwards. */
 async function commit(
-  prepared: PreparedTxn,
+  { prepared, pair, basis, report }: CommitContext,
   postimage: string,
-  basis: string | null,
-  report: (durable: boolean) => void,
   extras?: CommitExtras,
 ): Promise<{ durable: boolean; basis: string | null }> {
   try {
     const ack = await withJournalDeadline(
       "the commit",
-      () => commitControlledWrite(prepared.txn, postimage, extras),
+      () => commitControlledWrite(prepared.txn, postimage, pair, extras),
       JOURNAL_DEADLINE_MS,
       (late) => journalWarn("a commit acknowledgement arrived after its deadline; ignored:", late),
     );
@@ -184,7 +145,11 @@ async function commit(
     const durable = landed && ack.durable;
     report(durable);
     return { durable, basis: landed ? prepared.revision : basis };
-  } catch {
+  } catch (error) {
+    if (error instanceof JournalRefusal && error.journalCode === "STALE_PAGE") {
+      journalWarn(`the page that prepared ${prepared.txn} is no longer registered; the commit is not durable`);
+      noteStalePage(pair);
+    }
     report(false);
     return { durable: false, basis };
   }
@@ -198,15 +163,29 @@ export async function runPreparedWrite<T, P extends PreparedTxn>(
   write: PreparedWrite<T, P>,
 ): Promise<ControlledOutcome<T>> {
   const report = beginWriteReport(write.docKey);
-  let prepared: P;
+  const run = await runPrepareRequest({
+    build: write.prepare,
+    ...(write.docKey !== undefined && { docKey: write.docKey }),
+    ...(write.budget && { budget: write.budget }),
+    ...(write.turn && { turn: write.turn }),
+  });
+  if (!run.ok) return { status: "refused", refusal: run.refusal, disposition: run.disposition };
   try {
-    prepared = await prepareAttempt(write);
-  } catch (error) {
-    return { status: "refused", refusal: toJournalRefusal(error) };
+    return await settlePrepared(write, { prepared: run.prepared, pair: run.pair, report });
+  } finally {
+    run.finish();
   }
+}
+
+/** Verify, apply and commit (or abort) a prepared write. */
+async function settlePrepared<T, P extends PreparedTxn>(
+  write: PreparedWrite<T, P>,
+  { prepared, pair, report }: { prepared: P; pair: PagePair; report: (durable: boolean) => void },
+): Promise<ControlledOutcome<T>> {
   const basis = prepared.baseline ?? write.parent;
+  const ctx: CommitContext = { prepared, pair, basis, report };
   const aborted: Aborted<T> = async (reason, thrown) => {
-    await abort(prepared.txn, reason);
+    await abortTxn(prepared.txn, reason, pair);
     return { status: "aborted", reason, basis, ...(thrown && { thrown }) };
   };
   let reason: AbortReason | null;
@@ -220,44 +199,17 @@ export async function runPreparedWrite<T, P extends PreparedTxn>(
   try {
     applied = write.apply(prepared);
   } catch (error) {
-    return recoverFromThrownApply(write, prepared, { basis, report, aborted }, error);
+    return recoverFromThrownApply(write, prepared, { ctx, aborted }, error);
   }
   if ("refused" in applied) return aborted(applied.refused);
   const { postimage } = applied;
   const effects = write.effects ? await settleEffects(write.effects, postimage) : { extras: undefined };
-  const landed = await commit(prepared, postimage, basis, report, effects.extras);
+  const landed = await commit(ctx, postimage, effects.extras);
   if ("error" in effects) {
     journalWarn("the commit effects failed; committed the applied text without them:", effects.error);
     return { status: "appliedWithError", error: effects.error, postimage, revision: prepared.revision, ...landed };
   }
   return { status: "applied", value: applied.value, revision: prepared.revision, ...landed };
-}
-
-/**
- * Readiness and the prepare as one bounded attempt. The clock is re-checked
- * right before the prepare, so a timed-out attempt never dispatches; a
- * prepare that answers after the deadline is aborted `timedOut`.
- */
-function prepareAttempt<P extends PreparedTxn>(write: PreparedWrite<unknown, P>): Promise<P> {
-  const ms = Math.min(JOURNAL_DEADLINE_MS, write.budget?.remaining() ?? JOURNAL_DEADLINE_MS);
-  if (ms <= 0) return Promise.reject(journalTimeout("the prepare", JOURNAL_DEADLINE_MS));
-  const started = performance.now();
-  return withJournalDeadline(
-    "the prepare",
-    async () => {
-      if (write.docKey !== undefined) {
-        const ready = await journalDocumentReady(write.docKey);
-        if (!ready.ok) throw ready.refusal;
-      }
-      const send = () => {
-        if (performance.now() - started >= ms) throw journalTimeout("the prepare", ms);
-        return write.prepare();
-      };
-      return write.turn ? write.turn(async () => send()) : send();
-    },
-    ms,
-    (late) => void abort(late.txn, "timedOut"),
-  );
 }
 
 /** Run the effects step: its extras, or the error it threw (synchronously or not). */
@@ -276,7 +228,7 @@ async function settleEffects(
 async function recoverFromThrownApply<T, P extends PreparedTxn>(
   write: PreparedWrite<T, P>,
   prepared: P,
-  { basis, report, aborted }: { basis: string | null; report: (durable: boolean) => void; aborted: Aborted<T> },
+  { ctx, aborted }: { ctx: CommitContext; aborted: Aborted<T> },
   error: unknown,
 ): Promise<ControlledOutcome<T>> {
   let postimage: string;
@@ -284,11 +236,11 @@ async function recoverFromThrownApply<T, P extends PreparedTxn>(
     postimage = write.recover(prepared);
   } catch (readError) {
     journalWarn("an apply failed and the document could not be read back; its transaction stays open:", error, readError);
-    report(false);
+    ctx.report(false);
     return { status: "recoveryRequired", error, txn: prepared.txn };
   }
   if (postimage === write.preimage) return aborted("applyRefused", { error });
   journalWarn("an apply failed part-way; committing the text the document now holds:", error);
-  const landed = await commit(prepared, postimage, basis, report);
+  const landed = await commit(ctx, postimage);
   return { status: "appliedWithError", error, postimage, revision: prepared.revision, ...landed };
 }

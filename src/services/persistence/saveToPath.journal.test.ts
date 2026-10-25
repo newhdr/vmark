@@ -1,4 +1,4 @@
-// WI-AL1.4 — every successful save is captured in the agent edit journal and the outcome reports journaled yes/pending/no: editor-domain text (not the file's CRLF/BOM bytes), author human vs the initiator that asked, a save during a held prepare reported pending, a capture failure never failing the save, the journal revision handed to the "mcp" history snapshot, and nothing captured for a save that wrote nothing
+// WI-AL1.4 — every successful save is captured in the agent edit journal and the outcome reports journaled yes/pending/no: editor-domain text (not the file's CRLF/BOM bytes), author human vs the initiator that asked, a save during a held prepare reported pending, a capture failure never failing the save, the journal revision handed to the "mcp" history snapshot, and nothing captured for a save that wrote nothing | AL2.2g: the agent writes a save races are driven on the journal fake directly; the window's request protocol is not under test here
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("@tauri-apps/plugin-fs", async () => {
@@ -19,7 +19,6 @@ import { ROOT, editDoc, openDocInTab, resetTier0 } from "@/test/tier0/harness";
 import { agentJournalFake } from "@/test/agentJournalFake";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
 import { journalActorFor } from "@/services/agentJournal/journalActor";
-import { commitControlledWrite, prepareControlledWrite } from "@/services/agentJournal/journalClient";
 import { rememberJournalBasis } from "@/services/agentJournal/documentIdentity";
 import { imeToast } from "@/services/ime/imeToast";
 import { saveToPath, saveToPathForMcp } from "./saveToPath";
@@ -75,7 +74,7 @@ describe("save capture in the agent edit journal", () => {
   it("reports pending for a save while another write holds the document", async () => {
     const tabId = await openDocInTab(DOC, "base\n");
     agentJournalFake.holdNextPrepare();
-    void prepareControlledWrite({
+    void agentJournalFake.prepareControlledWrite({
       docKey: KEY, parent: null, preimage: "base\n", actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write", baselineProvenance: null, baselineTouched: false,
     });
     const outcome = await saveToPathForMcp(tabId, DOC, "base 2\n", "workspace.save", TEST_ATTRIBUTION);
@@ -111,10 +110,10 @@ describe("save capture in the agent edit journal", () => {
     statefulFs.stubCommand("atomic_write_file", () => new Promise<void>((resolve) => (finishWrite = resolve)));
     const saving = saveToPath(tabId, DOC, "abc\n");
     await vi.waitFor(() => expect(finishWrite).not.toBeNull());
-    const p = await prepareControlledWrite({
+    const p = await agentJournalFake.prepareControlledWrite({
       docKey: KEY, parent: base, preimage: "ab\n", actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write", baselineProvenance: null, baselineTouched: false,
     });
-    rememberJournalBasis(tabId, KEY, (await commitControlledWrite(p.txn, "AGENT\n")).revision);
+    rememberJournalBasis(tabId, KEY, (await agentJournalFake.commitControlledWrite(p.txn, "AGENT\n")).revision);
     finishWrite!();
     expect(await saving).toBe(true);
     expect(captures().at(-1)).toMatchObject({ postimage: "abc\n", observedParent: { ref: "revision", revision: base } });
@@ -134,10 +133,10 @@ describe("save capture in the agent edit journal", () => {
 
   it("records document.write's save with the agent as author and its written revision claimed", async () => {
     const tabId = await openDocInTab(DOC, "a\n");
-    const p = await prepareControlledWrite({
+    const p = await agentJournalFake.prepareControlledWrite({
       docKey: KEY, parent: null, preimage: "a\n", actor: journalActorFor(TEST_ATTRIBUTION), tool: "document.write", baselineProvenance: null, baselineTouched: false,
     });
-    const written = (await commitControlledWrite(p.txn, "写入\n")).revision;
+    const written = (await agentJournalFake.commitControlledWrite(p.txn, "写入\n")).revision;
     rememberJournalBasis(tabId, KEY, written);
     const outcome = await saveToPathForMcp(tabId, DOC, "写入\n", "document.write", TEST_ATTRIBUTION);
     expect(outcome).toMatchObject({ ok: true, journaled: "yes" });

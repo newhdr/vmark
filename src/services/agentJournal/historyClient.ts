@@ -7,8 +7,10 @@
  * Key decisions:
  *   - Same wire rules as `journalClient.ts`: one JSON string payload,
  *     decimal-string generations and sequence numbers, a malformed reply
- *     refused as `JOURNAL_UNAVAILABLE`; each restore prepare is one logical
- *     request with its own `requestId`, and its reply is decoded losslessly.
+ *     refused as `JOURNAL_UNAVAILABLE`. A restore prepare is one logical
+ *     request sent through the same coordinator as an agent write
+ *     (`journalRequest.ts`): frozen payload, page identity, bound reply,
+ *     abandon; its reply is decoded losslessly.
  *   - An entry's actor is reduced to the label the panel shows (the
  *     session label, else the client's declared name); the journal keeps
  *     the full attribution.
@@ -17,21 +19,11 @@
  * @module services/agentJournal/historyClient
  */
 
-import type { PreparedTxn } from "./journalClient";
+import type { PreparedTxn, PrepareSpec } from "./journalClient";
 import { parseJournalActor, type JournalActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
 import type { CaptureId } from "./provenance/captureId";
-import {
-  callJournal,
-  freezePreparePayload,
-  isDecimal,
-  isNullableString,
-  isObject,
-  isString,
-  malformed,
-  mintRequestId,
-  parsePreparedTxn,
-} from "./journalIpc";
+import { callJournal, isDecimal, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
 
 /** What a restore puts back: a revision, an uncommitted entry's preimage, or a pre-journal checkpoint. */
 export type RestoreSource =
@@ -80,11 +72,9 @@ export function parseRestorePrepared(command: string, r: unknown): PreparedResto
   return { ...prepared, text: r.text, resolves: r.resolves };
 }
 
-/** Prepare a restore, as one new logical request. Rejects with a `JournalRefusal`. */
-export async function prepareRestore(input: RestorePrepareInput): Promise<PreparedRestore> {
-  const command = "agent_journal_restore_prepare";
-  const payload = freezePreparePayload(input, mintRequestId());
-  return parseRestorePrepared(command, await callJournal(command, { payload }));
+/** A restore's prepare request, sent by the request coordinator like an agent write's (`journalRequest.ts`). */
+export function restorePrepare(input: RestorePrepareInput): PrepareSpec<PreparedRestore> {
+  return { command: "agent_journal_restore_prepare", fields: input, parse: parseRestorePrepared };
 }
 
 function entryOf(command: string, row: unknown): UncommittedEntry {

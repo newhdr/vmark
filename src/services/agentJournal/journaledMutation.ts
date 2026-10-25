@@ -22,8 +22,10 @@
  *   - Provenance: the apply forks the window in the same synchronous step,
  *     so the mutation's own change is never certified as a person's. Forks
  *     are recorded at the committed revision; an abort records the freeze at
- *     the baseline its prepare recorded; anything left unsettled is
- *     invalidated (the first settlement wins).
+ *     the baseline its prepare recorded; a refusal releases the freeze only
+ *     when its disposition says so (the journal proved nothing was
+ *     admitted, or nothing was sent: `journalRequest.ts`); anything left
+ *     unsettled is invalidated.
  *   - An apply that throws is read back through `recover`, never assumed
  *     undone: a changed buffer bumps the tab's MCP revision (the store may
  *     have thrown before its own bump), forks like an applied text, and is
@@ -56,7 +58,7 @@
  */
 
 import { useRevisionStore } from "@/stores/documentStore";
-import type { AbortReason, CommitExtras, PreparedTxn } from "./journalClient";
+import type { AbortReason, CommitExtras, PreparedTxn, PrepareSpec } from "./journalClient";
 import { runPreparedWrite } from "./controlledMutation";
 import { JournalRefusal } from "./journalRefusal";
 import { JOURNAL_PREAPPLY_BUDGET_MS, journalTimeout, settleWithin, startJournalBudget } from "./journalDeadline";
@@ -108,7 +110,8 @@ export interface JournaledMutation<T, P extends PreparedTxn, O> {
   retryHint: string;
   /** After the provenance payload was awaited: why the tab must not be prepared now, or `null`. */
   recheck?: () => AbortReason | null;
-  prepare: (baseline: MutationBaseline) => Promise<P>;
+  /** The prepare request (`controlledPrepare`, `restorePrepare`); the coordinator sends it. */
+  prepare: (baseline: MutationBaseline) => Promise<PrepareSpec<P>> | PrepareSpec<P>;
   /** After the prepare ack, synchronously: why the mutation must not go ahead, or `null`. */
   verify: (prepared: P) => AbortReason | null;
   /** Apply now, synchronously; `postimage` is the text the store then holds. */
@@ -122,22 +125,12 @@ export interface JournaledMutation<T, P extends PreparedTxn, O> {
 
 /** `run()`, or a rejection once `EFFECTS_DEADLINE_MS` passes without it settling. */
 function withinEffectsDeadline(run: () => Promise<CommitExtras>): Promise<CommitExtras> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`the commit effects did not settle within ${EFFECTS_DEADLINE_MS} ms`)),
-      EFFECTS_DEADLINE_MS,
-    );
-    new Promise<CommitExtras>((settle) => settle(run())).then(
-      (extras) => {
-        clearTimeout(timer);
-        resolve(extras);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the commit effects did not settle within ${EFFECTS_DEADLINE_MS} ms`)), EFFECTS_DEADLINE_MS);
   });
+  const running = new Promise<CommitExtras>((settle) => settle(run()));
+  return Promise.race([running, expired]).finally(() => clearTimeout(timer));
 }
 
 /** Run one journaled mutation of `m.tabId`; the outcome mapper's answer. Rethrows an apply that threw with nothing changed. */
@@ -163,9 +156,17 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     else rememberJournalBasis(tabId, docKey, basis);
   };
   const { effects } = m;
+  // The freeze's settlement this coordinator chose; the `finally` invalidates only an unsettled one.
+  let freezeSettled = false;
+  const releaseFreeze = (): void => {
+    freezeSettled = true;
+    freeze?.release();
+  };
   try {
     const frozen = freeze ? await settleWithin(freeze.payload(parent), budget.remaining()) : { value: null };
     if (frozen === null) {
+      // Nothing was sent: a client-side refusal releases.
+      releaseFreeze();
       return await m.outcome({ status: "refused", refusal: journalTimeout("the provenance freeze", JOURNAL_PREAPPLY_BUDGET_MS) });
     }
     const named = frozen.value;
@@ -207,6 +208,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     });
 
     if (outcome.status === "refused") {
+      if (outcome.disposition === "release") releaseFreeze();
       if (outcome.refusal.journalCode === "STALE_PARENT") settleBasis(null);
       return await m.outcome({ status: "refused", refusal: outcome.refusal });
     }
@@ -216,7 +218,10 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     }
     settleBasis(outcome.basis);
     if (outcome.status === "aborted") {
-      if (outcome.basis !== null) freeze?.recorded(outcome.basis);
+      if (outcome.basis !== null) {
+        freezeSettled = true;
+        freeze?.recorded(outcome.basis);
+      }
       if (outcome.thrown) throw outcome.thrown.error;
       return await m.outcome({ status: "aborted", reason: outcome.reason });
     }
@@ -228,6 +233,6 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
   } finally {
     // The first settlement wins, so this only reaches what nothing recorded.
     for (const f of forks) f.invalidate();
-    freeze?.invalidate();
+    if (!freezeSettled) freeze?.invalidate();
   }
 }

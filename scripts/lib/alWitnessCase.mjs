@@ -1,7 +1,7 @@
 /**
  * Purpose: select ONE named test case in a test file — a vitest case by its
- *   exact title, a Rust test fn by its name — and reduce the file to the code
- *   that case alone reaches: the evidence a witness row's assertions are
+ *   exact title, a Rust test fn by its name, an e2e journey by its `name` —
+ *   and reduce the file to the code that case alone reaches: the evidence a witness row's assertions are
  *   matched against (scripts/al-witness.mjs).
  *
  * A witness must be a case that runs on its own and runs once, so these are
@@ -15,6 +15,10 @@
  *   - Rust: no test fn of that name cargo runs on this host (an ignored or
  *     compiled-out fn gives its reason, a plain fn says it is not a test, a
  *     name only in a comment or a string says so); more than one.
+ *   - e2e journey (e2e/journeys/NN-*.mjs, one journey per file): a default
+ *     export that is not one object literal, a `name` that is not the title's
+ *     string literal, or no inline `run`. The evidence is that export's own
+ *     text and what `run` reaches; the journey's name is blanked like a title.
  * The case's own name — the vitest title, the Rust fn's identifier — is blanked
  * from the reach: a title such as `revert_preserves_…` would otherwise satisfy
  * an assertion like `revert\w*\(` that only a call in the body should.
@@ -30,7 +34,7 @@ import ts from "typescript";
 import { parseSource, testRoots } from "./dodSyntaxTs.mjs";
 import { oneFileChecker } from "./dodSyntaxRegister.mjs";
 import { vitestCall } from "./dodSyntaxVitest.mjs";
-import { rustFnReach, tsCaseReach } from "./dodSyntaxReach.mjs";
+import { rustFnReach, tsCaseReach, tsRootReach } from "./dodSyntaxReach.mjs";
 import { rustReachRoots } from "./dodSyntaxRustReach.mjs";
 import { rustCode } from "./rustSource.mjs";
 
@@ -127,4 +131,37 @@ export function rustWitnessCase(source, name) {
   if (new RegExp(`\\bfn\\s+${name}\\b`).test(rustCode(source))) return { error: `fn ${name} is not a #[test] fn cargo runs` };
   if (source.includes(name)) return { error: `${name} appears only in a comment or a string, not as a test fn` };
   return { error: `no test fn is named ${name}` };
+}
+
+/** The value of property `key` in the object literal `obj`, or null; a method counts as its own value. */
+const property = (obj, key) => obj.properties.find((p) => p.name && ts.isIdentifier(p.name) && p.name.text === key) ?? null;
+
+/**
+ * `{ reach }` — an e2e journey module (one journey per file, run by
+ * e2e/run-journeys.mjs) reduced to what its default export and its `run`
+ * reach, when that export is an object literal whose `name` is the string
+ * `title` — or `{ error }` saying what the file holds instead.
+ */
+export function e2eWitnessCase(file, source, title) {
+  const sf = parseSource(file, source);
+  const diagnostics = sf.parseDiagnostics ?? [];
+  if (diagnostics.length > 0) {
+    const d = diagnostics[0];
+    const line = sf.getLineAndCharacterOfPosition(d.start ?? 0).line + 1;
+    return { error: `the file does not parse cleanly (line ${line}: ${ts.flattenDiagnosticMessageText(d.messageText, " ")})` };
+  }
+  const exports = sf.statements.filter((s) => ts.isExportAssignment(s) && !s.isExportEquals);
+  const obj = exports.length === 1 && ts.isObjectLiteralExpression(exports[0].expression) ? exports[0].expression : null;
+  if (!obj) return { error: `a journey's default export must be one object literal \`{ name, run }\` (found ${exports.length} default export(s))` };
+  const name = property(obj, "name");
+  const value = name && ts.isPropertyAssignment(name) && ts.isStringLiteralLike(name.initializer) ? name.initializer : null;
+  if (!value) return { error: "the journey's `name` is not a string literal" };
+  if (value.text !== title) {
+    const where = source.includes(title) ? `; "${title}" appears only in a comment or a string` : "";
+    return { error: `the journey is named "${value.text}", not "${title}"${where}` };
+  }
+  const run = property(obj, "run");
+  const body = run && ts.isMethodDeclaration(run) ? run : run && ts.isPropertyAssignment(run) && ts.isFunctionLike(run.initializer) ? run.initializer : null;
+  if (!body?.body) return { error: "the journey has no inline `run` function — its body is the evidence" };
+  return { reach: blank(tsRootReach(sf, source, exports[0], body), value.getStart(sf), value.getEnd()) };
 }

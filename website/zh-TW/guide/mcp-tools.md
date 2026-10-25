@@ -238,7 +238,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 
 當使用者在顯示該分頁的 WYSIWYG 編輯器中以輸入法（IME）組字時，寫入會以 `BUSY` 被拒絕，且不做任何變更：組字中的文字在確認之前屬於輸入法。請稍後再試。在原始碼模式下，寫入會被接受，並在組字結束後顯示於編輯器中。
 
-每次寫入在任何變更發生之前，都會先記入 VMark 的代理程式編輯日誌。成功回應包含 `applied: true` 與 `durable`：`durable: false` 表示內容已寫入，但其日誌記錄尚未能儲存——VMark 會在背景重試，在此之前對該文件的下一次寫入會以 `JOURNAL_DEGRADED` 被拒絕。如果日誌直接拒絕該記錄，寫入仍保持已套用，並作為未記錄的寫入記入日誌，下一次寫入照常進行。以下情況寫入會被拒絕且不做任何變更：同一文件的另一次寫入正在記錄時傳回 `JOURNAL_BUSY`（顯示同一檔案的兩個視窗共用一份文件）；另一個視窗在本分頁上次寫入之後寫過該文件時傳回 `STALE_PARENT`（請重新讀取後再試）；日誌未執行時傳回 `JOURNAL_UNAVAILABLE`；`content` 含有孤立的 UTF-16 代理字元時傳回 `INVALID_TEXT`。若在記錄寫入期間使用者編輯了文件、關閉了分頁、開始以輸入法組字，或移動了選取範圍（未指定 `tabId` 時則是切換了分頁），寫入會以 `ABORTED` 及 `reason`（`edited`、`closed`、`composing`、`selection`）被拒絕，且不做任何變更；請重新讀取後再試。帶有 `applied: true` 的 `INTERNAL` 錯誤則不同：寫入已變更文件之後編輯器出錯，此時文件中的文字已被記錄（`durable` 含義同上，`current_revision` 為文件的修訂版本）；再次寫入前請重新讀取。寫入失敗後不帶 `applied` 的 `INTERNAL` 錯誤表示文件可能已被部分變更，同樣請重新讀取。
+每次寫入在任何變更發生之前，都會先記入 VMark 的代理程式編輯日誌。成功回應包含 `applied: true` 與 `durable`：`durable: false` 表示內容已寫入，但其日誌記錄尚未能儲存——VMark 會在背景重試，在此之前對該文件的下一次寫入會以 `JOURNAL_DEGRADED` 被拒絕。如果日誌直接拒絕該記錄，寫入仍保持已套用，並作為未記錄的寫入記入日誌，下一次寫入照常進行。以下情況寫入會被拒絕且不做任何變更：同一文件的另一次寫入正在記錄時傳回 `JOURNAL_BUSY`（顯示同一檔案的兩個視窗共用一份文件）；另一個視窗在本分頁上次寫入之後寫過該文件時傳回 `STALE_PARENT`（請重新讀取後再試）；日誌未執行或未能及時回應時傳回 `JOURNAL_UNAVAILABLE`；`content` 含有孤立的 UTF-16 代理字元時傳回 `INVALID_TEXT`。若在記錄寫入期間使用者編輯了文件、關閉了分頁、開始以輸入法組字，或移動了選取範圍（未指定 `tabId` 時則是切換了分頁），寫入會以 `ABORTED` 及 `reason`（`edited`、`closed`、`composing`、`selection`）被拒絕，且不做任何變更；請重新讀取後再試。帶有 `applied: true` 的 `INTERNAL` 錯誤則不同：寫入已變更文件之後編輯器出錯，此時文件中的文字已被記錄（`durable` 含義同上，`current_revision` 為文件的修訂版本）；再次寫入前請重新讀取。寫入失敗後不帶 `applied` 的 `INTERNAL` 錯誤表示文件可能已被部分變更，同樣請重新讀取。
 
 ### `transform`
 

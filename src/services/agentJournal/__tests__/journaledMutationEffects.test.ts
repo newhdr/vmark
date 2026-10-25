@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe("runJournaledMutation — provenance", () => {
   function source(payloadDelay?: () => void) {
-    const freeze = { touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: <T>(send: () => Promise<T>) => send(), payload: vi.fn(async () => (payloadDelay?.(), null)), recorded: vi.fn(), invalidate: vi.fn() };
+    const freeze = { touched: true, capture: { view: "v", session: "s", seq: "1" }, inTurn: <T>(send: () => Promise<T>) => send(), payload: vi.fn(async () => (payloadDelay?.(), null)), recorded: vi.fn(), invalidate: vi.fn(), release: vi.fn() };
     const forks: Array<{ text: string; recorded: ReturnType<typeof vi.fn>; invalidate: ReturnType<typeof vi.fn> }> = [];
     registerUnsavedProvenanceSource(TAB, {
       freeze: () => freeze,
@@ -136,8 +136,11 @@ describe("runJournaledMutation — the effects hook", () => {
   });
 
   it("a hook that never settles is cut off at the deadline: committed, answered applied with error", async () => {
-    vi.useFakeTimers();
+    // Timers only: the prepare's payload digest is real async work the clock must not outrun.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const pending = runJournaledMutation(mutation({ effects: () => new Promise<CommitExtras>(() => {}) }));
+    for (let i = 0; i < 1000 && content() !== "after"; i += 1) await new Promise((r) => setImmediate(r));
+    expect(content()).toBe("after");
     await vi.advanceTimersByTimeAsync(EFFECTS_DEADLINE_MS - 1);
     expect(ops()).toEqual(["prepare"]);
     await vi.advanceTimersByTimeAsync(1);

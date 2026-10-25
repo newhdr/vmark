@@ -12,7 +12,7 @@
 // is wired to) reject with that same wire error read by the real parser.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.unmock("@/services/agentJournal/journalClient");
+vi.unmock("@/services/agentJournal/journalTransport");
 vi.mock("@tauri-apps/plugin-fs", async () => {
   const { statefulFs } = await import("@/test/statefulFsFake");
   return statefulFs.fsModule();

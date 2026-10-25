@@ -1,10 +1,15 @@
 // @vitest-environment node
-// WI-AL1.6 — the history panel's IPC client: a restore prepare sends one JSON string and returns the text to apply (with the overwritten buffer's baseline and the uncommitted entry it resolves); uncommitted entries are listed with their preview and discarded by document key; malformed replies and refusals become JournalRefusal
+// WI-AL1.6 — the history panel's IPC client: a restore prepare sends one JSON string and returns the text to apply (with the overwritten buffer's baseline and the uncommitted entry it resolves); uncommitted entries are listed with their preview and discarded by document key; malformed replies and refusals become JournalRefusal; the restore prepare runs as a request with a frozen payload and a bound reply (WI-AL2.2g)
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.unmock("@/services/agentJournal/journalTransport");
 
 import { invoke } from "@tauri-apps/api/core";
 import { JournalRefusal } from "../journalRefusal";
-import { discardUncommitted, listUncommitted, prepareRestore, type RestorePrepareInput } from "../historyClient";
+import { discardUncommitted, listUncommitted, restorePrepare, type RestorePrepareInput } from "../historyClient";
+import { runPrepareRequest } from "../journalRequest";
+import { resetPageRegistration } from "../pageRegistration";
+import { boundPrepare, digestOf, requestAnswer, scriptWire } from "./journalWire";
 
 const invokeMock = vi.mocked(invoke);
 const TXN = "0190d3c4-0000-7000-8000-000000000001";
@@ -22,20 +27,43 @@ const input: RestorePrepareInput = {
 
 const prepared = { doc: DOC, txn: TXN, revision: REV, generation: "18446744073709551615", baseline: REV, text: "", resolves: TXN };
 
-beforeEach(() => invokeMock.mockReset());
+beforeEach(() => {
+  resetPageRegistration();
+  wire = scriptWire();
+});
 
-describe("prepareRestore", () => {
-  it("sends one JSON string and returns the text to apply, the baseline and what it resolves", async () => {
-    invokeMock.mockResolvedValueOnce(prepared);
+type Wire = ReturnType<typeof scriptWire>;
+let wire: Wire;
+const RESTORE = "agent_journal_restore_prepare";
+
+/** Run one restore prepare request; its prepared restore, or its refusal thrown. */
+async function prepareRestore(fields: RestorePrepareInput) {
+  const run = await runPrepareRequest({ build: () => restorePrepare(fields) });
+  if (!run.ok) throw run.refusal;
+  run.finish();
+  return run.prepared;
+}
+
+describe("restorePrepare", () => {
+  it("a restore sends a frozen payload and checks its bound reply", async () => {
+    wire.on(RESTORE, (a) => boundPrepare(String(a.payload), prepared));
     const p = await prepareRestore(input);
-    const { payload } = invokeMock.mock.calls[0][1] as { payload: string };
-    const { requestId } = JSON.parse(payload) as { requestId: string };
-    expect(invokeMock).toHaveBeenCalledWith("agent_journal_restore_prepare", { payload: JSON.stringify({ ...input, requestId }) });
+    const [sent] = wire.payloadsOf(RESTORE);
+    const fields: Record<string, unknown> = JSON.parse(sent);
+    const { requestId, incarnation, webviewGeneration, pageIdentity } = fields;
+    expect(wire.argsOf(RESTORE)).toEqual([{ payload: JSON.stringify({ ...input, requestId, incarnation, webviewGeneration, pageIdentity }) }]);
+    expect(pageIdentity).toBe(wire.argsOf("agent_journal_register_page")[0].pageIdentity);
     expect(p).toEqual(prepared);
   });
 
+  it("a restore reply bound to another request is not trusted", async () => {
+    wire.on(RESTORE, async (a) => ({ bind: { requestId: "other", digest: await digestOf(String(a.payload)) }, reply: prepared }));
+    await expect(prepareRestore(input)).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE", uncertain: true });
+    expect(wire.payloadsOf("agent_journal_abandon")).toEqual([wire.payloadsOf(RESTORE)[0]]);
+  });
+
   it("accepts an empty text to restore and no baseline", async () => {
-    invokeMock.mockResolvedValueOnce({ ...prepared, baseline: null, resolves: null });
+    wire.on(RESTORE, (a) => boundPrepare(String(a.payload), { ...prepared, baseline: null, resolves: null }));
     expect(await prepareRestore(input)).toMatchObject({ text: "", baseline: null, resolves: null });
   });
 
@@ -46,15 +74,15 @@ describe("prepareRestore", () => {
     ["a malformed resolves", { ...prepared, resolves: 5 }],
     ["null", null],
   ])("refuses %s as JOURNAL_UNAVAILABLE", async (_label, reply) => {
-    invokeMock.mockResolvedValueOnce(reply);
+    wire.on(RESTORE, (a) => boundPrepare(String(a.payload), reply));
     await expect(prepareRestore(input)).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });
   });
 
   it("reads a rejection as a JournalRefusal", async () => {
-    invokeMock.mockRejectedValueOnce({ code: "conflict", message: "stale", detail: { journalCode: "STALE_PARENT" } });
+    wire.on(RESTORE, (a) => requestAnswer(String(a.payload), "STALE_PARENT", false, { state: "notAdmitted" }).then((e) => Promise.reject(e)));
     const err = await prepareRestore(input).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(JournalRefusal);
-    expect((err as JournalRefusal).journalCode).toBe("STALE_PARENT");
+    expect(err).toMatchObject({ journalCode: "STALE_PARENT", uncertain: false });
   });
 });
 

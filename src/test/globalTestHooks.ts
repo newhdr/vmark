@@ -16,6 +16,7 @@ import { signalMenuCommandsMounted } from "@/services/commands/menuCommandsReady
 import { signalCloseListenersMounted } from "@/services/windowClose/closeListenersReady";
 import { resetWindowListeningForTest } from "@/contexts/windowListening";
 import { agentJournalFake } from "./agentJournalFake";
+import { abandonSpy } from "./agentJournalWireFake";
 import { agentJournalEpochFake } from "./agentJournalEpochFake";
 import { resetJournalBases } from "@/services/agentJournal/documentIdentity";
 // Keep this file's imports light: a module loaded here is loaded before any
@@ -26,10 +27,12 @@ import { resetJournalBases } from "@/services/agentJournal/documentIdentity";
 // Every bridge write goes through the agent edit journal's IPC client; the
 // global `invoke` stub answers `undefined`, which the client rightly reads as
 // an unavailable journal. The in-memory fake (same reservation, parent CAS,
-// baseline and degraded-queue rules as the Rust writer) is the default, so a
-// test about saving or editing does not have to know the journal exists. The
-// client's own suite opts out with `vi.unmock`.
-vi.mock("@/services/agentJournal/journalClient", () => import("./agentJournalFake").then((m) => m.journalClientModule()));
+// baseline and degraded-queue rules as the Rust writer) answers the journal's
+// wire (`agentJournalWireFake.ts`), so a test about saving or editing does not
+// have to know the journal exists, while the real client, page registration
+// and request coordinator still run. Suites that script raw `invoke` opt out
+// with `vi.unmock`.
+vi.mock("@/services/agentJournal/journalTransport", () => import("./agentJournalWireFake").then((m) => m.journalTransportModule()));
 // The epoch calls a tab's provenance session makes, on the same fake journal.
 vi.mock("@/services/agentJournal/epochClient", () => import("./agentJournalEpochFake").then((m) => m.epochClientModule()));
 
@@ -62,6 +65,7 @@ beforeEach(() => {
   // window never announced would leave the next one's surfaces held back.
   resetWindowListeningForTest();
   agentJournalFake.reset();
+  abandonSpy.mockClear();
   agentJournalEpochFake.reset();
   resetJournalBases();
 });

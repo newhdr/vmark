@@ -44,7 +44,7 @@
  *     key that changed while it was computed.
  *
  * @coordinates-with services/agentJournal/journaledMutation.ts — the coordinator
- * @coordinates-with services/agentJournal/controlledMutation.ts — the controlled prepare
+ * @coordinates-with services/agentJournal/journalRequest.ts — sends the controlled prepare
  * @coordinates-with services/agentJournal/selectionCertificate.ts — the certificate of `change`
  * @coordinates-with services/agentJournal/review/declaredScript.ts — the certificate of `target` (loaded on first use)
  * @coordinates-with writeTarget.ts — the re-verify
@@ -54,8 +54,7 @@
 
 import type { McpWriteContext } from "@/services/mcpBridge/writeContext";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
-import { prepareControlledWrite, type AbortReason, type CommitExtras } from "@/services/agentJournal/journalClient";
-import { prepareWithBaselineRetry } from "@/services/agentJournal/controlledMutation";
+import { controlledPrepare, type AbortReason, type CommitExtras } from "@/services/agentJournal/journalClient";
 import { runJournaledMutation, type JournaledOutcome } from "@/services/agentJournal/journaledMutation";
 import { journalActorFor } from "@/services/agentJournal/journalActor";
 import { journalTabLife } from "@/services/agentJournal/documentIdentity";
@@ -167,20 +166,17 @@ export async function runJournaledEdit<T>(
     recheck: () => recheckWriteTarget(target),
     prepare: async (baseline) => {
       const certificate = await certificateFor(edit, baseline.preimage);
-      return prepareWithBaselineRetry(
-        {
-          docKey: baseline.docKey,
-          parent: baseline.parent,
-          preimage: baseline.preimage,
-          actor: journalActorFor(edit.context.attribution),
-          tool: edit.tool,
-          baselineProvenance: baseline.baselineProvenance,
-          baselineTouched: baseline.baselineTouched,
-          ...(certificate ? { certificate } : {}),
-          ...(baseline.capture && { capture: baseline.capture }),
-        },
-        prepareControlledWrite,
-      );
+      return controlledPrepare({
+        docKey: baseline.docKey,
+        parent: baseline.parent,
+        preimage: baseline.preimage,
+        actor: journalActorFor(edit.context.attribution),
+        tool: edit.tool,
+        baselineProvenance: baseline.baselineProvenance,
+        baselineTouched: baseline.baselineTouched,
+        ...(certificate ? { certificate } : {}),
+        ...(baseline.capture && { capture: baseline.capture }),
+      });
     },
     verify: () => reverifyWriteTarget(target),
     apply: edit.apply,

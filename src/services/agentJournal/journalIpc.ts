@@ -2,15 +2,23 @@
  * Journal IPC — the shared call and reply-shape helpers of the agent edit
  * journal's clients: every rejection is read as a `JournalRefusal`, a reply
  * that is not the expected shape is refused as `JOURNAL_UNAVAILABLE`, and a
- * prepare's payload is frozen once under its request id.
+ * prepare's payload is frozen once under its request id and page pair.
+ *
+ * Key decisions:
+ *   - A bound reply (`{bind, reply}`) is checked against what was sent
+ *     before its reply is read: a bind that differs in any field, or has a
+ *     field too many, is malformed, never a confirmation of this request.
+ *   - A prepare's or abandon's refusal is validated here, at the boundary,
+ *     into `JournalRefusal.settlement` (`journalSettlement.ts`).
  *
  * @coordinates-with services/agentJournal/journalClient.ts — the controlled-write calls
  * @coordinates-with services/agentJournal/historyClient.ts — the history panel's calls
  * @module services/agentJournal/journalIpc
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invokeJournal } from "./journalTransport";
 import { JournalRefusal, toJournalRefusal } from "./journalRefusal";
+import { settleRequestRefusal, type RequestExpectation } from "./journalSettlement";
 import { isDecimalU64 } from "./provenance/payload";
 
 export const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
@@ -64,20 +72,58 @@ export function mintRequestId(): string {
   return crypto.randomUUID();
 }
 
-/**
- * A prepare's payload, serialized once: its fields, then `requestId`. The
- * journal digests these exact bytes, so a retry of the same logical request
- * must resend this string unchanged, never re-serialize the fields.
- */
-export function freezePreparePayload(fields: object, requestId: string): string {
-  return JSON.stringify({ ...fields, requestId });
+/** The registered page a request is sent for: the writer's incarnation and the page pair. */
+export interface PageIdentityFields {
+  incarnation: string;
+  /** Decimal string, opaque: never read as a number. */
+  webviewGeneration: string;
+  /** 32 lowercase hex. */
+  pageIdentity: string;
 }
 
-/** Invoke a journal command; a rejection is rethrown as a `JournalRefusal`. */
-export async function callJournal(command: string, args: Record<string, string>): Promise<unknown> {
+/**
+ * A prepare's payload `P`, serialized once: its fields, then `requestId`
+ * and the page identity. The journal digests these exact bytes, so a retry
+ * of the same logical request, and its abandon, resend this string
+ * unchanged, never re-serialize the fields.
+ */
+export function freezePreparePayload(fields: object, requestId: string, page: PageIdentityFields): string {
+  const { incarnation, webviewGeneration, pageIdentity } = page;
+  return JSON.stringify({ ...fields, requestId, incarnation, webviewGeneration, pageIdentity });
+}
+
+/** Lowercase hex SHA-256 of `text`'s UTF-8 bytes: the digest the journal computes of `P`. */
+export async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * The `reply` of a bound answer whose `bind` is exactly `bind`, every
+ * field equal and none extra. Throws `malformed` otherwise.
+ */
+export function parseBound(command: string, r: unknown, bind: Readonly<Record<string, string>>): unknown {
+  if (!isObject(r) || !isObject(r.bind) || !("reply" in r)) throw malformed(command);
+  const got = r.bind;
+  const keys = Object.keys(bind);
+  const same = Object.keys(got).length === keys.length && keys.every((k) => got[k] === bind[k]);
+  if (!same) throw malformed(command);
+  return r.reply;
+}
+
+/**
+ * Invoke a journal command; a rejection is rethrown as a `JournalRefusal`.
+ * With `expect` (a prepare or abandon), the refusal carries its validated
+ * `settlement`.
+ */
+export async function callJournal(command: string, args: Record<string, unknown>, expect?: RequestExpectation): Promise<unknown> {
   try {
-    return await invoke<unknown>(command, args);
+    return await invokeJournal(command, args);
   } catch (error) {
-    throw toJournalRefusal(error);
+    const refusal = toJournalRefusal(error);
+    if (!expect) throw refusal;
+    const { journalCode, message, head, field, uncertain, hunk, block } = refusal;
+    const settlement = settleRequestRefusal(error, expect);
+    throw new JournalRefusal(journalCode, message, head, field, { uncertain, hunk, block, settlement });
   }
 }
