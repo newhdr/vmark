@@ -5,8 +5,10 @@
  * open window into a payload the journal checks against its own texts.
  *
  * Pipeline: attach → edit / defer / gap → freeze(buffer) → payload(basis)
- * → recorded(id) | invalidate(). A recorded freeze is the next window's
- * basis; anything else leaves the next window uncertifiable.
+ * → recorded(id) | invalidate() | release(). A recorded freeze is the next
+ * window's basis; a released one (the journal admitted nothing) is merged
+ * back in front of the window after it; anything else leaves the next
+ * window uncertifiable.
  *
  * Key decisions:
  *   - A view is certified only by a certificate its session issued for it
@@ -23,7 +25,8 @@
  *     head when its text hashes the same as the window's, `genesis` for an
  *     empty document with no head, otherwise nothing.
  *   - Epochs are armed lazily (first change or freeze) and closed once
- *     nothing is left to certify; arm and close run on one serialized
+ *     nothing is left to certify; `freezeArmed` (a hunk revert) never arms
+ *     one, so a refused revert appends no epoch record; arm and close run on one serialized
  *     chain, and an arm that answers after dispose is closed at once.
  *   - Every freeze, the over-budget one included, takes the session's next
  *     capture id and send turn (`captureId.ts`): seqs reach the journal in order.
@@ -36,21 +39,21 @@
  *
  * @coordinates-with services/agentJournal/provenance/epochLease.ts — arming and closing the epoch
  * @coordinates-with services/agentJournal/provenance/window.ts — windows, slots, deferred ranges
+ * @coordinates-with services/agentJournal/provenance/windowChain.ts — the open window and a released freeze's copy
  * @coordinates-with services/agentJournal/provenance/certificates.ts — what a view presents to attach
  * @coordinates-with services/agentJournal/provenance/sessionTypes.ts — the collector, freeze and fork contracts
  * @coordinates-with services/agentJournal/provenanceSessions.ts — one session per tab and document
  * @module services/agentJournal/provenance/session
  */
 
-import type { ArmedEpoch } from "../epochClient";
 import { EpochLease, type SessionJournal } from "./epochLease";
-import { PROVENANCE_CAP } from "./accumulator";
+import { PROVENANCE_CAP, type Provenance } from "./accumulator";
 import { captureMinter, type CaptureId, type CaptureTurn } from "./captureId";
 import { certificateAuthority, type ViewCertificate } from "./certificates";
-import { encodePayload, textHash } from "./payload";
 import type { Section } from "./pieces";
 import type { NamedPayload, ProvenanceCollector, ProvenanceFork, ProvenanceFreeze, SessionOptions } from "./sessionTypes";
-import { composeRanges, isDeferredWhole, openWindow, rangesFit, settleSlot, slotBasis, type BasisSlot, type DeferredOutcome, type ProvenanceWindow } from "./window";
+import { composeRanges, isDeferredWhole, rangesFit, settleSlot, slotBasis, type BasisSlot, type DeferredOutcome, type ProvenanceWindow } from "./window";
+import { certifyWindow, settleHandshake, WindowChain } from "./windowChain";
 
 export type { DeferredOutcome, DeferredRange } from "./window";
 export { ViewCertificate } from "./certificates";
@@ -71,7 +74,7 @@ interface Deferral {
 
 export class ProvenanceSession {
   #text: string;
-  #window: ProvenanceWindow;
+  readonly #chain: WindowChain;
   readonly #initial: { pre: string; slot: BasisSlot };
   #deferral: Deferral | null = null;
   #frozen = 0;
@@ -81,20 +84,18 @@ export class ProvenanceSession {
   /** The collector that last changed the text, and the generation it left. */
   #holder: { owner: object | null; at: number } = { owner: null, at: -1 };
   readonly #lease: EpochLease;
-  readonly #cap: number;
   readonly #maxFrozen: number;
   readonly #warn: SessionOptions["warn"];
   readonly #mintCapture: () => { id: CaptureId; turn: CaptureTurn };
 
   constructor(text: string, journal: SessionJournal, { cap = PROVENANCE_CAP, maxFrozen = MAX_FROZEN_WINDOWS, view = "", warn }: SessionOptions) {
     this.#text = text;
-    this.#lease = new EpochLease(journal, { onArmed: (a) => this.#handshake(a), afterArm: () => this.#maybeClose(), warn });
-    this.#cap = cap;
+    this.#lease = new EpochLease(journal, { onArmed: (a) => settleHandshake(this.#initial, a), afterArm: () => this.#maybeClose(), warn });
     this.#maxFrozen = maxFrozen;
     this.#warn = warn;
     this.#mintCapture = captureMinter(view);
-    this.#window = openWindow(text, { kind: "handshake" }, cap);
-    this.#initial = { pre: text, slot: this.#window.slot };
+    this.#chain = new WindowChain(text, cap);
+    this.#initial = { pre: text, slot: this.#chain.open.slot };
   }
 
   /** A certificate for a fresh view of the session's text, created now, that `owner` presents to attach. */
@@ -105,6 +106,11 @@ export class ProvenanceSession {
   /** The text the session believes the tab holds. */
   get text(): string {
     return this.#text;
+  }
+
+  /** Changes with every change of the text and every break (an uncertified attach included). */
+  get mark(): number {
+    return this.#generation;
   }
 
   attach(owner: object, cert: ViewCertificate | null, origin: string): ProvenanceCollector {
@@ -156,26 +162,36 @@ export class ProvenanceSession {
   }
 
   freeze(buffer: string): ProvenanceFreeze {
+    return this.#freeze(buffer, true);
+  }
+
+  /** A freeze that never arms an epoch: `null` unless one is armed or arming already. */
+  freezeArmed(buffer: string): ProvenanceFreeze | null {
+    return this.#lease.engaged ? this.#freeze(buffer, false) : null;
+  }
+
+  #freeze(buffer: string, arm: boolean): ProvenanceFreeze {
     this.#materialize();
     const { id: capture, turn } = this.#mintCapture();
     if (buffer !== this.#text) {
       this.#setText(buffer);
       this.#breakWhole("snapshotOnly", "freeze:unaligned");
     }
-    const frozen = this.#window;
     const over = this.#frozen >= this.#maxFrozen;
-    this.#window = openWindow(buffer, over ? { kind: "invalid" } : { kind: "pending" }, this.#cap);
+    const owner = {};
+    const frozen = this.#chain.advance(buffer, over ? { kind: "invalid" } : { kind: "pending" }, over ? null : owner);
     if (over) {
       this.#warn("provenance: too many unsettled saves; this one and the next window are snapshot-only");
       return { touched: true, capture, inTurn: turn.run, payload: async () => null, recorded: turn.settle, invalidate: turn.settle, release: turn.settle };
     }
     this.#frozen++;
-    void this.#lease.ensure();
-    const next = this.#window.slot;
+    if (arm) void this.#lease.ensure();
+    const next = this.#chain.open.slot;
     let settled = false;
-    const settle = (id: string | null) => {
+    const settle = (id: string | null, restore = false) => {
       if (settled) return;
       [settled, this.#frozen] = [true, this.#frozen - 1];
+      this.#chain.settle(owner, restore);
       turn.settle();
       settleSlot(next, id);
       this.#maybeClose();
@@ -184,9 +200,9 @@ export class ProvenanceSession {
       touched: frozen.acc.transactions > 0,
       capture,
       inTurn: turn.run,
-      payload: (expected) => this.#payload(frozen, buffer, expected, () => settled),
+      payload: (expected) => this.#payload(frozen, buffer, expected, () => settled, arm),
       recorded: settle,
-      invalidate: () => settle(null), release: () => settle(null),
+      invalidate: () => settle(null), release: () => settle(null, true),
     };
   }
 
@@ -194,8 +210,7 @@ export class ProvenanceSession {
   fork(text: string): ProvenanceFork {
     this.#deferral = null;
     this.#setText(text);
-    this.#window = openWindow(text, { kind: "pending" }, this.#cap);
-    const slot = this.#window.slot;
+    const slot = this.#chain.restart(text);
     return { recorded: (id) => settleSlot(slot, id), invalidate: () => settleSlot(slot, null) };
   }
 
@@ -217,12 +232,10 @@ export class ProvenanceSession {
       return this.#breakWhole("snapshotOnly", `${origin}:unaligned`);
     }
     this.#setText(after);
-    try {
-      this.#window.acc.compose(sections);
-      if (this.#window.acc.lenB !== after.length) throw new Error("sections do not reach the new text");
-    } catch {
-      return this.#breakWhole("snapshotOnly", `${origin}:malformed`);
-    }
+    this.#feed((acc) => {
+      acc.compose(sections);
+      if (acc.lenB !== after.length) throw new Error("sections do not reach the new text");
+    }, `${origin}:malformed`);
     void this.#lease.ensure();
   }
 
@@ -246,15 +259,8 @@ export class ProvenanceSession {
       this.#warn("provenance: deferred range failed", error);
     }
     if (isDeferredWhole(out)) this.#breakWhole(out.whole, out.origin);
-    else if (!rangesFit(out, d.base, d.after) || this.#window.acc.lenB !== d.base.length) this.#breakWhole("snapshotOnly", `${d.origin}:unmatched`);
-    else {
-      try {
-        composeRanges(this.#window.acc, out, d.origin);
-      } catch (error) {
-        this.#warn("provenance: deferred ranges do not compose", error);
-        this.#breakWhole("snapshotOnly", `${d.origin}:unmatched`);
-      }
-    }
+    else if (!rangesFit(out, d.base, d.after) || this.#chain.open.acc.lenB !== d.base.length) this.#breakWhole("snapshotOnly", `${d.origin}:unmatched`);
+    else this.#feed((acc) => composeRanges(acc, out, d.origin), `${d.origin}:unmatched`);
     if (held) this.#own(d.owner);
   }
 
@@ -263,38 +269,30 @@ export class ProvenanceSession {
     this.#generation++;
   }
 
+  /** Apply `op` to every live window; one that refuses it breaks whole under `origin`. */
+  #feed(op: (acc: Provenance) => void, origin: string): void {
+    if (this.#chain.feed(op, this.#text.length, origin, this.#warn)) [this.#generation, this.#deferral] = [this.#generation + 1, null];
+  }
+
   #breakWhole(reason: string, origin: string): void {
     this.#generation++;
     this.#deferral = null;
-    this.#window.acc.breakWhole(this.#text.length, reason, origin);
+    this.#chain.breakWhole(this.#text.length, reason, origin);
     void this.#lease.ensure();
   }
 
   /** `settled` is re-read after every await: a freeze settled meanwhile answers no payload. */
-  async #payload(w: ProvenanceWindow, post: string, expected: string | null, settled: () => boolean): Promise<NamedPayload | null> {
+  async #payload(w: ProvenanceWindow, post: string, expected: string | null, settled: () => boolean, arm: boolean): Promise<NamedPayload | null> {
     if (settled()) return null;
-    const armed = await this.#lease.ensure();
+    const armed = await (arm ? this.#lease.ensure() : this.#lease.current());
     const basis = slotBasis(w.slot);
     if (settled() || !armed || basis === null || (expected !== null && expected !== basis)) return null;
-    try {
-      w.acc.checkTexts(w.pre, post);
-      const payload = await encodePayload({ document: armed.doc, epoch: armed.epoch, basis, pre: w.pre, post, provenance: w.acc });
-      return settled() ? null : { basis, payload };
-    } catch (error) {
-      this.#warn("provenance: window does not certify its texts", error);
-      return null;
-    }
-  }
-
-  async #handshake({ head, headHash }: ArmedEpoch): Promise<void> {
-    const { pre, slot } = this.#initial;
-    if (slot.kind !== "handshake") return;
-    if (head === null) return settleSlot(slot, pre === "" ? "genesis" : null);
-    settleSlot(slot, headHash === `sha256-${await textHash(pre)}` ? head : null);
+    const named = await certifyWindow(w, basis, post, armed, this.#warn);
+    return settled() ? null : named;
   }
 
   #maybeClose(): void {
-    if (this.#frozen > 0 || this.#deferral || this.#window.acc.transactions > 0) return;
+    if (this.#frozen > 0 || this.#deferral || this.#chain.open.acc.transactions > 0) return;
     this.#lease.release();
   }
 }

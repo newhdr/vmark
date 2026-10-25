@@ -67,6 +67,17 @@ export class EpochLease {
     return this.#arming;
   }
 
+  /** An epoch is armed, or an arm is in flight. */
+  get engaged(): boolean {
+    return this.#armed !== null || this.#arming !== null;
+  }
+
+  /** The armed epoch, after any arm already in flight; never starts an arm. */
+  async current(): Promise<ArmedEpoch | null> {
+    if (this.#arming) await this.#arming;
+    return this.#armed;
+  }
+
   /** Close the armed epoch, if any. */
   release(): void {
     const armed = this.#armed;

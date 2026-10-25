@@ -93,6 +93,20 @@ export class Provenance {
     this.Rp = this.Lp;
   }
 
+  /** An independent copy: what one is later fed never reaches the other. */
+  clone(): Provenance {
+    const c = new Provenance(this.lenA, { cap: this.cap });
+    c.lenB = this.lenB;
+    c.Lp = [...this.Lp];
+    c.Rp = [...this.Rp];
+    c.deletedChars = this.deletedChars.map(([a, b]) => [a, b]);
+    c.touchedGaps = this.touchedGaps.map(([a, b]) => [a, b]);
+    c.whole = this.whole && { ...this.whole };
+    c.bounded = this.bounded.map((x) => ({ ...x, normal: [...x.normal], growing: [...x.growing] }));
+    c.transactions = this.transactions;
+    return c;
+  }
+
   get entries(): number {
     return this.Lp.length + this.Rp.length + this.deletedChars.length + this.touchedGaps.length + this.bounded.length;
   }

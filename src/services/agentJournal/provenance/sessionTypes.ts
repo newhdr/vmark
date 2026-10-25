@@ -55,9 +55,10 @@ export interface ProvenanceFreeze {
   invalidate(): void;
   /**
    * The journal confirmed it admitted nothing for this freeze (a clean
-   * refusal), so the frozen window could carry into the next one. Terminal.
-   * Until windows can be merged, a release drops the segment exactly like
-   * `invalidate()`; callers still say which one they mean.
+   * refusal): the frozen window is merged back in front of the window after
+   * it, sticky breaks included, so the next freeze certifies both. Only
+   * while that window is still the open one; otherwise it fails closed like
+   * `invalidate()`. Terminal.
    */
   release(): void;
 }
