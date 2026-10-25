@@ -87,6 +87,9 @@ mod admission_clone_cost_tests;
 #[path = "../revert_admission.test.rs"]
 mod revert_admission_tests;
 #[cfg(test)]
+#[path = "../revert_compaction_crash.test.rs"]
+mod revert_compaction_crash_tests;
+#[cfg(test)]
 #[path = "../revert_differential.test.rs"]
 mod revert_differential_tests;
 #[cfg(test)]
