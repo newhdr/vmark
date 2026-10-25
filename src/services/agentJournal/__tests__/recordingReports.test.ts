@@ -100,7 +100,8 @@ describe("save outcomes", () => {
     await vi.waitFor(() => expect(fake.captureSaveToJournal).toHaveBeenCalledTimes(1));
     fake.failNextCommits(1);
     const written = agentWrite("x");
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // One macrotask turn drains every microtask: an unwaited path reaches the asserted call within it.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(fake.prepareControlledWrite).not.toHaveBeenCalled();
     fake.doc(KEY).head = "r";
     answer({ doc: KEY, journaled: "yes", observation: null, revision: "r" });

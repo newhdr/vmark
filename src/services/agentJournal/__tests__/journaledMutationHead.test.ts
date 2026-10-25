@@ -76,7 +76,8 @@ describe("runJournaledMutation — the expected head", () => {
     let settle: (next: JournalObservedRef | null) => void = () => {};
     setOutstandingSaveBase(TAB, KEY, new Promise((resolve) => (settle = resolve)));
     const run = runJournaledMutation(mutation());
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // One macrotask turn drains every microtask: an unwaited path reaches the asserted call within it.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(epochs.readJournalHead).not.toHaveBeenCalled();
     fake.doc(KEY).head = "rev-s";
     settle({ ref: "revision", revision: "rev-s" });
