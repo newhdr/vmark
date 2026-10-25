@@ -23,6 +23,10 @@
  *     isActiveDocReadOnly()), then routes through dispatchV2 — the pruned
  *     5-tool surface (vmark.session / workspace / document / workflow /
  *     selection).
+ *   - The listener is scoped to this webview window. Rust sends each request
+ *     to the one window it routed it to; a global `listen` matches every
+ *     target, so every open window would run the request and the client would
+ *     get whichever answer came first.
  *   - On mount the hook sends a 5-second `mcp_bridge_heartbeat` so the Rust
  *     side can tell the webview is alive under macOS App Nap.
  *   - Listener registration is async; mounted-state tracking handles React
@@ -37,6 +41,7 @@
  *     to `registering`; a discarded mount (Strict Mode) never writes after its
  *     cleanup, so the live mount alone decides the health.
  *
+ * @coordinates-with src-tauri/src/mcp_bridge/live_emit.rs — the window-targeted send
  * @coordinates-with services/mcpBridge/handleRequest.ts — read-only guard + v2 routing
  * @coordinates-with services/mcpBridge/v2/dispatch.ts — dispatchV2, the 5-tool dispatcher
  * @coordinates-with services/mcpBridge/utils.ts — respond()
@@ -47,7 +52,7 @@
  */
 
 import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { invoke } from "@tauri-apps/api/core";
 import type { McpRequestEvent, McpRequestEventRaw } from "@/services/mcpBridge/types";
 import { respond } from "@/services/mcpBridge/utils";
@@ -170,7 +175,8 @@ export function useMcpBridge(): void {
     // with backoff; once every attempt is spent the webview cannot serve a
     // request, so it says so and stops the heartbeat rather than look alive.
     const register = (attempt: number): void => {
-      listen<McpRequestEventRaw>("mcp-bridge:request", (event) => processMcpRequest(event.payload))
+      getCurrentWebviewWindow()
+        .listen<McpRequestEventRaw>("mcp-bridge:request", (event) => processMcpRequest(event.payload))
         .then((fn) => {
           // If unmounted before Promise resolved, clean up immediately
           if (!mounted) {

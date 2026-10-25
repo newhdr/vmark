@@ -3,8 +3,9 @@
 //! never sent to the window, and its client still gets stop's answer.
 //!
 //! Edge cases: the entry drained with its client (stop), the client gone
-//! with the entry left (disconnect), no target window, and a live request
-//! (sent once, with its id).
+//! with the entry left (disconnect), no target window, a live request
+//! (sent once, with its id), and a second document window, which must never
+//! receive a request routed to another window.
 
 use super::{emit_while_live, LiveEmit};
 use crate::mcp_bridge::managed::{bridge, McpBridgeState};
@@ -134,4 +135,43 @@ async fn a_disconnected_client_or_a_missing_window_sends_nothing() {
         LiveEmit::ClientGone
     ));
     assert!(events.try_recv().is_err());
+}
+
+/// Each document window's listener is scoped to its own label (the webview
+/// side listens on its own window). A request routed to `doc-0` reaches
+/// `doc-0` and never `main`: a broadcast made every open window run the
+/// request, and the client got whichever answer came first.
+#[tokio::test]
+async fn a_request_reaches_its_target_window_and_no_other() {
+    let app = mock_app(true);
+    let doc =
+        tauri::webview::WebviewWindowBuilder::new(&app, "doc-0", tauri::WebviewUrl::default())
+            .visible(false)
+            .build()
+            .expect("second mock window");
+    let main = tauri::Manager::get_webview_window(&app, "main").expect("main");
+    let heard = |w: &tauri::WebviewWindow<MockRuntime>| {
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        w.listen("mcp-bridge:request", move |event| {
+            let _ = tx.send(event.payload().to_string());
+        });
+        rx
+    };
+    let mut at_main = heard(&main);
+    let mut at_doc = heard(&doc);
+    let _rx = pending(&app, "req-doc").await;
+
+    assert!(matches!(
+        emit_while_live(app.handle(), "doc-0", &event("req-doc"), 1).await,
+        LiveEmit::Sent
+    ));
+
+    let got: Value =
+        serde_json::from_str(&at_doc.try_recv().expect("doc-0 received it")).expect("json");
+    assert_eq!(got["id"], "req-doc");
+    assert!(at_doc.try_recv().is_err(), "doc-0 received it once");
+    assert!(
+        at_main.try_recv().is_err(),
+        "main received a request routed to doc-0"
+    );
 }

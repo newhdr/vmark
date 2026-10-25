@@ -29,11 +29,13 @@ const { listeners, invokeCalls } = vi.hoisted(() => ({
   invokeCalls: [] as Array<{ cmd: string; args: unknown }>,
 }));
 
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (_event: string, handler: BridgeHandler) => {
-    listeners.add(handler);
-    return Promise.resolve(() => listeners.delete(handler));
-  },
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({
+    listen: (_event: string, handler: BridgeHandler) => {
+      listeners.add(handler);
+      return Promise.resolve(() => listeners.delete(handler));
+    },
+  }),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({

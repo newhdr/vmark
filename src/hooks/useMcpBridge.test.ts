@@ -1,5 +1,7 @@
 // Behavior coverage for the MCP bridge entry hook. Specifically:
 //   - listener registration on mount, teardown on unmount (unlisten + heartbeat)
+//   - the listener is scoped to this webview window, never the global
+//     target-Any listen that hears requests routed to other windows
 //   - Strict Mode guard: unmount before listen() resolves still cleans up
 //   - a refused registration is retried with bounded backoff; after the last
 //     attempt the failure is logged and the heartbeat stops claiming liveness
@@ -21,6 +23,7 @@ type BridgeHandler = (event: { payload: unknown }) => void;
 
 const {
   mockListen,
+  mockGlobalListen,
   mockInvoke,
   mockHandleRequest,
   mockBridgeLog,
@@ -32,6 +35,7 @@ const {
   };
   return {
     mockListen: vi.fn(),
+    mockGlobalListen: vi.fn(() => Promise.resolve(() => {})),
     mockInvoke: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => undefined),
     mockHandleRequest: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
     mockBridgeLog: vi.fn(),
@@ -40,8 +44,15 @@ const {
   };
 });
 
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({
+    label: "doc-0",
+    listen: (...args: unknown[]) => mockListen(...args),
+  }),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
+  listen: (...args: unknown[]) => mockGlobalListen(...args),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -141,6 +152,9 @@ describe("useMcpBridge — registration and teardown", () => {
 
     expect(mockListen).toHaveBeenCalledTimes(1);
     expect(mockListen).toHaveBeenCalledWith("mcp-bridge:request", expect.any(Function));
+    // A global listen matches every emit target, so this window would also
+    // run requests Rust routed to another window.
+    expect(mockGlobalListen).not.toHaveBeenCalled();
   });
 
   it("calls unlisten on unmount", async () => {

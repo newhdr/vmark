@@ -30,11 +30,16 @@ vi.mock("@tauri-apps/api/core", async () =>
   (await import("@/services/mcpBridge/v2/__tests__/bridgeWriteGate")).gatedCoreModule(),
 );
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn((event: string, handler: Listener) => {
-    bus.listeners.set(event, handler);
-    return Promise.resolve(() => bus.listeners.delete(event));
-  }),
   emit: vi.fn(() => Promise.resolve()),
+}));
+// The bridge listens on its own window: Rust sends each request to one window.
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({
+    listen: vi.fn((event: string, handler: Listener) => {
+      bus.listeners.set(event, handler);
+      return Promise.resolve(() => bus.listeners.delete(event));
+    }),
+  }),
 }));
 
 import { statefulFs } from "@/test/statefulFsFake";

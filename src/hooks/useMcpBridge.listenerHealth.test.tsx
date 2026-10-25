@@ -16,8 +16,10 @@ const { mockListen, mockInvoke } = vi.hoisted(() => ({
   mockInvoke: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => undefined),
 }));
 
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({
+    listen: (...args: unknown[]) => mockListen(...args),
+  }),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
