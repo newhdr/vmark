@@ -29,14 +29,15 @@ const history = (rows: HistoryRow[]): DocumentHistory => ({ generation: "1", hea
 
 describe("DocumentHistoryList — edited in two windows", () => {
   it("a concurrent revision says so and offers both restores", () => {
-    render(<DocumentHistoryList tabId="t-1" history={history([row("r3", "r2", { kind: "concurrent" }), row("r2", "r1"), row("r1", null)])} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history([row("r3", "r2", { kind: "concurrent" }), row("r2", "r1"), row("r1", null)])} failed={false} />);
     const concurrent = screen.getByTestId("history-row-r3");
     expect(within(concurrent).getByText(en("review.editedInTwoWindows"))).toBeInTheDocument();
-    expect(within(concurrent).getAllByRole("button")).toHaveLength(2);
+    expect(within(concurrent).getByRole("button", { name: en("mcpHistoryRestoreVersion") })).toBeInTheDocument();
+    expect(within(concurrent).getByRole("button", { name: en("mcpHistoryRestoreBefore") })).toBeInTheDocument();
   });
 
   it("an ordinary revision carries no notice", () => {
-    render(<DocumentHistoryList tabId="t-1" history={history([row("r2", "r1"), row("r1", null)])} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history([row("r2", "r1"), row("r1", null)])} failed={false} />);
     expect(screen.queryByText(en("review.editedInTwoWindows"))).not.toBeInTheDocument();
   });
 });

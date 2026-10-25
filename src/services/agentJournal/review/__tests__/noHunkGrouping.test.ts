@@ -1,5 +1,6 @@
 // @vitest-environment node
-// WI-AL2.1b — source-level guard: nothing the history panel or the declared-script writer path loads imports a hunk-grouping helper (the spike's line-level groupIntoHunks, which merged ab12cd → aX12Yd's two runs, or any helper named like it); the panel loads no client re-diff either, so the hunks it lists are only the ones the journal persisted
+// WI-AL2.1b — source-level guard: nothing the history panel or the declared-script writer path loads imports a hunk-grouping helper (the spike's line-level groupIntoHunks, which merged ab12cd → aX12Yd's two runs, or any helper named like it); the panel's hunk surfaces load no client re-diff either, so the hunks they list are only the ones the journal persisted
+// WI-AL2.4 — the one exception is the two-windows pair view (ADR-AL6): a concurrent revision persists no hunks, so its "diff of both pairs" is a whole-document diff computed on the client; it is entered only from the history list's ConcurrentPairDiffs import and loads no grouping helper
 //
 // Imports are found with the TypeScript parser over the real module graph,
 // not by searching text: every static import, re-export, dynamic import()
@@ -80,10 +81,11 @@ function importsOf(file: string): Import[] {
   return out;
 }
 
-/** Every module reachable from `entries`, and every import made along the way. */
-function graph(entries: string[]): { modules: Set<string>; imports: Import[] } {
+/** Every module reachable from `entries` without entering `stop`, every import made along the way, and each import that reached into `stop`. */
+function graph(entries: string[], stop: ReadonlySet<string> = new Set()): { modules: Set<string>; imports: Import[]; stopped: string[] } {
   const modules = new Set<string>();
   const imports: Import[] = [];
+  const stopped: string[] = [];
   const queue = [...entries];
   while (queue.length > 0) {
     const file = queue.pop() as string;
@@ -92,10 +94,12 @@ function graph(entries: string[]): { modules: Set<string>; imports: Import[] } {
     for (const imp of importsOf(file)) {
       imports.push(imp);
       const target = resolveLocal(file, imp.specifier);
-      if (target && target !== "asset") queue.push(target);
+      if (!target || target === "asset") continue;
+      if (stop.has(target)) stopped.push(`${relative(SRC, file)} -> ${relative(SRC, target)}`);
+      else queue.push(target);
     }
   }
-  return { modules, imports };
+  return { modules, imports, stopped };
 }
 
 function groupingImports(imports: Import[]): string[] {
@@ -104,9 +108,14 @@ function groupingImports(imports: Import[]): string[] {
     .map((i) => `${relative(SRC, i.from)}: ${i.names.join(", ")} from ${i.specifier}`);
 }
 
-const PANEL = readdirSync(join(SRC, "components/McpHistory"))
-  .filter((f) => /\.tsx?$/.test(f))
-  .map((f) => join(SRC, "components/McpHistory", f));
+const sources = (dir: string) =>
+  readdirSync(join(SRC, dir))
+    .filter((f) => /\.tsx?$/.test(f))
+    .map((f) => join(SRC, dir, f));
+/** The two-windows pair view: whole-document diffs of a revision that persisted no hunks. */
+const PAIR_VIEW = ["ConcurrentPairDiffs.tsx", "useConcurrentPair.ts", "pairDiffView.ts"].map((f) => join(SRC, "components/McpHistory", f));
+const PAIR_ENTRY = "components/McpHistory/DocumentHistoryList.tsx -> components/McpHistory/ConcurrentPairDiffs.tsx";
+const PANEL = [...sources("components/McpHistory"), ...sources("components/ReviewPanel")].filter((f) => !PAIR_VIEW.includes(f));
 const WRITER = [join(SRC, "services/mcpBridge/v2/journaledEdit.ts"), join(SRC, "services/agentJournal/review/declaredScript.ts")];
 
 describe("no hunk grouping on the panel or writer path", () => {
@@ -115,11 +124,23 @@ describe("no hunk grouping on the panel or writer path", () => {
     for (const name of ["declaredScriptCertificate", "repairAndMerge", "mergedRuns", "mergeInlineHtmlTags", "groupSpan", "LiveHunk", "hunkLabel", "lineHeight"]) expect(isGrouping(name), name).toBe(false);
   });
 
-  it("the history panel imports no grouping helper and no client re-diff", () => {
-    const { modules, imports } = graph(PANEL);
+  it("the history panel's hunk surfaces import no grouping helper and no client re-diff", () => {
+    for (const f of PAIR_VIEW) expect(existsSync(f), relative(SRC, f)).toBe(true);
+    const { modules, imports, stopped } = graph(PANEL, new Set(PAIR_VIEW));
     expect(modules.size).toBeGreaterThan(PANEL.length);
     expect(groupingImports(imports)).toEqual([]);
     expect([...modules].map((m) => relative(SRC, m)).filter((m) => REDIFF.includes(m))).toEqual([]);
+    // The pair view is entered from exactly one place, by its component.
+    expect([...new Set(stopped)]).toEqual([PAIR_ENTRY]);
+  });
+
+  it("the two-windows pair view diffs on the client but imports no grouping helper", () => {
+    const { modules, imports } = graph([join(SRC, "components/McpHistory/ConcurrentPairDiffs.tsx")]);
+    // The walk really reaches the diff, so the exception above is not vacuous.
+    expect([...modules].map((m) => relative(SRC, m))).toEqual(expect.arrayContaining(["services/agentJournal/review/budgetedDiff.ts"]));
+    expect(groupingImports(imports)).toEqual([]);
+    // Its client-derived changes reach no hunk surface: it loads none of the panel's other modules.
+    expect([...modules].filter((m) => PANEL.includes(m)).map((m) => relative(SRC, m))).toEqual([]);
   });
 
   it("the declared-script writer path imports no grouping helper", () => {

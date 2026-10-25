@@ -170,7 +170,7 @@ export function McpHistoryButton(): React.ReactElement {
             <JournalStatusNotice {...status} />
             {tabId && docKey && <UncommittedEntries tabId={tabId} docKey={docKey} pollMs={historyPoll} />}
             {tabId && docKey && <ReviewPanel tabId={tabId} docKey={docKey} history={visibleHistory} onChanged={history.refresh} />}
-            {tabId && <DocumentHistoryList tabId={tabId} history={visibleHistory} failed={history.failed} />}
+            {tabId && <DocumentHistoryList tabId={tabId} docKey={docKey} history={visibleHistory} failed={history.failed} />}
             <EarlierCheckpoints windowLabel={windowLabel} pollMs={historyPoll} />
           </div>
         </div>

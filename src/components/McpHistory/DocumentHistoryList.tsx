@@ -25,7 +25,9 @@
  *     apart rather than dropped.
  *   - A concurrent revision (a save that started from another version
  *     than the one before it) says it was edited in two windows; its two
- *     restore actions are the way back to either side.
+ *     restore actions are the way back to either side. While its text is
+ *     kept, "Show both changes" opens both diffs (`ConcurrentPairDiffs`);
+ *     a collected one says its text is no longer kept instead.
  *   - Restores go through `restoreFromHistory`, one at a time; a second
  *     click while one is in flight is ignored. A restore the editor failed
  *     after applying warns (restored, check the document); one that could
@@ -36,6 +38,7 @@
  * @coordinates-with services/agentJournal/historyRestore.ts — the restore
  * @coordinates-with components/McpHistory/historyLabels.ts — the words
  * @coordinates-with components/McpHistory/restoreVerdict.ts — the restore outcome
+ * @coordinates-with components/McpHistory/ConcurrentPairDiffs.tsx — both changes of a concurrent row
  * @module components/McpHistory/DocumentHistoryList
  */
 
@@ -49,11 +52,14 @@ import { restoreFromHistory } from "@/services/agentJournal/historyRestore";
 import type { JournalActor } from "@/services/agentJournal/journalActor";
 import { journalWarn } from "@/utils/debug";
 import { ActorLabel } from "./ActorLabel";
+import { ConcurrentPairDiffs } from "./ConcurrentPairDiffs";
 import { breakReasonLabel, historyTime, hunkLabel, kindLabel, originLabel } from "./historyLabels";
 import { classifyRestore } from "./restoreVerdict";
 
 interface Props {
   tabId: string;
+  /** The journal's key for the document; with none, a concurrent row's two changes cannot be read. */
+  docKey: string | null;
   history: DocumentHistory | null;
   failed: boolean;
 }
@@ -137,6 +143,7 @@ const sameActor = (a: JournalActor, b: JournalActor): boolean => JSON.stringify(
 
 interface RowProps {
   row: HistoryRow;
+  docKey: string | null;
   /** The parent "Restore to before" puts back, or null when none can be. */
   before: string | null;
   hunks: BlockedHunk[] | undefined;
@@ -144,7 +151,7 @@ interface RowProps {
   onRestore: (revision: string) => Promise<void>;
 }
 
-function RevisionRow({ row: r, before, hunks, live, onRestore }: RowProps): React.ReactElement {
+function RevisionRow({ row: r, docKey, before, hunks, live, onRestore }: RowProps): React.ReactElement {
   const { t } = useTranslation("statusbar");
   const time = historyTime(r.at);
   return (
@@ -170,6 +177,7 @@ function RevisionRow({ row: r, before, hunks, live, onRestore }: RowProps): Reac
         </div>
       )}
       {r.kind === "concurrent" && <div className="mcp-history-popover__note">{t("review.editedInTwoWindows")}</div>}
+      {r.kind === "concurrent" && !r.collected && docKey !== null && <ConcurrentPairDiffs docKey={docKey} revision={r.revision} />}
       {live && <HunkList hunks={live} label={t("mcpHistoryHunks")} />}
       {hunks?.map((hunk) => <BlockedLine key={hunk.hunkId} hunk={hunk} />)}
       <div className="mcp-history-popover__actions">
@@ -202,7 +210,7 @@ function RevisionRow({ row: r, before, hunks, live, onRestore }: RowProps): Reac
   );
 }
 
-export function DocumentHistoryList({ tabId, history, failed }: Props): React.ReactElement | null {
+export function DocumentHistoryList({ tabId, docKey, history, failed }: Props): React.ReactElement | null {
   const { t } = useTranslation("statusbar");
   const onRestore = useHistoryRestore(tabId);
 
@@ -243,6 +251,7 @@ export function DocumentHistoryList({ tabId, history, failed }: Props): React.Re
             <RevisionRow
               key={r.revision}
               row={r}
+              docKey={docKey}
               before={restorableParent(r)}
               hunks={anchored.get(r.revision)}
               live={byTarget.get(r.revision)}

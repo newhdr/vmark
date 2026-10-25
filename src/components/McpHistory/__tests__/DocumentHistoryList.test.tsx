@@ -78,7 +78,7 @@ beforeEach(() => {
 
 describe("DocumentHistoryList", () => {
   it("shows who made each revision: provider, connection and session label", () => {
-    render(<DocumentHistoryList tabId="t-1" history={history()} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history()} failed={false} />);
     const r2 = within(rowOf("r2"));
     expect(r2.getByText("claude")).toBeInTheDocument();
     expect(r2.getByText(/conn-1/)).toBeInTheDocument();
@@ -92,6 +92,7 @@ describe("DocumentHistoryList", () => {
     render(
       <DocumentHistoryList
         tabId="t-1"
+        docKey="path:/a.md"
         failed={false}
         history={history({
           rows: [
@@ -112,7 +113,7 @@ describe("DocumentHistoryList", () => {
 
   it("restores a row's own revision, or its parent", async () => {
     const user = userEvent.setup();
-    render(<DocumentHistoryList tabId="t-1" history={history()} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history()} failed={false} />);
     await user.click(within(rowOf("r2")).getByRole("button", { name: /restore this version/i }));
     expect(restore.restoreFromHistory).toHaveBeenLastCalledWith("t-1", { from: "revision", revision: "r2" });
     await user.click(within(rowOf("r2")).getByRole("button", { name: /restore to before this change/i }));
@@ -124,6 +125,7 @@ describe("DocumentHistoryList", () => {
     render(
       <DocumentHistoryList
         tabId="t-1"
+        docKey="path:/a.md"
         failed={false}
         history={history({ rows: [row("r3", { parent: "r2" }), row("r2", { parent: "r1", collected: true }), row("r1")] })}
       />,
@@ -139,6 +141,7 @@ describe("DocumentHistoryList", () => {
     render(
       <DocumentHistoryList
         tabId="t-1"
+        docKey="path:/a.md"
         failed={false}
         history={history({ truncated: true, rows: [row("r3", { parent: "r2" }), row("r2", { parent: "r1" })] })}
       />,
@@ -153,6 +156,7 @@ describe("DocumentHistoryList", () => {
     render(
       <DocumentHistoryList
         tabId="t-1"
+        docKey="path:/a.md"
         failed={false}
         history={history({
           rows: [
@@ -177,7 +181,7 @@ describe("DocumentHistoryList", () => {
       .mockResolvedValueOnce({ status: "applied", durable: true, changed: false, resolves: null } as never)
       .mockResolvedValueOnce({ status: "aborted", reason: "edited" } as never);
     const user = userEvent.setup();
-    render(<DocumentHistoryList tabId="t-1" history={history()} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history()} failed={false} />);
     await user.click(within(rowOf("r1")).getByRole("button", { name: /restore this version/i }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1));
     await user.click(within(rowOf("r1")).getByRole("button", { name: /restore this version/i }));
@@ -192,7 +196,7 @@ describe("DocumentHistoryList", () => {
         status: "appliedWithError", error: new Error("listener crashed"), durable, changed: true, resolves: null,
       } as never);
       const user = userEvent.setup();
-      render(<DocumentHistoryList tabId="t-1" history={history()} failed={false} />);
+      render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history()} failed={false} />);
       await user.click(within(rowOf("r1")).getByRole("button", { name: /restore this version/i }));
       await waitFor(() => expect(toastMock.warning).toHaveBeenCalledTimes(1));
       expect(toastMock.warning).toHaveBeenCalledWith(expect.stringMatching(/restored.*editor reported an error.*check the document/i));
@@ -204,7 +208,7 @@ describe("DocumentHistoryList", () => {
   it("a restore that could not be confirmed says the document stays locked for agent edits until VMark restarts", async () => {
     restore.restoreFromHistory.mockResolvedValueOnce({ status: "recoveryRequired", error: new Error("tab gone") } as never);
     const user = userEvent.setup();
-    render(<DocumentHistoryList tabId="t-1" history={history()} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history()} failed={false} />);
     await user.click(within(rowOf("r1")).getByRole("button", { name: /restore this version/i }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1));
     expect(toastMock.error).toHaveBeenCalledWith(expect.stringMatching(/could not confirm.*locked for agent edits until VMark restarts/i));
@@ -215,7 +219,7 @@ describe("DocumentHistoryList", () => {
     let finish: (v: unknown) => void = () => undefined;
     restore.restoreFromHistory.mockImplementationOnce(() => new Promise((r) => (finish = r)) as never);
     const user = userEvent.setup();
-    render(<DocumentHistoryList tabId="t-1" history={history()} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history()} failed={false} />);
     const button = within(rowOf("r1")).getByRole("button", { name: /restore this version/i });
     await user.click(button);
     await user.click(button);
@@ -225,7 +229,7 @@ describe("DocumentHistoryList", () => {
   });
 
   it("shows a blocked hunk as 'Blocked: reason (origin)' under its last certified revision, highlighted", () => {
-    render(<DocumentHistoryList tabId="t-1" history={history({ blocked: [blocked()] })} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ blocked: [blocked()] })} failed={false} />);
     const r2 = rowOf("r2");
     expect(r2).toHaveAttribute("data-blocked", "true");
     expect(rowOf("r3")).not.toHaveAttribute("data-blocked");
@@ -233,7 +237,7 @@ describe("DocumentHistoryList", () => {
   });
 
   it("keeps an unknown origin readable", () => {
-    render(<DocumentHistoryList tabId="t-1" history={history({ blocked: [blocked({ origin: "schemaV9:新しい" })] })} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ blocked: [blocked({ origin: "schemaV9:新しい" })] })} failed={false} />);
     expect(within(rowOf("r2")).getByText(/Blocked: .*schemaV9:新しい/)).toBeInTheDocument();
   });
 
@@ -241,6 +245,7 @@ describe("DocumentHistoryList", () => {
     render(
       <DocumentHistoryList
         tabId="t-1"
+        docKey="path:/a.md"
         failed={false}
         history={history({ blocked: [blocked({ hunkId: "a", lastCertified: null }), blocked({ hunkId: "b", lastCertified: "r0", reason: "capOverflow", origin: "accumulator" })] })}
       />,
@@ -253,7 +258,7 @@ describe("DocumentHistoryList", () => {
 
   it("lists each persisted hunk under the revision that made it, touching hunks as separate rows", () => {
     const hunks = [live("h-a", 0, 1), live("h-b", 1, 2, { kind: "largeChange", state: "reverted" }), live("h-c", 4, 9, { target: "r3", kind: "restore" })];
-    render(<DocumentHistoryList tabId="t-1" history={history({ hunks })} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ hunks })} failed={false} />);
     const r2 = within(rowOf("r2")).getByRole("list", { name: /changes/i });
     const items = within(r2).getAllByRole("listitem");
     expect(items.map((li) => li.textContent)).toEqual(["Change (pending), position 0–1", "Large change (reverted), position 1–2"]);
@@ -266,7 +271,7 @@ describe("DocumentHistoryList", () => {
     vi.mocked(invoke).mockResolvedValueOnce(writerReply);
     const reply = await listDocumentHistory("doc");
     expect(invoke).toHaveBeenCalledWith("agent_journal_history", { payload: JSON.stringify({ docKey: "doc" }) });
-    render(<DocumentHistoryList tabId="t-1" history={reply} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={reply} failed={false} />);
     const runs = within(rowOf("rev-2")).getByRole("list", { name: /changes/i });
     const items = within(runs).getAllByRole("listitem");
     expect(items.map((li) => li.textContent)).toEqual(["Change (pending), position 1–2", "Change (pending), position 4–5"]);
@@ -276,27 +281,27 @@ describe("DocumentHistoryList", () => {
 
   it("lists hunks of revisions the list does not show apart, never dropped", () => {
     const hunks = [live("h-old", 3, 3, { target: "r0", kind: "tooComplex" })];
-    render(<DocumentHistoryList tabId="t-1" history={history({ hunks, truncated: true })} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ hunks, truncated: true })} failed={false} />);
     const older = screen.getByRole("list", { name: /changes in revisions not shown/i });
     expect(within(older).getByText("Too complex to split (pending), position 3–3")).toBeInTheDocument();
   });
 
   it("says when older revisions are not shown", () => {
-    render(<DocumentHistoryList tabId="t-1" history={history({ truncated: true })} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ truncated: true })} failed={false} />);
     expect(screen.getByText(/older revisions are not shown/i)).toBeInTheDocument();
   });
 
   it("renders a row whose time is outside what a Date can hold, without a time", () => {
     const rows = [row("r2", { at: 9_000_000_000_000_000, parent: "r1" }), row("r1")];
-    render(<DocumentHistoryList tabId="t-1" history={history({ rows })} failed={false} />);
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ rows })} failed={false} />);
     expect(rowOf("r2").querySelector("time")).toBeNull();
     expect(rowOf("r1").querySelector("time")).not.toBeNull();
   });
 
   it("says when the history cannot be read, and when it is empty", () => {
-    const { rerender } = render(<DocumentHistoryList tabId="t-1" history={null} failed />);
+    const { rerender } = render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={null} failed />);
     expect(screen.getByText(/could not be read/i)).toBeInTheDocument();
-    rerender(<DocumentHistoryList tabId="t-1" history={history({ rows: [] })} failed={false} />);
+    rerender(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ rows: [] })} failed={false} />);
     expect(screen.getByText(/no revisions recorded/i)).toBeInTheDocument();
   });
 });

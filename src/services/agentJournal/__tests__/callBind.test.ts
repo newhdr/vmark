@@ -1,5 +1,6 @@
 // @vitest-environment node
 // WI-AL2.2i — every journal command with no request key is sent with a fresh callId (32 lowercase hex, minted per call) and its reply is read only when it echoes that callId as {bind: {callId}, reply}: a reply bound to another call, unbound, or with a bind field too many is a transport failure (JOURNAL_UNAVAILABLE), checked before any reply parser runs; a callId that cannot be minted makes the journal unavailable and invokes nothing
+// WI-AL2.4 — the concurrent pair read (`agent_journal_concurrent_pair`) is call-bound the same way
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.unmock("@/services/agentJournal/journalTransport");
@@ -11,6 +12,7 @@ import { armEpoch, bindDocument, closeEpoch, findDocument, readJournalHead, rele
 import { discardUncommitted, listUncommitted } from "../historyClient";
 import { forgetJournalCheckpoints, listJournalCheckpoints, resetJournalCheckpointClient } from "../checkpointClient";
 import { listDocumentHistory } from "../docHistoryClient";
+import { readConcurrentPair } from "../concurrentPairClient";
 import { readJournalHealth } from "../journalStatusClient";
 import { exportDocumentToGit } from "../gitExportClient";
 import { decideReview } from "../reviewClient";
@@ -51,6 +53,11 @@ const CASES: Array<[string, () => Promise<unknown>, unknown]> = [
     "agent_journal_history",
     () => listDocumentHistory("path:/a.md"),
     { generation: "0", head: null, rows: [], truncated: false, hunks: [], blocked: [], degraded: false },
+  ],
+  [
+    "agent_journal_concurrent_pair",
+    () => readConcurrentPair("path:/a.md", REV),
+    { observedBefore: "稿", linearBefore: "稿!", result: "稿🎉" },
   ],
   ["agent_journal_status", () => readJournalHealth(), STATUS],
   [

@@ -1,6 +1,7 @@
 //! Tauri commands of the history panel over the agent edit journal: prepare
 //! a restore or a hunk revert (committed or aborted through `agent_journal_commit` /
-//! `agent_journal_abort`), list a document's revisions, list or discard a document's uncommitted
+//! `agent_journal_abort`), list a document's revisions, read both pairs of a revision edited in
+//! two windows (`controller_concurrent_pair`), list or discard a document's uncommitted
 //! entries, keep the panel's checkpoints (`controller_checkpoints`), and record
 //! the review panel's decisions (`controller::review`).
 //!
@@ -18,6 +19,7 @@ use crate::agent_journal::controlled_revert::RevertReply;
 use crate::agent_journal::controller::review::ReviewDecided;
 use crate::agent_journal::controller::AbortReply;
 use crate::agent_journal::controller_checkpoints::CheckpointView;
+use crate::agent_journal::controller_concurrent_pair::ConcurrentPair;
 use crate::agent_journal::controller_doc_history::DocHistory;
 use crate::agent_journal::controller_history::UncommittedEntry;
 use crate::agent_journal::service::AgentJournalState;
@@ -96,6 +98,23 @@ pub async fn agent_journal_history(
     call_id: String,
 ) -> Result<Bound<CallBind, DocHistory>, CommandError> {
     bind_call(&call_id, run(&state, move |c| c.history(&payload))).await
+}
+
+/// Both pairs of a concurrent revision (`payload`: JSON `{docKey,
+/// revision}`): its observed before-text, its linear before-text and its
+/// postimage.
+///
+/// # Errors
+/// `INVALID_REQUEST` for a malformed payload or a revision that is not a
+/// concurrent revision of that document; `JOURNAL_CORRUPT` for a missing
+/// text; `JOURNAL_UNAVAILABLE`.
+#[tauri::command]
+pub async fn agent_journal_concurrent_pair(
+    state: tauri::State<'_, AgentJournalState>,
+    payload: String,
+    call_id: String,
+) -> Result<Bound<CallBind, ConcurrentPair>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.concurrent_pair(&payload))).await
 }
 
 /// A document's uncommitted entries (`payload`: JSON `{docKey}`).

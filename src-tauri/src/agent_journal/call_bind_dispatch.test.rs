@@ -1,4 +1,4 @@
-// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound) | AL2.2d: the revert prepare is request-bound like the restore prepare | AL2.3: the malformed-callId sweep covers every call-bound command, the review decide and the epoch close included
+// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound) | AL2.2d: the revert prepare is request-bound like the restore prepare | AL2.3: the malformed-callId sweep covers every call-bound command, the review decide and the epoch close included | AL2.4: the concurrent pair read is call-bound and swept
 //! Each command is invoked the way a webview invokes it: through the mock
 //! runtime's IPC layer and the generated handler. Gated off Windows, where
 //! `tauri::test` does not exist.
@@ -19,7 +19,7 @@ use crate::agent_journal::{commands, commands_history, git_export};
 use crate::ipc_caller::{invoke_from, window};
 
 /// The commands bound by a call id, in the order they were converted.
-const CALL_BOUND: [&str; 15] = [
+const CALL_BOUND: [&str; 16] = [
     "agent_journal_capture",
     "agent_journal_arm_epoch",
     "agent_journal_close_epoch",
@@ -35,6 +35,7 @@ const CALL_BOUND: [&str; 15] = [
     "agent_journal_git_export",
     "agent_journal_head",
     "agent_journal_review_decide",
+    "agent_journal_concurrent_pair",
 ];
 
 const CALL: &str = "0123456789abcdef0123456789abcdef";
@@ -64,6 +65,7 @@ fn ready() -> Ready {
             commands_history::agent_journal_checkpoints,
             commands_history::agent_journal_checkpoints_forget,
             commands_history::agent_journal_review_decide,
+            commands_history::agent_journal_concurrent_pair,
             git_export::command::agent_journal_git_export,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -214,6 +216,10 @@ fn a_missing_or_malformed_call_id_is_refused_before_the_command_runs() {
             "docKey": key, "expectedHead": null, "action": "keep",
             "items": [{ "hunkId": "h", "expectedReviewGen": "0" }],
         })),
+    ));
+    calls.push((
+        "agent_journal_concurrent_pair",
+        payload(json!({ "docKey": key, "revision": uuid::Uuid::nil().to_string() })),
     ));
     let mut swept: Vec<&str> = calls.iter().map(|(c, _)| *c).collect();
     swept.sort_unstable();

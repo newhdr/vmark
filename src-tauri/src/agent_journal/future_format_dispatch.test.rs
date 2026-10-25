@@ -56,6 +56,7 @@ fn journal_app() -> tauri::App<MockRuntime> {
             commands::agent_journal_register_page,
             commands_history::agent_journal_restore_prepare,
             commands_history::agent_journal_history,
+            commands_history::agent_journal_concurrent_pair,
             commands_history::agent_journal_uncommitted,
             commands_history::agent_journal_discard,
             commands_history::agent_journal_checkpoints,
@@ -103,8 +104,12 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
         v["webviewGeneration"] = json!("1");
         v
     };
-    let calls: [(&str, Value); 16] = [
+    let calls: [(&str, Value); 17] = [
         ("agent_journal_history", call(json!({"payload": "{}"}))),
+        (
+            "agent_journal_concurrent_pair",
+            call(json!({"payload": "{}"})),
+        ),
         ("agent_journal_checkpoints", call(json!({}))),
         (
             "agent_journal_checkpoints_forget",

@@ -151,6 +151,7 @@ const CALL_BOUND = new Set([
   "agent_journal_git_export",
   "agent_journal_head",
   "agent_journal_review_decide",
+  "agent_journal_concurrent_pair",
 ]);
 
 type Answerer = (command: string, args: Args) => Promise<unknown>;

@@ -30,9 +30,8 @@
 //! - `doc_key`, `doc_index`, `doc_renames`, `service_identity` — durable document identity:
 //!   entry-spelling keys, the persisted key-to-UUID op log, and binds on Save As,
 //!   rename and an external rename.
-//! - `controlled_restore`, `controlled_revert`, `controller_history`, `controller_checkpoints`,
-//!   `controller_doc_history`, `commands_history` — restore, hunk revert, the uncommitted list,
-//!   the history panel's revisions, its checkpoints and its review decisions over IPC.
+//! - `controlled_restore`, `controlled_revert`, `controller_history`, `controller_checkpoints`, `controller_doc_history`, `controller_concurrent_pair`,
+//!   `commands_history` — restore, hunk revert, the uncommitted list, the history panel's revisions, a two-window save's both pairs, its checkpoints and review decisions over IPC.
 //!   `generation_events` — the writer's broadcast as one coalesced Tauri
 //!   event, so every window's panel re-reads when the journal changes.
 //! - `gc_policy` — the collector's caps and warnings. `service_gc`, `service_legacy` — the
@@ -63,6 +62,7 @@ pub mod controlled_revert;
 pub mod controlled_wire;
 pub mod controller;
 pub mod controller_checkpoints;
+pub mod controller_concurrent_pair;
 pub mod controller_doc_history;
 pub mod controller_history;
 pub mod degraded_drain;
