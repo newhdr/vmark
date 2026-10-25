@@ -18,6 +18,7 @@ import type { DocumentTab } from "@/stores/tabStoreTypes";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
 import { useEditorStore } from "@/stores/editorStore";
 import { useUIStore } from "@/stores/uiStore";
+import { markContentApplied } from "@/services/editor/contentApplied";
 import { respond } from "@/services/mcpBridge/utils";
 import { handleDocumentWrite } from "@/services/mcpBridge/v2/document";
 import { journalActorFor } from "@/services/agentJournal/journalActor";
@@ -37,8 +38,10 @@ function seed(tabs: DocumentTab[], focused: string): void {
   for (const t of tabs) useDocumentStore.getState().initDocument(t.id, "old document\n", t.filePath);
 }
 
+/** A settled editor on `tabId`: its content load has run, so its selection is the reader's. */
 function mountLive(tabId: string): Editor {
   editor = new Editor({ extensions: [StarterKit], content: "<p>old document</p>" });
+  markContentApplied(editor);
   editor.commands.setTextSelection({ from: 1, to: 4 });
   useEditorStore.getState().setTiptapEditor(editor);
   useEditorStore.getState().setActiveWysiwygEditor(editor, tabId);

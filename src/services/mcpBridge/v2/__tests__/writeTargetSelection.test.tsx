@@ -15,6 +15,7 @@ import type { DocumentTab } from "@/stores/tabStoreTypes";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
 import { useEditorStore } from "@/stores/editorStore";
 import { useUIStore } from "@/stores/uiStore";
+import { markContentApplied } from "@/services/editor/contentApplied";
 import { captureWriteTarget, reverifyWriteTarget, type WriteTarget } from "@/services/mcpBridge/v2/writeTarget";
 
 let editor: Editor | null = null;
@@ -28,8 +29,10 @@ function seed(ids: string[], focused: string): void {
   for (const id of ids) useDocumentStore.getState().initDocument(id, "old document\n", `/notes/${id}.md`);
 }
 
+/** A settled editor on `tabId`: its content load has run and no caret restore is pending. */
 function mountLive(tabId: string, cursor = 1): Editor {
   editor = new Editor({ extensions: [StarterKit], content: "<p>old document</p>" });
+  markContentApplied(editor);
   editor.commands.setTextSelection({ from: cursor, to: cursor });
   useEditorStore.getState().setTiptapEditor(editor);
   useEditorStore.getState().setActiveWysiwygEditor(editor, tabId);

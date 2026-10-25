@@ -28,7 +28,10 @@
  *     one the write resolved to. A write captured with no live selection (no
  *     editor showed the tab yet, or the tab was not focused) is not
  *     aborted when an editor mounts or the user switches to the tab: that
- *     is not a selection the user moved. Any other
+ *     is not a selection the user moved. Nor is one captured while the
+ *     editor was still mounting — before its content load, or before its
+ *     mount/show caret restore ran: the restore moving the caret is not the
+ *     user either. Any other
  *     explicit-target write to a tab the user switched away from goes
  *     ahead: it no longer touches what the user is doing.
  *   - Synchronous, so the caller can apply in the same task with nothing
@@ -65,11 +68,15 @@ function focusedTabId(): string | null {
   return useTabStore.getState().activeTabId[getCurrentWindowLabel()] ?? null;
 }
 
-/** The live editor's selection on `tabId`, as a comparable key; `null` when none is showing it. */
+/**
+ * The live editor's selection on `tabId`, as a comparable key; `null` when
+ * none is showing it, or the one showing it is still mounting (its caret is
+ * not yet the reader's).
+ */
 function selectionKey(tabId: string): string | null {
   if (focusedTabId() !== tabId) return null;
   const surface = resolveSelectionSurface(tabId);
-  if ("error" in surface) return null;
+  if ("error" in surface || surface.mounting()) return null;
   const { from, to } = surface.range();
   return `${surface.mode}:${from}-${to}`;
 }
@@ -132,8 +139,9 @@ export function reverifyWriteTarget(target: WriteTarget): AbortReason | null {
   const focused = focusedTabId() === target.tabId;
   if (target.requireFocus && !focused) return "selection";
   // Only a selection the write saw can have moved: one captured as `null` (no
-  // live editor showed the tab, or it was not focused) is not the user's
-  // selection moving when an editor mounts or the user switches to the tab.
+  // live editor showed the tab, it was still mounting, or the tab was not
+  // focused) is not the user's selection moving when an editor mounts and
+  // restores its caret or the user switches to the tab.
   if (focused && target.selection !== null && selectionKey(target.tabId) !== target.selection) return "selection";
   return null;
 }

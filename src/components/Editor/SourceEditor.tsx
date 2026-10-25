@@ -54,7 +54,7 @@ import {
   shortcutKeymapCompartment,
   readOnlyCompartment,
 } from "@/services/assembly/sourceEditorExtensions";
-import { focusAndRestoreSource } from "./sourceFocusRestore";
+import { focusAndRestoreSource, scheduleSourceFocusRestore } from "./sourceFocusRestore";
 import { createSourceCursorTracker, sourceCursorExtension, type SourceCursorTracker } from "./sourceCursorTracker";
 import { createSourceProvenance } from "@/services/agentJournal/collectors/sourceCollector";
 
@@ -217,17 +217,14 @@ export function SourceEditor({ hidden = false, readOnly = false }: SourceEditorP
 
     // Auto-focus and restore cursor/scroll on mount (only when visible)
     const initialCursorInfo = cursorInfo;
-    let focusTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    if (!hiddenRef.current) {
-      focusTimeoutId = setTimeout(() => {
-        /* v8 ignore next -- @preserve defensive guard: view is cleared by cleanup before timeout fires */
-        if (!viewRef.current) return; // Defensive — cleanup clears this timeout
-        focusAndRestoreSource(view, mountTabId, initialCursorInfo, isFocusedPaneRef.current); // only the focused pane takes focus (#1554)
-      }, 50);
-    }
+    const cancelFocusRestore = hiddenRef.current ? null : scheduleSourceFocusRestore(view, () => {
+      /* v8 ignore next -- @preserve defensive guard: view is cleared by cleanup before timeout fires */
+      if (!viewRef.current) return; // Defensive — cleanup cancels this restore
+      focusAndRestoreSource(view, mountTabId, initialCursorInfo, isFocusedPaneRef.current); // only the focused pane takes focus (#1554)
+    });
 
     return () => {
-      if (focusTimeoutId !== null) clearTimeout(focusTimeoutId);
+      cancelFocusRestore?.();
       searchRecount.cancel();
       unsubscribeShortcuts();
       stopScrollMemory();
@@ -265,10 +262,10 @@ export function SourceEditor({ hidden = false, readOnly = false }: SourceEditorP
     if (isFocusedPaneRef.current) useEditorStore.getState().setActiveSourceView(view, tabId);
 
     // Focus and restore cursor/scroll
-    setTimeout(() => {
+    scheduleSourceFocusRestore(view, () => {
       if (!viewRef.current || hiddenRef.current) return;
       focusAndRestoreSource(view, tabId, cursorInfoRef.current, isFocusedPaneRef.current);
-    }, 50);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- reacts to the visibility transition only; it reads the current render's values when it runs
   }, [hidden]);
 

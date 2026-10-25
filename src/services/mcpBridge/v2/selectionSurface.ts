@@ -37,6 +37,9 @@
  *     ended and is not yet cleaned up), `writeRefusal` answers BUSY and
  *     `replaceSelection` throws: a replacement dispatched under the preedit
  *     text is committed or dropped by the browser. The handler asks first.
+ *   - `mounting` says the editor's selection is not yet the reader's: a
+ *     WYSIWYG editor before its content load, or either editor before its
+ *     mount/show caret restore has run.
  *
  * @coordinates-with selection.ts — the handlers
  * @coordinates-with stores/editorStore.ts — focused editor instances
@@ -45,6 +48,8 @@
  * @coordinates-with services/ime/compositionWriteGate.ts — WYSIWYG composition state
  * @coordinates-with utils/imeGuard.ts — Source composition state
  * @coordinates-with services/agentJournal/collectors/wysiwyg/wysiwygCollector.ts — the apply capture
+ * @coordinates-with services/editor/contentApplied.ts — whether the WYSIWYG load ran
+ * @coordinates-with services/editor/caretRestorePending.ts — whether the caret restore ran
  * @module services/mcpBridge/v2/selectionSurface
  */
 import type { Editor as TiptapEditor } from "@tiptap/core";
@@ -56,6 +61,8 @@ import { parseMarkdown, serializeMarkdown } from "@/utils/markdownPipeline";
 import { getSerializeOptions } from "@/plugins/toolbarActions/wysiwygAdapterUtils";
 import { isCompositionInProgress } from "@/services/ime/compositionWriteGate";
 import { isCodeMirrorComposing, isCodeMirrorInCompositionGrace } from "@/utils/imeGuard";
+import { hasContentApplied } from "@/services/editor/contentApplied";
+import { isCaretRestorePending } from "@/services/editor/caretRestorePending";
 import { captureWysiwygApply } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCollector";
 import type { WysiwygApplyCapture } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCertificate";
 import { composingRefusal } from "./liveEditor";
@@ -69,6 +76,12 @@ export interface SelectionSurface {
   mode: SelectionMode;
   /** The selection's bounds: PM positions in WYSIWYG, character offsets in Source. */
   range(): { from: number; to: number };
+  /**
+   * Whether the editor is still mounting: it has not received its document
+   * (WYSIWYG) or its mount/show caret restore has not run. Its selection is
+   * then not one the reader placed.
+   */
+  mounting(): boolean;
   /** The selected text; empty for a collapsed selection. */
   selectedText(): string;
   /** The whole document as the editor holds it now. */
@@ -186,6 +199,7 @@ function wysiwygSurface(editor: TiptapEditor): SelectionSurface {
       const { from, to } = editor.state.selection;
       return { from, to };
     },
+    mounting: () => !hasContentApplied(editor) || isCaretRestorePending(editor),
     selectedText: () => tiptapSelectionText(editor),
     documentText: () =>
       serializeMarkdown(editor.state.schema, editor.state.doc, getSerializeOptions()),
@@ -209,6 +223,7 @@ function sourceSurface(view: CMView): SelectionSurface {
   return {
     mode: "source",
     range,
+    mounting: () => isCaretRestorePending(view),
     selectedText,
     documentText: () => view.state.doc.toString(),
     writeRefusal: () => (composing() ? composingRefusal() : null),
