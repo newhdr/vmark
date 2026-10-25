@@ -46,7 +46,7 @@
  * @coordinates-with services/agentJournal/journaledMutation.ts — the coordinator
  * @coordinates-with services/agentJournal/controlledMutation.ts — the controlled prepare
  * @coordinates-with services/agentJournal/selectionCertificate.ts — the certificate of `change`
- * @coordinates-with services/agentJournal/review/declaredScript.ts — the certificate of `target`
+ * @coordinates-with services/agentJournal/review/declaredScript.ts — the certificate of `target` (loaded on first use)
  * @coordinates-with writeTarget.ts — the re-verify
  * @coordinates-with journalV2Error.ts — refusal and abort answers
  * @module services/mcpBridge/v2/journaledEdit
@@ -60,7 +60,6 @@ import { runJournaledMutation, type JournaledOutcome } from "@/services/agentJou
 import { journalActorFor } from "@/services/agentJournal/journalActor";
 import { journalTabLife } from "@/services/agentJournal/documentIdentity";
 import { selectionCertificate, type ExactChange, type SelectionCertificate } from "@/services/agentJournal/selectionCertificate";
-import { declaredScriptCertificate } from "@/services/agentJournal/review/declaredScript";
 import { journalWarn } from "@/utils/debug";
 import { structuredError } from "./tabGuard";
 import { captureWriteTarget, recheckWriteTarget, reverifyWriteTarget } from "./writeTarget";
@@ -119,7 +118,12 @@ async function certificateFor(edit: JournaledEdit<unknown>, preimage: string): P
   if (preimage !== edit.preimage) return null;
   try {
     if (edit.change) return await selectionCertificate(preimage, edit.change);
-    if (edit.target !== undefined) return await declaredScriptCertificate(preimage, edit.target);
+    if (edit.target !== undefined) {
+      // Loaded on first use: the diff engine (diff-match-patch) is the bulk of
+      // the module, and only a whole-text write needs it — not app launch.
+      const { declaredScriptCertificate } = await import("@/services/agentJournal/review/declaredScript");
+      return await declaredScriptCertificate(preimage, edit.target);
+    }
     return null;
   } catch (error) {
     journalWarn(`${edit.tool}: no certificate for its change; recording a barrier:`, error);
