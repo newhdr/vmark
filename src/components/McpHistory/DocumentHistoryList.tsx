@@ -38,7 +38,7 @@
  * @coordinates-with services/agentJournal/historyRestore.ts — the restore
  * @coordinates-with components/McpHistory/historyLabels.ts — the words
  * @coordinates-with components/McpHistory/restoreVerdict.ts — the restore outcome
- * @coordinates-with components/McpHistory/ConcurrentPairDiffs.tsx — both changes of a concurrent row
+ * @coordinates-with components/McpHistory/ConcurrentPairDiffs.tsx — both changes of a concurrent row (loaded lazily)
  * @module components/McpHistory/DocumentHistoryList
  */
 
@@ -52,7 +52,7 @@ import { restoreFromHistory } from "@/services/agentJournal/historyRestore";
 import type { JournalActor } from "@/services/agentJournal/journalActor";
 import { journalWarn } from "@/utils/debug";
 import { ActorLabel } from "./ActorLabel";
-import { ConcurrentPairDiffs } from "./ConcurrentPairDiffs";
+import { LazyConcurrentPairDiffs } from "./lazyHistoryParts";
 import { breakReasonLabel, historyTime, hunkLabel, kindLabel, originLabel } from "./historyLabels";
 import { classifyRestore } from "./restoreVerdict";
 
@@ -177,7 +177,7 @@ function RevisionRow({ row: r, docKey, before, hunks, live, onRestore }: RowProp
         </div>
       )}
       {r.kind === "concurrent" && <div className="mcp-history-popover__note">{t("review.editedInTwoWindows")}</div>}
-      {r.kind === "concurrent" && !r.collected && docKey !== null && <ConcurrentPairDiffs docKey={docKey} revision={r.revision} />}
+      {r.kind === "concurrent" && !r.collected && docKey !== null && <LazyConcurrentPairDiffs docKey={docKey} revision={r.revision} />}
       {live && <HunkList hunks={live} label={t("mcpHistoryHunks")} />}
       {hunks?.map((hunk) => <BlockedLine key={hunk.hunkId} hunk={hunk} />)}
       <div className="mcp-history-popover__actions">

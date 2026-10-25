@@ -33,7 +33,7 @@
  *
  * @coordinates-with components/McpHistory/useJournalFeed.ts — live reads
  * @coordinates-with components/McpHistory/journalStatusLines.ts — attention
- * @coordinates-with components/ReviewPanel/ReviewPanel.tsx — the changes to review
+ * @coordinates-with components/ReviewPanel/ReviewPanel.tsx — the changes to review (loaded lazily, lazyHistoryParts.tsx)
  * @coordinates-with components/McpHistory/DocumentHistoryList.tsx — revisions
  * @coordinates-with components/McpHistory/EarlierCheckpoints.tsx — earlier checkpoints
  * @coordinates-with components/McpHistory/UncommittedEntries.tsx — unrecorded writes
@@ -53,10 +53,10 @@ import { listDocumentHistory } from "@/services/agentJournal/docHistoryClient";
 import { FEED_POLL_MS } from "@/services/agentJournal/journalFeed";
 import { readJournalHealth, type JournalHealth } from "@/services/agentJournal/journalStatusClient";
 import { getCurrentWindowLabel } from "@/services/persistence/workspaceStorage";
-import { ReviewPanel } from "@/components/ReviewPanel/ReviewPanel";
 import { DocumentHistoryList } from "./DocumentHistoryList";
 import { EarlierCheckpoints } from "./EarlierCheckpoints";
 import { JournalStatusNotice } from "./JournalStatusNotice";
+import { LazyReviewPanel } from "./lazyHistoryParts";
 import { journalStatusLines } from "./journalStatusLines";
 import { UncommittedEntries } from "./UncommittedEntries";
 import { useJournalFeed } from "./useJournalFeed";
@@ -169,7 +169,7 @@ export function McpHistoryButton(): React.ReactElement {
           <div className="mcp-history-popover__body">
             <JournalStatusNotice {...status} />
             {tabId && docKey && <UncommittedEntries tabId={tabId} docKey={docKey} pollMs={historyPoll} />}
-            {tabId && docKey && <ReviewPanel tabId={tabId} docKey={docKey} history={visibleHistory} onChanged={history.refresh} />}
+            {tabId && docKey && <LazyReviewPanel tabId={tabId} docKey={docKey} history={visibleHistory} onChanged={history.refresh} />}
             {tabId && <DocumentHistoryList tabId={tabId} docKey={docKey} history={visibleHistory} failed={history.failed} />}
             <EarlierCheckpoints windowLabel={windowLabel} pollMs={historyPoll} />
           </div>

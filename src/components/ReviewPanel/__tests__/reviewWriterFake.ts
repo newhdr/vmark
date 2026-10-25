@@ -31,7 +31,7 @@ export interface WriterHunk {
   target: string;
 }
 
-export interface Decision {
+interface Decision {
   docKey: string;
   expectedHead: string | null;
   action: string;
@@ -57,7 +57,7 @@ export const agentRow = (revision: string, seq: number, connectionId = "c-1"): W
 });
 
 /** A CommandError-shaped refusal, as the Rust command rejects. */
-export const refusal = (journalCode: JournalCode, extra: Args = {}) => ({ code: "conflict", message: `${journalCode}: refused`, detail: { journalCode, uncertain: false, ...extra } });
+const refusal = (journalCode: JournalCode, extra: Args = {}) => ({ code: "conflict", message: `${journalCode}: refused`, detail: { journalCode, uncertain: false, ...extra } });
 
 export function createReviewWriter(init: { head: string; rows: WireRow[]; hunks: WriterHunk[]; blocked?: BlockedHunk[] }) {
   const state = { head: init.head, generation: 10, rows: init.rows, hunks: init.hunks, blocked: init.blocked ?? [] };

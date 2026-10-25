@@ -25,9 +25,9 @@
 import { useState, type ReactNode } from "react";
 
 /** One row, in px; the rows' CSS fills exactly this. */
-export const REVIEW_ROW_HEIGHT = 52;
+const REVIEW_ROW_HEIGHT = 52;
 /** The tallest the viewport grows, in px: five rows. */
-export const REVIEW_VIEWPORT_HEIGHT = REVIEW_ROW_HEIGHT * 5;
+const REVIEW_VIEWPORT_HEIGHT = REVIEW_ROW_HEIGHT * 5;
 const OVERSCAN = 3;
 
 interface Props<R> {

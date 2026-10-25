@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "Frente a la versión de la que partió este guardado",
   "review.pairAgainstBefore": "Frente a la versión anterior",
   "review.pairFailed": "No se pudieron cargar ambos cambios. El historial de ediciones rechazó la lectura o esta falló.",
+  "review.loadFailed": "No se pudo cargar esta parte del historial.",
+  "review.retryLoad": "Reintentar",
   "review.pairCoarse": "Demasiado complejo para dividirlo: se muestra como un solo cambio.",
   "review.pairHidden": "Cambios no mostrados: {{count}}",
   "review.pairNoDifference": "Sin diferencias.",

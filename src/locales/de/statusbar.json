@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "Gegenüber der Ausgangsversion dieser Speicherung",
   "review.pairAgainstBefore": "Gegenüber der vorherigen Version",
   "review.pairFailed": "Beide Änderungen konnten nicht geladen werden. Der Bearbeitungsverlauf hat das Lesen abgelehnt oder es ist fehlgeschlagen.",
+  "review.loadFailed": "Dieser Teil des Verlaufs konnte nicht geladen werden.",
+  "review.retryLoad": "Erneut versuchen",
   "review.pairCoarse": "Zu komplex zum Aufteilen: als eine Änderung angezeigt.",
   "review.pairHidden": "Nicht angezeigte Änderungen: {{count}}",
   "review.pairNoDifference": "Kein Unterschied.",

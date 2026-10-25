@@ -12,7 +12,7 @@ import { runJournaledMutation } from "../journaledMutation";
 import { JournalRefusal } from "../journalRefusal";
 import { registerUnsavedProvenanceSource } from "../unsavedProvenance";
 import type { ProvenancePayload } from "../provenance/payload";
-import { KEY, TAB, mutation, ops, resetMutationFixture } from "./journaledMutationFixture";
+import { KEY, TAB, mutation, resetMutationFixture } from "./journaledMutationFixture";
 
 beforeEach(resetMutationFixture);
 

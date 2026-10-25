@@ -254,7 +254,13 @@ module.exports = [
     // every agent write: the request coordinator, page registration, request
     // ending and the selection certificate (#1591). Actual 747.3 kB; smallest
     // raise that fits, as above.
-    limit: "747.5 kB",
+    // 747.5 → 751.5 kB (#1591): review and history additions that every
+    // journal reply or controlled write decodes — the hunk review states the
+    // history decoder validates (reviewTransitions), the expected head every
+    // controlled prepare names (expectedHead), and the lazy wrapper that
+    // keeps the review panel and the two-windows pair view out of this chunk
+    // (lazyHistoryParts) — took it to 751,089 bytes. Smallest raise that fits.
+    limit: "751.5 kB",
     brotli: false,
   },
   {
@@ -286,7 +292,15 @@ module.exports = [
     // ledger, step correspondence) and the serializer's span map, 13.6 kB,
     // which must be loaded before the first WYSIWYG edit so none goes
     // unrecorded, took it to 281,436 bytes. Smallest raise that fits.
-    limit: "281.5 kB",
+    // 281.5 → 291 kB: bytes MOVED in, nothing new. When the review panel
+    // became a lazy chunk, Rolldown dissolved two side chunks index.html
+    // already modulepreloaded — markmap (the markmap and graphviz plugins)
+    // and popupHostDom (popup positioning, media path and security helpers,
+    // unifiedHistory) — and about 9 kB of their modules landed here: 281,490
+    // -> 290,524 bytes. The modulepreloaded total rose 14.6 kB, 12.2 kB of
+    // it the App and provenance growth budgeted beside this; `pnpm lint:eager`
+    // caps that total. Smallest raise that fits.
+    limit: "291 kB",
     brotli: false,
   },
   {
@@ -307,7 +321,10 @@ module.exports = [
     // to 19,040 bytes. Smallest raise that fits.
     // 19.5 → 20 kB: the capture id a save names (captureId) took it to
     // 19,785 bytes. Smallest raise that fits.
-    limit: "20 kB",
+    // 20 → 21.5 kB: the window chain (windowChain), which keeps a frozen
+    // window's copy until its freeze settles so a released revert can put it
+    // back, took it to 21,198 bytes. Smallest raise that fits.
+    limit: "21.5 kB",
     brotli: false,
   },
 

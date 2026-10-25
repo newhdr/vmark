@@ -377,3 +377,11 @@
   margin: 0;
   padding-left: var(--space-4);
 }
+
+/* A history part (review panel, pair view) whose chunk failed to load. */
+.mcp-history-part-error {
+  margin: 0;
+  padding: var(--spacing-1) 0;
+  font-size: var(--font-size-xs);
+  color: var(--error-color);
+}

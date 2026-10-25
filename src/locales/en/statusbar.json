@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "Against the version this save started from",
   "review.pairAgainstBefore": "Against the version before it",
   "review.pairFailed": "Could not load both changes. The edit history refused or failed the read.",
+  "review.loadFailed": "This part of the history could not be loaded.",
+  "review.retryLoad": "Try again",
   "review.pairCoarse": "Too complex to split: shown as one change.",
   "review.pairHidden": "Changes not shown: {{count}}",
   "review.pairNoDifference": "No difference.",

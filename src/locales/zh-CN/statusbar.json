@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "与此次保存起始的版本相比",
   "review.pairAgainstBefore": "与上一版本相比",
   "review.pairFailed": "无法加载两处更改。编辑历史拒绝了读取，或读取失败。",
+  "review.loadFailed": "无法加载历史记录的这一部分。",
+  "review.retryLoad": "重试",
   "review.pairCoarse": "过于复杂，无法拆分：显示为一处更改。",
   "review.pairHidden": "未显示的更改：{{count}}",
   "review.pairNoDifference": "没有差异。",

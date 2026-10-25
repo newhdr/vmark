@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "Par rapport à la version dont cet enregistrement est parti",
   "review.pairAgainstBefore": "Par rapport à la version précédente",
   "review.pairFailed": "Impossible de charger les deux modifications. L’historique des modifications a refusé la lecture ou celle-ci a échoué.",
+  "review.loadFailed": "Impossible de charger cette partie de l’historique.",
+  "review.retryLoad": "Réessayer",
   "review.pairCoarse": "Trop complexe à découper : affiché comme une seule modification.",
   "review.pairHidden": "Modifications non affichées : {{count}}",
   "review.pairNoDifference": "Aucune différence.",

@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "Rispetto alla versione da cui è partito questo salvataggio",
   "review.pairAgainstBefore": "Rispetto alla versione precedente",
   "review.pairFailed": "Impossibile caricare entrambe le modifiche. La cronologia delle modifiche ha rifiutato la lettura o questa non è riuscita.",
+  "review.loadFailed": "Impossibile caricare questa parte della cronologia.",
+  "review.retryLoad": "Riprova",
   "review.pairCoarse": "Troppo complessa da suddividere: mostrata come un’unica modifica.",
   "review.pairHidden": "Modifiche non mostrate: {{count}}",
   "review.pairNoDifference": "Nessuna differenza.",

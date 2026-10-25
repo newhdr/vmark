@@ -114,7 +114,7 @@ const sources = (dir: string) =>
     .map((f) => join(SRC, dir, f));
 /** The two-windows pair view: whole-document diffs of a revision that persisted no hunks. */
 const PAIR_VIEW = ["ConcurrentPairDiffs.tsx", "useConcurrentPair.ts", "pairDiffView.ts"].map((f) => join(SRC, "components/McpHistory", f));
-const PAIR_ENTRY = "components/McpHistory/DocumentHistoryList.tsx -> components/McpHistory/ConcurrentPairDiffs.tsx";
+const PAIR_ENTRY = "components/McpHistory/lazyHistoryParts.tsx -> components/McpHistory/ConcurrentPairDiffs.tsx";
 const PANEL = [...sources("components/McpHistory"), ...sources("components/ReviewPanel")].filter((f) => !PAIR_VIEW.includes(f));
 const WRITER = [join(SRC, "services/mcpBridge/v2/journaledEdit.ts"), join(SRC, "services/agentJournal/review/declaredScript.ts")];
 

@@ -25,7 +25,7 @@ import { mapSpan } from "../../../provenance/__tests__/spanMapping";
 import { exactCanonicalDiff } from "../../canonicalDiff";
 import type { CertifiedOp, LedgerHunk, Revision } from "./ledgerTypes";
 
-export type ItemState = "pending" | "conflicted" | "reverted" | "kept" | "resolvedByHumanEdit";
+type ItemState = "pending" | "conflicted" | "reverted" | "kept" | "resolvedByHumanEdit";
 
 /** What the gate reads of a hunk. */
 export interface GateItem {
@@ -119,7 +119,7 @@ export function mapRevisions(items: Item[], text: string, revisions: readonly Re
   return text;
 }
 
-export type RevertStatus = "applied" | "foundBase" | "conflicted" | "refused" | "ambiguous";
+type RevertStatus = "applied" | "foundBase" | "conflicted" | "refused" | "ambiguous";
 export type RevertResult = { status: "applied"; text: string; from: number } | { status: Exclude<RevertStatus, "applied">; text: string };
 
 /**

@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "この保存の開始バージョンとの比較",
   "review.pairAgainstBefore": "直前のバージョンとの比較",
   "review.pairFailed": "両方の変更を読み込めませんでした。編集履歴が読み取りを拒否したか、読み取りに失敗しました。",
+  "review.loadFailed": "履歴のこの部分を読み込めませんでした。",
+  "review.retryLoad": "再試行",
   "review.pairCoarse": "複雑すぎて分割できないため、1 つの変更として表示しています。",
   "review.pairHidden": "表示されていない変更：{{count}}",
   "review.pairNoDifference": "差分はありません。",

@@ -67,11 +67,11 @@ describe("DocumentHistoryList — show both changes", () => {
     workers.current = answeringWorkers();
   });
 
-  it("offers the control only on a concurrent row whose text is kept", () => {
+  it("offers the control only on a concurrent row whose text is kept", async () => {
     const rows = [row("r4", "r3", { kind: "concurrent", collected: true }), row("r3", "r2", { kind: "concurrent" }), row("r2", "r1"), row("r1", null)];
     render(<DocumentHistoryList tabId="t-1" docKey={KEY} history={history(rows)} failed={false} />);
     const show = en("review.showBothChanges");
-    expect(within(screen.getByTestId("history-row-r3")).getByRole("button", { name: show })).toBeInTheDocument();
+    expect(await within(screen.getByTestId("history-row-r3")).findByRole("button", { name: show })).toBeInTheDocument();
     for (const r of ["r2", "r1"]) expect(within(screen.getByTestId(`history-row-${r}`)).queryByRole("button", { name: show })).toBeNull();
     const collected = screen.getByTestId("history-row-r4");
     expect(within(collected).queryByRole("button", { name: show })).toBeNull();
@@ -89,7 +89,7 @@ describe("DocumentHistoryList — show both changes", () => {
     render(<DocumentHistoryList tabId="t-1" docKey={KEY} history={twoWindows()} failed={false} />);
     expect(invoke).not.toHaveBeenCalledWith("agent_journal_concurrent_pair", expect.anything());
 
-    const toggle = screen.getByRole("button", { name: en("review.showBothChanges") });
+    const toggle = (await screen.findByRole("button", { name: en("review.showBothChanges") }));
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await user.click(toggle);
 
@@ -112,14 +112,14 @@ describe("DocumentHistoryList — show both changes", () => {
     replyWith(corrupt);
     const user = userEvent.setup();
     render(<DocumentHistoryList tabId="t-1" docKey={KEY} history={twoWindows()} failed={false} />);
-    await user.click(screen.getByRole("button", { name: en("review.showBothChanges") }));
+    await user.click((await screen.findByRole("button", { name: en("review.showBothChanges") })));
     expect(await screen.findByRole("alert")).toHaveTextContent(en("review.pairFailed"));
     expect(screen.queryByRole("region", { name: en("review.pairAgainstStart") })).toBeNull();
     expect(screen.queryByRole("region", { name: en("review.pairAgainstBefore") })).toBeNull();
 
     replyWith(async () => PAIR);
     await user.click(screen.getByRole("button", { name: en("review.hideBothChanges") }));
-    await user.click(screen.getByRole("button", { name: en("review.showBothChanges") }));
+    await user.click((await screen.findByRole("button", { name: en("review.showBothChanges") })));
     expect(await screen.findByRole("region", { name: en("review.pairAgainstStart") })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -128,7 +128,7 @@ describe("DocumentHistoryList — show both changes", () => {
     replyWith(async () => ({ observedBefore: "a", linearBefore: null, result: "b" }));
     const user = userEvent.setup();
     render(<DocumentHistoryList tabId="t-1" docKey={KEY} history={twoWindows()} failed={false} />);
-    await user.click(screen.getByRole("button", { name: en("review.showBothChanges") }));
+    await user.click((await screen.findByRole("button", { name: en("review.showBothChanges") })));
     expect(await screen.findByRole("alert")).toHaveTextContent(en("review.pairFailed"));
     expect(screen.queryByRole("region", { name: en("review.pairAgainstStart") })).toBeNull();
   });
@@ -138,7 +138,7 @@ describe("DocumentHistoryList — show both changes", () => {
     replyWith(() => new Promise((resolve) => (settle = resolve)));
     const user = userEvent.setup();
     render(<DocumentHistoryList tabId="t-1" docKey={KEY} history={twoWindows()} failed={false} />);
-    await user.click(screen.getByRole("button", { name: en("review.showBothChanges") }));
+    await user.click((await screen.findByRole("button", { name: en("review.showBothChanges") })));
     expect(screen.getByRole("status")).toHaveTextContent(en("review.pairLoading"));
     await user.click(screen.getByRole("button", { name: en("review.hideBothChanges") }));
     settle(PAIR);
@@ -151,7 +151,7 @@ describe("DocumentHistoryList — show both changes", () => {
     replyWith(async () => PAIR);
     const user = userEvent.setup();
     render(<DocumentHistoryList tabId="t-1" docKey={KEY} history={twoWindows()} failed={false} />);
-    await user.click(screen.getByRole("button", { name: en("review.showBothChanges") }));
+    await user.click((await screen.findByRole("button", { name: en("review.showBothChanges") })));
     const fromStart = await screen.findByRole("region", { name: en("review.pairAgainstStart") });
     expect(within(fromStart).getByText(en("review.pairCoarse"))).toBeInTheDocument();
     expect(texts(fromStart, "ins").join("")).toContain("🎉");
@@ -161,7 +161,7 @@ describe("DocumentHistoryList — show both changes", () => {
     replyWith(async () => ({ observedBefore: "同じ", linearBefore: "前", result: "同じ" }));
     const user = userEvent.setup();
     render(<DocumentHistoryList tabId="t-1" docKey={KEY} history={twoWindows()} failed={false} />);
-    await user.click(screen.getByRole("button", { name: en("review.showBothChanges") }));
+    await user.click((await screen.findByRole("button", { name: en("review.showBothChanges") })));
     const fromStart = await screen.findByRole("region", { name: en("review.pairAgainstStart") });
     expect(within(fromStart).getByText(en("review.pairNoDifference"))).toBeInTheDocument();
     expect(texts(fromStart, "ins")).toEqual([]);

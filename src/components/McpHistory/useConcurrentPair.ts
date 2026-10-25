@@ -29,7 +29,7 @@ import { journalWarn } from "@/utils/debug";
 import { diffView, type DiffView } from "./pairDiffView";
 
 /** How long one of the two diffs may take, from its call, before it is shown coarse. */
-export const PAIR_DEADLINE_MS = 1_000;
+const PAIR_DEADLINE_MS = 1_000;
 
 export interface PairDiff {
   readonly view: DiffView;

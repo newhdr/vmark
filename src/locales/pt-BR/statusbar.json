@@ -234,6 +234,8 @@
   "review.pairAgainstStart": "Em relação à versão da qual este salvamento partiu",
   "review.pairAgainstBefore": "Em relação à versão anterior",
   "review.pairFailed": "Não foi possível carregar as duas alterações. O histórico de edições recusou a leitura ou ela falhou.",
+  "review.loadFailed": "Não foi possível carregar esta parte do histórico.",
+  "review.retryLoad": "Tentar novamente",
   "review.pairCoarse": "Complexo demais para dividir: exibido como uma única alteração.",
   "review.pairHidden": "Alterações não exibidas: {{count}}",
   "review.pairNoDifference": "Nenhuma diferença.",
