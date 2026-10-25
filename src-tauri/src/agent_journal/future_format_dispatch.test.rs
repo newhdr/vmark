@@ -27,6 +27,12 @@ use crate::agent_journal::test_support::*;
 use crate::agent_journal::{commands, commands_history, git_export};
 use crate::ipc_caller::{invoke_from, window};
 
+/// `v` with a well-formed `callId`, so the call reaches the journal.
+fn call(mut v: Value) -> Value {
+    v["callId"] = json!("0123456789abcdef0123456789abcdef");
+    v
+}
+
 fn hashes(dir: &Path) -> Vec<Vec<u8>> {
     [JOURNAL_FILE, BLOB_PACK]
         .iter()
@@ -84,7 +90,8 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
     assert!(state.writer().is_none(), "no history is exposed");
 
     let caller = window(&app, "main");
-    let status = invoke_from(&caller, "agent_journal_status", json!({})).expect("status");
+    let status = invoke_from(&caller, "agent_journal_status", call(json!({}))).expect("status");
+    let status = &status["reply"];
     assert_eq!(status["phase"], json!(Phase::Failed));
     assert_eq!(status["readOnly"], true, "written by a newer build");
     let error = status["error"].as_str().unwrap_or_default();
@@ -97,11 +104,11 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
         v
     };
     let calls: [(&str, Value); 16] = [
-        ("agent_journal_history", json!({"payload": "{}"})),
-        ("agent_journal_checkpoints", json!({})),
-        ("agent_journal_checkpoints_forget", json!({"payload": "{}"})),
-        ("agent_journal_uncommitted", json!({"payload": "{}"})),
-        ("agent_journal_discard", json!({"payload": "{}"})),
+        ("agent_journal_history", call(json!({"payload": "{}"}))),
+        ("agent_journal_checkpoints", call(json!({}))),
+        ("agent_journal_checkpoints_forget", call(json!({"payload": "{}"}))),
+        ("agent_journal_uncommitted", call(json!({"payload": "{}"}))),
+        ("agent_journal_discard", call(json!({"payload": "{}"}))),
         ("agent_journal_restore_prepare", json!({"payload": "{}"})),
         ("agent_journal_prepare", json!({"payload": "not json"})),
         (
@@ -117,11 +124,11 @@ fn future_format_every_journal_command_refuses_through_dispatch_and_both_files_k
             "agent_journal_register_page",
             json!({"pageIdentity": "0".repeat(32)}),
         ),
-        ("agent_journal_capture", json!({"payload": "{}"})),
-        ("agent_journal_arm_epoch", json!({"payload": "{}"})),
-        ("agent_journal_close_epoch", json!({"payload": "{}"})),
-        ("agent_journal_release_window", json!({"window": "doc-1"})),
-        ("agent_journal_git_export", json!({"payload": "{}"})),
+        ("agent_journal_capture", call(json!({"payload": "{}"}))),
+        ("agent_journal_arm_epoch", call(json!({"payload": "{}"}))),
+        ("agent_journal_close_epoch", call(json!({"payload": "{}"}))),
+        ("agent_journal_release_window", call(json!({"window": "doc-1"}))),
+        ("agent_journal_git_export", call(json!({"payload": "{}"}))),
     ];
     for (command, args) in calls {
         let err = invoke_from(&caller, command, args).expect_err(&format!("{command} must refuse"));

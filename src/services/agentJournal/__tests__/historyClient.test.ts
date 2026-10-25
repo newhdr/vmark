@@ -2,7 +2,7 @@
 // WI-AL1.6 — the history panel's IPC client: a restore prepare sends one JSON string and returns the text to apply (with the overwritten buffer's baseline and the uncommitted entry it resolves); uncommitted entries are listed with their preview and discarded by document key; malformed replies and refusals become JournalRefusal; the restore prepare runs as a request with a frozen payload and a bound reply (WI-AL2.2g)
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.unmock("@/services/agentJournal/journalTransport");
+vi.mock("@/services/agentJournal/journalTransport", () => import("@/test/agentJournalWireFake").then((m) => m.callBindingTransportModule()));
 
 import { invoke } from "@tauri-apps/api/core";
 import { JournalRefusal } from "../journalRefusal";

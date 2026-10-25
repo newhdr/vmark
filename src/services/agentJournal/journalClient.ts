@@ -30,7 +30,7 @@ import type { JournalMcpActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
 import type { SelectionCertificate } from "./selectionCertificate";
 import type { CaptureId } from "./provenance/captureId";
-import { callJournal as call, isNullableString, isObject, isString, malformed, parseBound, parsePreparedTxn } from "./journalIpc";
+import { callJournal as call, callJournalBound, isNullableString, isObject, isString, malformed, parseBound, parsePreparedTxn } from "./journalIpc";
 import type { PagePair } from "./pageRegistration";
 import { journalWarn } from "@/utils/debug";
 
@@ -223,7 +223,7 @@ export async function abortControlledWrite(txn: string, reason: JournalAbortReas
 
 /** Record a finished save. Rejects with a `JournalRefusal`. */
 export async function captureSaveToJournal(input: CaptureInput): Promise<CapturedSave> {
-  const r = await call("agent_journal_capture", { payload: JSON.stringify(input) });
+  const r = await callJournalBound("agent_journal_capture", { payload: JSON.stringify(input) });
   if (
     !isObject(r) ||
     !isString(r.doc) ||

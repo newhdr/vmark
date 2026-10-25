@@ -20,7 +20,7 @@
  * @module services/agentJournal/docHistoryClient
  */
 
-import { callJournal, isDecimal, isEpochMillis, isNullableString, isObject, isString, malformed } from "./journalIpc";
+import { callJournalBound, isDecimal, isEpochMillis, isNullableString, isObject, isString, malformed } from "./journalIpc";
 import { parseJournalActor, type JournalActor } from "./journalActor";
 import { BREAK_REASONS, type BreakReason } from "./provenance/accumulator";
 
@@ -174,7 +174,7 @@ function blockedOf(b: unknown): BlockedHunk {
 
 /** Document `docKey`'s history. Rejects with a `JournalRefusal`. */
 export async function listDocumentHistory(docKey: string): Promise<DocumentHistory> {
-  const r = await callJournal(COMMAND, { payload: JSON.stringify({ docKey }) });
+  const r = await callJournalBound(COMMAND, { payload: JSON.stringify({ docKey }) });
   if (
     !isObject(r) ||
     !isDecimal(r.generation) ||

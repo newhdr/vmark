@@ -49,6 +49,7 @@
 import { writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { evalJs } from "../lib/bridge.mjs";
+import { BOUND_INVOKE_SNIPPET } from "../lib/journalCall.mjs";
 import { makeAppTempDir } from "../lib/fixtures.mjs";
 import { openFixtureInNewTab } from "../lib/disk.mjs";
 import { startVmarkMcp, bridgeReady } from "../lib/vmarkMcp.mjs";
@@ -90,10 +91,9 @@ async function journalState(client, filePath) {
   const r = await evalJs(
     client,
     `(async () => {
-       try {
-         const invoke = window.__TAURI__.core.invoke;
-         const h = await invoke("agent_journal_history", { payload: ${JSON.stringify(payload)} });
-         const u = await invoke("agent_journal_uncommitted", { payload: ${JSON.stringify(payload)} });
+       try {${BOUND_INVOKE_SNIPPET}
+         const h = await boundInvoke("agent_journal_history", { payload: ${JSON.stringify(payload)} });
+         const u = await boundInvoke("agent_journal_uncommitted", { payload: ${JSON.stringify(payload)} });
          return JSON.stringify({ ok: true, generation: h.generation, rows: h.rows, degraded: h.degraded, uncommitted: u });
        } catch (e) { return JSON.stringify({ ok: false, error: e && e.message ? e.message : String(e) }); }
      })()`,

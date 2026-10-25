@@ -23,7 +23,7 @@ import type { PreparedTxn, PrepareSpec } from "./journalClient";
 import { parseJournalActor, type JournalActor } from "./journalActor";
 import type { JournalProvenancePayload } from "./unsavedProvenance";
 import type { CaptureId } from "./provenance/captureId";
-import { callJournal, isDecimal, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
+import { callJournalBound, isDecimal, isNullableString, isObject, isString, malformed, parsePreparedTxn } from "./journalIpc";
 
 /** What a restore puts back: a revision, an uncommitted entry's preimage, or a pre-journal checkpoint. */
 export type RestoreSource =
@@ -96,7 +96,7 @@ function entryOf(command: string, row: unknown): UncommittedEntry {
 /** A document's uncommitted entries, oldest first. Rejects with a `JournalRefusal`. */
 export async function listUncommitted(docKey: string): Promise<UncommittedEntry[]> {
   const command = "agent_journal_uncommitted";
-  const r = await callJournal(command, { payload: JSON.stringify({ docKey }) });
+  const r = await callJournalBound(command, { payload: JSON.stringify({ docKey }) });
   if (!Array.isArray(r)) throw malformed(command);
   return r.map((row) => entryOf(command, row));
 }
@@ -104,7 +104,7 @@ export async function listUncommitted(docKey: string): Promise<UncommittedEntry[
 /** Discard one uncommitted entry. `durable: false` = queued. Rejects with a `JournalRefusal`. */
 export async function discardUncommitted(docKey: string, txn: string): Promise<{ durable: boolean }> {
   const command = "agent_journal_discard";
-  const r = await callJournal(command, { payload: JSON.stringify({ docKey, txn }) });
+  const r = await callJournalBound(command, { payload: JSON.stringify({ docKey, txn }) });
   if (!isObject(r) || typeof r.durable !== "boolean") throw malformed(command);
   return { durable: r.durable };
 }

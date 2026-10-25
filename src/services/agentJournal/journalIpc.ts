@@ -1,13 +1,20 @@
 /**
  * Journal IPC — the shared call and reply-shape helpers of the agent edit
  * journal's clients: every rejection is read as a `JournalRefusal`, a reply
- * that is not the expected shape is refused as `JOURNAL_UNAVAILABLE`, and a
- * prepare's payload is frozen once under its request id and page pair.
+ * that is not the expected shape is refused as `JOURNAL_UNAVAILABLE`, a
+ * prepare's payload is frozen once under its request id and page pair, and
+ * every other command is bound to a fresh call id.
  *
  * Key decisions:
  *   - A bound reply (`{bind, reply}`) is checked against what was sent
  *     before its reply is read: a bind that differs in any field, or has a
  *     field too many, is malformed, never a confirmation of this request.
+ *   - A command with no request key (`callJournalBound`) is sent with a
+ *     `callId` minted for that call alone, and its reply is read only when
+ *     it echoes that id. A reply Tauri delivers into the wrong callback
+ *     (a reloaded page reusing callback ids) is then a transport failure,
+ *     never another call's answer. A call id that cannot be minted makes
+ *     the journal unavailable and nothing is sent.
  *   - A prepare's or abandon's refusal is validated here, at the boundary,
  *     into `JournalRefusal.settlement` (`journalSettlement.ts`).
  *
@@ -126,4 +133,51 @@ export async function callJournal(command: string, args: Record<string, unknown>
     const settlement = settleRequestRefusal(error, expect);
     throw new JournalRefusal(journalCode, message, head, field, { uncertain, hunk, block, settlement });
   }
+}
+
+/** A fresh call id: 16 random bytes as 32 lowercase hex, or `null` when none can be minted. */
+function mintCallId(): string | null {
+  try {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Invoke call-bound `command` with `args` and a fresh `callId`; resolves
+ * with the `reply` it echoes. A rejection is passed to `onRejection`. With
+ * no call id to send, nothing is invoked and the journal is unavailable.
+ */
+async function invokeCallBound(
+  command: string,
+  args: Record<string, unknown>,
+  onRejection: (error: unknown) => unknown,
+): Promise<unknown> {
+  const callId = mintCallId();
+  if (callId === null) throw new JournalRefusal("JOURNAL_UNAVAILABLE", `${command}: no call id could be minted`);
+  let r: unknown;
+  try {
+    r = await invokeJournal(command, { ...args, callId });
+  } catch (error) {
+    throw onRejection(error);
+  }
+  return parseBound(command, r, { callId });
+}
+
+/**
+ * Invoke a command with no request key, bound to a fresh call id; the
+ * echoed `reply`, or a `JournalRefusal` (a misbound reply is `malformed`).
+ */
+export function callJournalBound(command: string, args: Record<string, unknown>): Promise<unknown> {
+  return invokeCallBound(command, args, toJournalRefusal);
+}
+
+/**
+ * `callJournalBound`, but a rejection is rethrown unchanged: for a caller
+ * that reads the command's own error detail (the Git export's codes).
+ */
+export function callJournalBoundRaw(command: string, args: Record<string, unknown>): Promise<unknown> {
+  return invokeCallBound(command, args, (error) => error);
 }

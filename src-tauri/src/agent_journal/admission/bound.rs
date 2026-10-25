@@ -8,14 +8,24 @@
 //!     pair it named. The generation is a canonical decimal string.
 //!   - The envelope is wire-only: the persisted receipt stores the bare
 //!     reply, so its bytes are unchanged.
+//!   - A command with no request key (a capture, an epoch, the history
+//!     panel's reads, …) is bound by a call id the caller mints per call:
+//!     32 lowercase hex, checked before the command does anything, echoed
+//!     unchanged. It names one call, so it binds a reply and nothing else.
 //!
 //! @module agent_journal/admission/bound
+
+use std::future::Future;
 
 use serde::Serialize;
 
 use crate::agent_journal::admission::answer::RequestState;
+use crate::agent_journal::admission::identity::is_hex32;
 use crate::agent_journal::admission::receipt::{PayloadDigest, RequestId};
+use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::TxnId;
+use crate::agent_journal::refusal::refusal;
+use crate::command_error::CommandError;
 
 /// `{bind, reply}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -40,6 +50,42 @@ pub struct PairBind {
     pub page_identity: String,
     #[serde(with = "crate::agent_journal::u64_wire")]
     pub webview_generation: u64,
+}
+
+/// What binds the reply of a command with no request key: the caller's
+/// call id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallBind {
+    call_id: String,
+}
+
+impl CallBind {
+    /// `call_id` as a bind; anything but 32 lowercase hex is `INVALID_REQUEST`.
+    pub fn parse(call_id: &str) -> Result<Self, CommandError> {
+        if is_hex32(call_id) {
+            Ok(Self {
+                call_id: call_id.to_owned(),
+            })
+        } else {
+            Err(refusal(&TxnError::InvalidRequest(
+                "callId must be 32 lowercase hex digits".into(),
+            )))
+        }
+    }
+}
+
+/// Run `work` for the call `call_id` names and envelope its reply. A
+/// malformed id is refused before `work` is polled, so nothing runs.
+pub async fn bind_call<T>(
+    call_id: &str,
+    work: impl Future<Output = Result<T, CommandError>>,
+) -> Result<Bound<CallBind, T>, CommandError> {
+    let bind = CallBind::parse(call_id)?;
+    Ok(Bound {
+        bind,
+        reply: work.await?,
+    })
 }
 
 /// What an abandon did, or found already done.

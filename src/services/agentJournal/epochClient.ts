@@ -15,7 +15,7 @@
  * @module services/agentJournal/epochClient
  */
 
-import { callJournal as call, isDecimal, isObject, isString as isId, malformed } from "./journalIpc";
+import { callJournalBound as call, isDecimal, isObject, isString as isId, malformed } from "./journalIpc";
 
 export interface ArmedEpoch {
   /** The journal's document id: a payload's `document`. */

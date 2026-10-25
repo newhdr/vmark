@@ -338,6 +338,22 @@
         "assert": ["cleanupWorkerFailures", "cleanup_worker_failures"]
       },
       {
+        "row": "a capture reply delivered into another page's callback cannot mark a save recorded",
+        "wi": "WI-AL2.2i",
+        "file": "src/services/agentJournal/__tests__/tauriIpcCallBind.test.ts",
+        "title": "a_misdelivered_capture_reply_cannot_mark_a_save_recorded",
+        "runner": "vitest",
+        "assert": ["\\bharness\\.reload\\(", "\\bharness\\.deliver\\(", "\\bcaptureSaveToJournal\\(", "JOURNAL_UNAVAILABLE"]
+      },
+      {
+        "row": "every agent_journal command in all_commands! has an R98 bind or a callId echo",
+        "wi": "WI-AL2.2i",
+        "file": "src-tauri/src/agent_journal/call_bind_dispatch.test.rs",
+        "title": "every_journal_command_reply_is_bound",
+        "runner": "cargo",
+        "assert": ["command_registry\\.rs", "Bound<CallBind", "call_id: String", "CALL_BOUND"]
+      },
+      {
         "row": "uncertainty contract: the freeze is released only on a confirmed clean refusal",
         "wi": "WI-AL2.2g",
         "file": "src/services/agentJournal/__tests__/journalUncertainty.test.ts",

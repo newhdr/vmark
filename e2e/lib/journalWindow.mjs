@@ -32,6 +32,7 @@ import { join } from "node:path";
 import { evalJs, listWindows } from "./bridge.mjs";
 import { makeAppTempDir } from "./fixtures.mjs";
 import { DRIVABLE_SNIPPET, drivableGap } from "./readiness.mjs";
+import { BOUND_INVOKE_SNIPPET } from "./journalCall.mjs";
 
 /** Run `script` in `label`'s webview; its evaluated value. */
 export async function inWindow(client, label, script, timeoutMs = 15000) {
@@ -215,10 +216,9 @@ export async function journalOf(client, filePath) {
   const r = await settle(
     client,
     "main",
-    `(async () => {
-       const invoke = window.__TAURI__.core.invoke;
-       const h = await invoke("agent_journal_history", { payload: ${JSON.stringify(payload)} });
-       const u = await invoke("agent_journal_uncommitted", { payload: ${JSON.stringify(payload)} });
+    `(async () => {${BOUND_INVOKE_SNIPPET}
+       const h = await boundInvoke("agent_journal_history", { payload: ${JSON.stringify(payload)} });
+       const u = await boundInvoke("agent_journal_uncommitted", { payload: ${JSON.stringify(payload)} });
        return { rows: h.rows, uncommitted: u };
      })()`,
     `reading the journal of ${filePath}`,
@@ -236,7 +236,9 @@ export async function discardUncommitted(client, filePath, txn) {
   await settle(
     client,
     "main",
-    `window.__TAURI__.core.invoke("agent_journal_discard", { payload: ${JSON.stringify(payload)} })`,
+    `(async () => {${BOUND_INVOKE_SNIPPET}
+       return boundInvoke("agent_journal_discard", { payload: ${JSON.stringify(payload)} });
+     })()`,
     `discarding ${txn}`,
   );
 }

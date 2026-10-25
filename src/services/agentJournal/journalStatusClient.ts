@@ -28,7 +28,7 @@
  * @module services/agentJournal/journalStatusClient
  */
 
-import { callJournal, isDecimal, isObject, isString, malformed } from "./journalIpc";
+import { callJournalBound, isDecimal, isObject, isString, malformed } from "./journalIpc";
 
 const PHASES = ["starting", "ready", "failed"] as const;
 type JournalPhase = (typeof PHASES)[number];
@@ -135,7 +135,7 @@ const COMMAND = "agent_journal_status";
  * opened journal has one. Rejects with a `JournalRefusal`.
  */
 export async function readJournalHealth(): Promise<JournalHealth> {
-  const r = await callJournal(COMMAND, {});
+  const r = await callJournalBound(COMMAND, {});
   const retention = isObject(r) ? parseRetention(r.gc) : null;
   if (
     !isObject(r) ||

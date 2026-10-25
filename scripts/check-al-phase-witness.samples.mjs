@@ -150,6 +150,14 @@ export const SAMPLES = {
   "the journal status reports cleanup worker failures": [
     'assert_eq!(json["cleanupWorkerFailures"], json!(0));', "assert_eq!(state.status().cleanup_worker_failures, 1);",
   ],
+  "a capture reply delivered into another page's callback cannot mark a save recorded": [
+    "harness.reload();", "harness.deliver(old.callback, misbound);", "const out = captureSaveToJournal(input);",
+    'await expect(out).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });',
+  ],
+  "every agent_journal command in all_commands! has an R98 bind or a callId echo": [
+    'let registry = include_str!("../command_registry.rs");', 'assert!(returns.contains("Bound<CallBind"));',
+    'assert!(sig.contains("call_id: String"));', "assert_eq!(call_bound, CALL_BOUND.to_vec());",
+  ],
   "uncertainty contract: the freeze is released only on a confirmed clean refusal": [
     "expect(release).toHaveBeenCalled();", "expect(releaseOnRetry).not.toHaveBeenCalled();", "expect(invalidate).toHaveBeenCalled();",
     "expect(out).toMatchObject({ uncertain: true });",

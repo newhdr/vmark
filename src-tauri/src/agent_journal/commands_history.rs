@@ -5,11 +5,12 @@
 //!
 //! Key decisions:
 //!   - Same contract as `commands`: `async` + `spawn_blocking`, JSON string
-//!     payloads, `JOURNAL_UNAVAILABLE` when no journal is open.
+//!     payloads, `JOURNAL_UNAVAILABLE` when no journal is open, and a
+//!     reply bound to the caller's request id or `callId`.
 //!
 //! @module agent_journal/commands_history
 
-use crate::agent_journal::admission::bound::{Bound, RequestBind};
+use crate::agent_journal::admission::bound::{bind_call, Bound, CallBind, RequestBind};
 use crate::agent_journal::commands::run;
 use crate::agent_journal::controlled_restore::RestorePrepared;
 use crate::agent_journal::controller::AbortReply;
@@ -49,8 +50,9 @@ pub async fn agent_journal_restore_prepare<R: tauri::Runtime>(
 pub async fn agent_journal_history(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<DocHistory, CommandError> {
-    run(&state, move |c| c.history(&payload)).await
+    call_id: String,
+) -> Result<Bound<CallBind, DocHistory>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.history(&payload))).await
 }
 
 /// A document's uncommitted entries (`payload`: JSON `{docKey}`).
@@ -61,8 +63,9 @@ pub async fn agent_journal_history(
 pub async fn agent_journal_uncommitted(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<Vec<UncommittedEntry>, CommandError> {
-    run(&state, move |c| c.uncommitted(&payload)).await
+    call_id: String,
+) -> Result<Bound<CallBind, Vec<UncommittedEntry>>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.uncommitted(&payload))).await
 }
 
 /// Discard one uncommitted entry (`payload`: JSON `{docKey, txn}`).
@@ -73,8 +76,9 @@ pub async fn agent_journal_uncommitted(
 pub async fn agent_journal_discard(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<AbortReply, CommandError> {
-    run(&state, move |c| c.discard(&payload)).await
+    call_id: String,
+) -> Result<Bound<CallBind, AbortReply>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.discard(&payload))).await
 }
 
 /// Every checkpoint of the history panel, in the order they were written.
@@ -84,8 +88,9 @@ pub async fn agent_journal_discard(
 #[tauri::command]
 pub async fn agent_journal_checkpoints(
     state: tauri::State<'_, AgentJournalState>,
-) -> Result<Vec<CheckpointView>, CommandError> {
-    run(&state, move |c| c.checkpoints()).await
+    call_id: String,
+) -> Result<Bound<CallBind, Vec<CheckpointView>>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.checkpoints())).await
 }
 
 /// Delete checkpoints (`payload`: JSON `{ids}`) from the journal.
@@ -96,6 +101,7 @@ pub async fn agent_journal_checkpoints(
 pub async fn agent_journal_checkpoints_forget(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<ForgetReport, CommandError> {
-    run(&state, move |c| c.checkpoints_forget(&payload)).await
+    call_id: String,
+) -> Result<Bound<CallBind, ForgetReport>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.checkpoints_forget(&payload))).await
 }

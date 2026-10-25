@@ -6,7 +6,8 @@
  * Key decisions:
  *   - The payload is one JSON string like every journal command, so the
  *     folder path and the document key arrive byte for byte.
- *   - The report is checked before it is trusted; a malformed one throws.
+ *   - The report is checked before it is trusted; a malformed one, or one
+ *     bound to another call (`callJournalBoundRaw`), throws.
  *   - A refusal is rethrown unchanged: its `detail.exportCode` is the
  *     contract the command layer translates, and an unknown code reads as
  *     `null` rather than as some other refusal.
@@ -16,8 +17,8 @@
  * @module services/agentJournal/gitExportClient
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import { commandErrorDetailString } from "@/services/commands/commandError";
+import { callJournalBoundRaw } from "./journalIpc";
 
 const COMMAND = "agent_journal_git_export";
 
@@ -64,7 +65,7 @@ function parseReport(reply: unknown): GitExportReport {
 
 /** Export the document `docKey` into the repository containing `repository`. */
 export async function exportDocumentToGit(docKey: string, repository: string): Promise<GitExportReport> {
-  const reply = await invoke<unknown>(COMMAND, {
+  const reply = await callJournalBoundRaw(COMMAND, {
     payload: JSON.stringify({ docKey, repository }),
   });
   return parseReport(reply);

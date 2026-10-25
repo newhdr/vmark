@@ -1,9 +1,9 @@
 //! Tauri commands of the agent edit journal: the status query and the
 //! controlled-write protocol (`register_page`, then `prepare` → `commit` |
 //! `abort`, or `abandon`) a window runs for its agent writes, the capture of a save, the editing epochs a
-//! window's provenance maps are certified under, the release of a
-//! closed window's base root, and carrying a document to a new key or
-//! looking one up.
+//! window's provenance maps are certified under, and the release of a
+//! closed window's base root. Carrying a document to a new key or looking
+//! one up is in `document` (`commands_document.rs`).
 //!
 //! Key decisions:
 //!   - `async` + `spawn_blocking`: every write fsyncs under the writer lock,
@@ -17,6 +17,10 @@
 //!     (`agent_journal_register_page`). The caller's label is always the
 //!     invoking webview's, never an argument. Success replies travel in
 //!     `{bind, reply}` envelopes (`admission::bound`).
+//!   - Every other command takes the caller's `callId` and echoes it as
+//!     `{bind: {callId}, reply}`, so a reply delivered to the wrong call is
+//!     caught before it is read. A malformed id is refused before the
+//!     command runs.
 //!   - No journal (still starting, or failed to open) is a `conflict` with
 //!     `journalCode: JOURNAL_UNAVAILABLE`; the caller does not write. A
 //!     journal a newer build wrote refuses as `JOURNAL_FUTURE_FORMAT`.
@@ -27,16 +31,19 @@ use serde::Deserialize;
 use serde_json::Value;
 use tauri::Manager;
 
-use crate::agent_journal::admission::bound::{AbandonReply, Bound, PairBind, RequestBind};
+use crate::agent_journal::admission::bound::{
+    bind_call, AbandonReply, Bound, CallBind, PairBind, RequestBind,
+};
 use crate::agent_journal::capture::CaptureReply;
 use crate::agent_journal::controlled::{ControlledCommitted, ControlledPrepared};
 use crate::agent_journal::controller::{AbortReply, Controller, EpochReply};
-use crate::agent_journal::ids::DocId;
 use crate::agent_journal::service::{register_window_page, AgentJournalState, AgentJournalStatus};
 use crate::command_error::CommandError;
 
 #[path = "debug_pause.rs"]
 mod debug_pause;
+#[path = "commands_document.rs"]
+pub mod document;
 
 /// Where the journal's startup stands: starting, ready (with generation,
 /// health and the legacy import report) or failed (with the reason).
@@ -48,8 +55,9 @@ mod debug_pause;
 #[tauri::command]
 pub async fn agent_journal_status(
     state: tauri::State<'_, AgentJournalState>,
-) -> Result<AgentJournalStatus, CommandError> {
-    Ok(state.status())
+    call_id: String,
+) -> Result<Bound<CallBind, AgentJournalStatus>, CommandError> {
+    bind_call(&call_id, async { Ok(state.status()) }).await
 }
 
 pub(super) async fn run<T: Send + 'static>(
@@ -206,8 +214,9 @@ pub async fn agent_journal_register_page<R: tauri::Runtime>(
 pub async fn agent_journal_capture(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<CaptureReply, CommandError> {
-    run(&state, move |c| c.capture(&payload)).await
+    call_id: String,
+) -> Result<Bound<CallBind, CaptureReply>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.capture(&payload))).await
 }
 
 /// Arm the next editing epoch of a document (`payload`: JSON `{docKey}`);
@@ -219,8 +228,9 @@ pub async fn agent_journal_capture(
 pub async fn agent_journal_arm_epoch(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<EpochReply, CommandError> {
-    run(&state, move |c| c.arm_epoch(&payload)).await
+    call_id: String,
+) -> Result<Bound<CallBind, EpochReply>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.arm_epoch(&payload))).await
 }
 
 /// Close a document's armed epoch (`payload`: JSON `{docKey, epoch}`).
@@ -231,8 +241,9 @@ pub async fn agent_journal_arm_epoch(
 pub async fn agent_journal_close_epoch(
     state: tauri::State<'_, AgentJournalState>,
     payload: String,
-) -> Result<(), CommandError> {
-    run(&state, move |c| c.close_epoch(&payload)).await
+    call_id: String,
+) -> Result<Bound<CallBind, ()>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.close_epoch(&payload))).await
 }
 
 /// A window closed a document: release its base root (`window`:
@@ -244,48 +255,17 @@ pub async fn agent_journal_close_epoch(
 pub async fn agent_journal_release_window(
     state: tauri::State<'_, AgentJournalState>,
     window: String,
-) -> Result<(), CommandError> {
-    run(&state, move |c| c.release_window(&window)).await
-}
-
-/// Carry a document to a new key on Save As or in-app rename (`payload`:
-/// JSON `{from, to, expectedDoc?}`; `expectedDoc` absent checks nothing,
-/// `null` requires `from` to carry no document, an id requires that one).
-/// Replies the document the destination carries now. Works before the
-/// journal is ready.
-///
-/// # Errors
-/// `INVALID_REQUEST` for a malformed payload or a source that no longer
-/// carries `expectedDoc`; `JOURNAL_IO` when the bind cannot be made durable.
-#[tauri::command]
-pub async fn agent_journal_bind_document(
-    app: tauri::AppHandle,
-    payload: String,
-) -> Result<DocId, CommandError> {
-    tokio::task::spawn_blocking(move || app.state::<AgentJournalState>().bind_document(&payload))
-        .await
-        .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
-}
-
-/// The document a key carries, without minting one (`payload`: JSON
-/// `{docKey}`); replies the id or `null`. Works before the journal is
-/// ready.
-///
-/// # Errors
-/// `INVALID_REQUEST` for a malformed payload or key.
-#[tauri::command]
-pub async fn agent_journal_find_document(
-    app: tauri::AppHandle,
-    payload: String,
-) -> Result<Option<DocId>, CommandError> {
-    tokio::task::spawn_blocking(move || app.state::<AgentJournalState>().find_document(&payload))
-        .await
-        .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
+    call_id: String,
+) -> Result<Bound<CallBind, ()>, CommandError> {
+    bind_call(&call_id, run(&state, move |c| c.release_window(&window))).await
 }
 
 #[cfg(all(test, not(target_os = "windows")))]
 #[path = "abandon_dispatch.test.rs"]
 mod abandon_dispatch;
+#[cfg(all(test, not(target_os = "windows")))]
+#[path = "call_bind_dispatch.test.rs"]
+mod call_bind_dispatch;
 #[cfg(all(test, not(target_os = "windows")))]
 #[path = "commands_dispatch.test.rs"]
 pub(crate) mod commands_dispatch;

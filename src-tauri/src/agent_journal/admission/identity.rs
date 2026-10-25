@@ -24,7 +24,7 @@ pub struct Incarnation(String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PageIdentity(String);
 
-fn is_hex32(s: &str) -> bool {
+pub(crate) fn is_hex32(s: &str) -> bool {
     s.len() == 32 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 

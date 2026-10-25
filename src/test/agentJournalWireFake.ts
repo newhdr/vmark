@@ -15,6 +15,10 @@
  *     Rust command does when its writer is off.
  *   - Commit and abort are bound to the txn and pair they named; the page
  *     pair is not validated here. Abandon answers `fenced`.
+ *   - A call-bound command (`CALL_BOUND`) must carry a well-formed
+ *     `callId`, as the Rust command requires; it is stripped before the
+ *     command is answered and echoed around the reply, so a test's
+ *     `invoke` mock and assertions see the arguments without it.
  *   - Any other command (a restore's prepare, the history panel's reads)
  *     falls through to the global `invoke` mock; `answerPrepare` and
  *     `boundRestoreReply` build a restore prepare's answer for a test that
@@ -22,6 +26,8 @@
  *
  * Use: the global setup mocks `@/services/agentJournal/journalTransport`
  * with `journalTransportModule()`; drive `agentJournalFake` from the test.
+ * A client test that scripts raw replies mocks it with
+ * `callBindingTransportModule()` instead.
  *
  * @module test/agentJournalWireFake
  */
@@ -128,8 +134,47 @@ async function abort(args: Args): Promise<unknown> {
 /** Abandons the fake answered: always `fenced`. */
 export const abandonSpy = vi.fn((_payload: string) => ({ state: "fenced" }));
 
+/** The commands whose reply echoes the caller's `callId` (`journalIpc.callJournalBound`). */
+const CALL_BOUND = new Set([
+  "agent_journal_capture",
+  "agent_journal_arm_epoch",
+  "agent_journal_close_epoch",
+  "agent_journal_bind_document",
+  "agent_journal_find_document",
+  "agent_journal_release_window",
+  "agent_journal_discard",
+  "agent_journal_uncommitted",
+  "agent_journal_checkpoints_forget",
+  "agent_journal_checkpoints",
+  "agent_journal_history",
+  "agent_journal_status",
+  "agent_journal_git_export",
+]);
+
+type Answerer = (command: string, args: Args) => Promise<unknown>;
+
+/** `respond`'s answer, with a call-bound command's `callId` checked, stripped and echoed. */
+async function bindCall(command: string, args: Args, respond: Answerer): Promise<unknown> {
+  if (!CALL_BOUND.has(command)) return respond(command, args);
+  const { callId, ...rest } = args;
+  if (typeof callId !== "string" || !/^[0-9a-f]{32}$/.test(callId)) {
+    throw rejection("INVALID_REQUEST: callId must be 32 lowercase hex digits", { journalCode: "INVALID_REQUEST" });
+  }
+  return { bind: { callId }, reply: await respond(command, rest) };
+}
+
+/** The global `invoke` mock, loaded late: a static import would load the Tauri core before a test file's own mock of it. */
+async function viaInvoke(command: string, args: Args): Promise<unknown> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<unknown>(command, args);
+}
+
 /** Answer one journal command over the fake. */
-export async function invokeJournal(command: string, args: Args): Promise<unknown> {
+export function invokeJournal(command: string, args: Args): Promise<unknown> {
+  return bindCall(command, args, answer);
+}
+
+async function answer(command: string, args: Args): Promise<unknown> {
   switch (command) {
     case "agent_journal_register_page": {
       generation += 1;
@@ -148,15 +193,21 @@ export async function invokeJournal(command: string, args: Args): Promise<unknow
       const input: unknown = JSON.parse(String(args.payload));
       return plain(() => fake.captureSaveToJournal(input as Parameters<typeof fake.captureSaveToJournal>[0]));
     }
-    default: {
-      // Loaded late: a static import here would load the Tauri core before a test file's own mock of it.
-      const { invoke } = await import("@tauri-apps/api/core");
-      return invoke<unknown>(command, args);
-    }
+    default:
+      return viaInvoke(command, args);
   }
 }
 
 /** The module object for `vi.mock("@/services/agentJournal/journalTransport", …)`. */
 export function journalTransportModule() {
   return { invokeJournal };
+}
+
+/**
+ * A transport that answers every command from the global `invoke` mock,
+ * only binding the call-bound ones: for a client test that scripts the
+ * raw replies of its commands.
+ */
+export function callBindingTransportModule() {
+  return { invokeJournal: (command: string, args: Args) => bindCall(command, args, viaInvoke) };
 }

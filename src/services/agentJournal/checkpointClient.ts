@@ -20,7 +20,7 @@
  * @module services/agentJournal/checkpointClient
  */
 
-import { callJournal, isEpochMillis, isNullableString, isObject, isString, malformed } from "./journalIpc";
+import { callJournalBound, isEpochMillis, isNullableString, isObject, isString, malformed } from "./journalIpc";
 import { JournalRefusal } from "./journalRefusal";
 
 /** Longest wait for the journal to finish starting. */
@@ -61,7 +61,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 async function waitForStart(): Promise<void> {
   const deadline = Date.now() + JOURNAL_START_WAIT_MS;
   for (;;) {
-    const s = await callJournal("agent_journal_status", {});
+    const s = await callJournalBound("agent_journal_status", {});
     const phase = isObject(s) ? s.phase : undefined;
     if (phase === "ready") return;
     if (phase !== "starting") {
@@ -102,7 +102,7 @@ function isCheckpoint(v: unknown): v is JournalCheckpoint {
 export async function listJournalCheckpoints(): Promise<JournalCheckpoint[]> {
   await journalReady();
   const command = "agent_journal_checkpoints";
-  const r = await callJournal(command, {});
+  const r = await callJournalBound(command, {});
   if (!Array.isArray(r) || !r.every(isCheckpoint)) throw malformed(command);
   return r;
 }
@@ -116,7 +116,7 @@ export async function listJournalCheckpoints(): Promise<JournalCheckpoint[]> {
 export async function forgetJournalCheckpoints(ids: readonly string[]): Promise<ForgetReport> {
   await journalReady();
   const command = "agent_journal_checkpoints_forget";
-  const r = await callJournal(command, { payload: JSON.stringify({ ids }) });
+  const r = await callJournalBound(command, { payload: JSON.stringify({ ids }) });
   const named = new Set(ids).size;
   if (!isObject(r) || !isCount(r.forgotten, named) || !isNullableString(r.blobError)) throw malformed(command);
   return { forgotten: r.forgotten, blobError: r.blobError };
