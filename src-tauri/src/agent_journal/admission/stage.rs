@@ -1,7 +1,9 @@
 //! Staging a multi-record prepare as one `admission` frame: every pending
 //! capture of the document linearized, the buffer recorded as a human
 //! baseline (its observation and linearization) when it is needed, then
-//! the `prepared` with its reply and receipt. Each item is checked and
+//! the `prepared` with its reply and receipt — or, for a revert that does
+//! not apply, the review decision it records. A frame of one item (a
+//! revert with nothing before it) is written as that item. Each item is checked and
 //! applied to a clone of the projection, reading texts through the pack
 //! overlaid with the blobs the frame will store, so every item derives
 //! from exactly the state the replay will have reached. The live
@@ -18,17 +20,20 @@ use crate::agent_journal::admission::blobs::StagedBlobs;
 use crate::agent_journal::admission::prepare::{
     needs_baseline, prepare_request, Minted, Request, Responder,
 };
-use crate::agent_journal::admission::prepared_record::prepared_record;
+use crate::agent_journal::admission::prepared_record::{prepared_record, revert_decision, Mint};
 use crate::agent_journal::admission::publish::Staging;
+use crate::agent_journal::admission::receipt::{Outcome, Receipt};
 use crate::agent_journal::admission::reduce::preflight;
 use crate::agent_journal::blob_store::BlobStore;
 use crate::agent_journal::controlled::Prep;
+use crate::agent_journal::controlled_revert::RevertDecided;
 use crate::agent_journal::effects_rules::{check_effects, EffectsCtx};
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
 use crate::agent_journal::projection::Projection;
-use crate::agent_journal::record::{Envelope, ObservedRef, Record, SCHEMA_V3};
+use crate::agent_journal::record::{Envelope, ObservedRef, Record, SCHEMA_V3, SCHEMA_V4};
 use crate::agent_journal::review::ReviewOp;
+use crate::agent_journal::schema_table::{label, receipt_min};
 use crate::agent_journal::writer::certificate::bind_to_parent;
 use crate::agent_journal::writer_derive::{derived, linearize_ctx_from};
 use crate::agent_journal::writer_epoch::{check_payload, observed_basis};
@@ -42,6 +47,9 @@ struct Frame {
     items: Vec<Envelope>,
     next_seq: u64,
     at: u64,
+    /// The schema of every item and of the frame: v4 when a revert's
+    /// receipt is among them, v3 otherwise.
+    schema: u32,
 }
 
 impl Frame {
@@ -54,11 +62,11 @@ impl Frame {
         &mut self,
         txn: TxnId,
         record: Record,
-        receipt: Option<crate::agent_journal::admission::receipt::Receipt>,
+        receipt: Option<Receipt>,
     ) -> Result<u64, TxnError> {
         let seq = self.next_seq;
         let env = Envelope {
-            schema_version: SCHEMA_V3,
+            schema_version: self.schema,
             seq,
             txn,
             at: self.at,
@@ -111,6 +119,32 @@ impl Frame {
         }
         Ok(())
     }
+
+    /// The envelope to write: one item alone, relabelled with its own
+    /// schema; more as one `admission` whose `txn` is the last item's.
+    fn into_envelope(mut self) -> Result<(Envelope, Projection), TxnError> {
+        if self.items.len() == 1 {
+            let mut env = self.items.remove(0);
+            env.schema_version = match &env.receipt {
+                Some(r) => label(&env.record).max(receipt_min(r)),
+                None => label(&env.record),
+            };
+            return Ok((env, self.proj));
+        }
+        let last = self
+            .items
+            .last()
+            .ok_or_else(|| TxnError::Invariant("an empty admission".into()))?;
+        let env = Envelope {
+            schema_version: self.schema,
+            seq: self.items[0].seq,
+            txn: last.txn,
+            at: self.at,
+            record: Record::Admission { items: self.items },
+            receipt: None,
+        };
+        Ok((env, self.proj))
+    }
 }
 
 /// What staging may read: the live projection and the pack.
@@ -131,11 +165,17 @@ pub(crate) fn staged(
     responder: &Responder,
     request: Option<&Request>,
 ) -> Result<Staging, TxnError> {
+    let revert = matches!(prep.review_op, ReviewOp::HunkRevert { .. });
     let mut f = Frame {
         proj: live.proj.clone(),
         items: Vec::new(),
         next_seq: live.next_seq,
         at: now_ms(),
+        schema: if revert && request.is_some() {
+            SCHEMA_V4
+        } else {
+            SCHEMA_V3
+        },
     };
     let mut blobs = StagedBlobs::new(live.pack);
     f.linearize_pending(&mut blobs, doc)?;
@@ -153,36 +193,53 @@ pub(crate) fn staged(
         bind_to_parent(&f.proj, doc, parent, &req.preimage, sent)?.split();
     let certified = certificate.is_some();
     req.certificate = certificate;
-    let r = prepared_record(&f.proj, &mut blobs, req)?;
-    blobs.stage(&r.preimage);
-    let minted = Minted {
-        txn: r.txn,
-        revision: r.revision,
-        generation: f.next_seq,
-        baseline,
-        certified,
-        fallback_reason: fallback,
+    let (txn, response) = match prepared_record(&f.proj, &mut blobs, req)? {
+        Mint::Prepared(r) => {
+            blobs.stage(&r.preimage);
+            let minted = Minted {
+                txn: r.txn,
+                revision: r.revision,
+                generation: f.next_seq,
+                baseline,
+                certified,
+                fallback_reason: fallback,
+                revert: r.revert,
+            };
+            let response = Outcome::Prepared(responder.reply(&minted));
+            f.push_receipted(r.txn, r.record, Responder::receipt(request, &response))?;
+            (r.txn, response)
+        }
+        Mint::NotApplied {
+            hunk,
+            review_gen,
+            decision,
+        } => {
+            let d = revert_decision(&f.proj, doc, &hunk, review_gen, &decision)?;
+            let response = Outcome::Decision(RevertDecided {
+                doc,
+                hunk: d.hunk,
+                action: d.action,
+                review_gen: d.review_gen,
+                generation: f.next_seq,
+                baseline,
+                head: d.head,
+            });
+            let txn = TxnId::new();
+            f.push_receipted(txn, d.record, Responder::receipt(request, &response))?;
+            (txn, response)
+        }
     };
-    let receipt = responder.receipt(request, &minted);
-    f.push_receipted(r.txn, r.record, receipt)?;
     let staged_blobs = blobs.into_staged();
-    let frame = Envelope {
-        schema_version: SCHEMA_V3,
-        seq: f.items[0].seq,
-        txn: r.txn,
-        at: f.at,
-        record: Record::Admission { items: f.items },
-        receipt: None,
-    };
-    preflight(live.proj, &frame)
+    let (env, proj) = f.into_envelope()?;
+    preflight(live.proj, &env)
         .map_err(|e| TxnError::Invariant(format!("staged admission: {e}")))?;
     Ok(Staging {
-        env: frame,
+        env,
         blobs: staged_blobs,
-        staged: Some(f.proj),
+        staged: Some(proj),
         doc,
-        txn: r.txn,
-        response: responder.reply(&minted),
+        txn,
+        response,
         fallback,
     })
 }

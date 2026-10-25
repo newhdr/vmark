@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL2.2a — the frozen R64 receipt fixtures, read from the Rust tree, decode in the client too: each stored prepared response (the agent write's, the restore's) parses through the production client decoder and re-serializes byte for byte inside its receipt; each digest is SHA-256 over the exact payload bytes; the client freezes each payload byte-identical from its fields and requestId; and two payloads with the same fields in another order are different requests to the digest | AL2.2g: the client appends the page identity after the requestId; the stored fixture bytes are unchanged and are the frozen payload's prefix
+// WI-AL2.2a — the frozen R64 receipt fixtures, read from the Rust tree, decode in the client too: each stored prepared response (the agent write's, the restore's) parses through the production client decoder and re-serializes byte for byte inside its receipt; each digest is SHA-256 over the exact payload bytes; the client freezes each payload byte-identical from its fields and requestId; and two payloads with the same fields in another order are different requests to the digest | AL2.2g: the client appends the page identity after the requestId; the stored fixture bytes are unchanged and are the frozen payload's prefix | AL2.2b: the schema-4 revert receipts decode too — an applied revert's prepared reply (its UTF-16 patch and postimage hash) and a revert's recorded decision (kind decision)
 import { describe, it, expect, vi } from "vitest";
 vi.unmock("@/services/agentJournal/journalTransport");
 import { createHash } from "node:crypto";
@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { parseControlledPrepared } from "../journalClient";
 import { parseRestorePrepared } from "../historyClient";
 import { freezePreparePayload } from "../journalIpc";
+import { parseRevertDecided, parseRevertPrepared } from "../revertReplies";
 
 interface Fixtures {
   receipts: Array<{ name: string; payload: string; receipt: string }>;
@@ -21,16 +22,19 @@ const sha256 = (text: string) => createHash("sha256").update(Buffer.from(text, "
 const DECODERS: Record<string, (r: unknown) => unknown> = {
   controlledPrepared: (r) => parseControlledPrepared("agent_journal_prepare", r),
   restorePrepared: (r) => parseRestorePrepared("agent_journal_restore_prepare", r),
+  revertPrepared: (r) => parseRevertPrepared("agent_journal_revert_prepare", r),
+  revertDecided: (r) => parseRevertDecided("agent_journal_revert_prepare", r),
 };
+const KINDS: Record<string, string> = { revertDecided: "decision" };
 
 describe("receipt fixtures", () => {
-  it("covers exactly the two prepared variants", () => {
+  it("covers exactly the prepared variants and the revert decision", () => {
     expect(fixtures.receipts.map((f) => f.name).sort()).toEqual(Object.keys(DECODERS).sort());
   });
 
   it.each(fixtures.receipts.map((f) => [f.name, f] as const))("%s: the response decodes losslessly", (name, f) => {
     const receipt = JSON.parse(f.receipt) as { requestId: string; digest: string; outcome: { kind: string; response: unknown } };
-    expect(receipt.outcome.kind).toBe("prepared");
+    expect(receipt.outcome.kind).toBe(KINDS[name] ?? "prepared");
     const decoded = DECODERS[name](receipt.outcome.response);
     expect(f.receipt.endsWith(`"response":${JSON.stringify(decoded)}}}`)).toBe(true);
   });

@@ -4,12 +4,18 @@
 //! staging, replay and hydration — and the receipt is indexed by `apply`
 //! for whichever envelope carries it.
 //!
+//! A revert decision's receipt reports the hunk's `reviewGen` after the
+//! decision; `check_decided_gen` holds it to the hunk's live one plus one,
+//! checked by `apply` just before the record reduces (an admission's
+//! earlier items may move it).
+//!
 //! An item that fails inside its own reducer after earlier items applied
 //! leaves those applied: on replay that is a corrupt journal (the writer
 //! stays off), and the writer stages on a clone it then drops.
 //!
 //! @module agent_journal/admission/reduce
 
+use crate::agent_journal::admission::receipt::Outcome;
 use crate::agent_journal::admission::{receipt, shape};
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::DocId;
@@ -39,6 +45,25 @@ pub(crate) fn preflight(proj: &Projection, env: &Envelope) -> Result<(), TxnErro
             return Err(corrupt(env, "names more than one document"));
         }
         doc = Some(named);
+    }
+    Ok(())
+}
+
+/// A decision receipt's `reviewGen` is its hunk's in `proj` plus one.
+pub(crate) fn check_decided_gen(proj: &Projection, env: &Envelope) -> Result<(), TxnError> {
+    let Some(Outcome::Decision(d)) = env.receipt.as_ref().map(|r| &r.outcome) else {
+        return Ok(());
+    };
+    let live = proj
+        .docs
+        .get(&d.doc)
+        .and_then(|doc| doc.hunks.get(&d.hunk))
+        .and_then(|h| h.review_gen.checked_add(1));
+    if live != Some(d.review_gen) {
+        return Err(TxnError::Corrupt(format!(
+            "seq {}: the receipt reports reviewGen {} for {}",
+            env.seq, d.review_gen, d.hunk.0
+        )));
     }
     Ok(())
 }

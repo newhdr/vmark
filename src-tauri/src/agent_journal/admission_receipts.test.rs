@@ -48,7 +48,7 @@ fn an_admission_reduces_every_item_and_indexes_its_receipt() {
     assert_eq!(p.txns[&a.txn].revision, *t_rev);
     let stored = &p.requests[&REQUEST.parse().unwrap()];
     assert_eq!(Some(stored), items[2].receipt.as_ref());
-    assert_eq!(stored.txn(), a.txn);
+    assert_eq!(stored.txn(), Some(a.txn));
     assert_eq!(p.requests.len(), 1);
 }
 

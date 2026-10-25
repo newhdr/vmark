@@ -121,12 +121,18 @@ pub(crate) fn plan(
     };
     let restored = *restored;
     let window = revert_window(current, *from, *to, restored).map_err(|e| broken(&e))?;
-    let effects = revert_effects(d, id, h, &window, postimage, restored, &broken)?;
-    Ok(RevertPlan {
-        decision,
-        effects,
-        window: Some((window, restored)),
-    })
+    match revert_effects(d, id, h, &window, postimage, restored, &broken)? {
+        Some(effects) => Ok(RevertPlan {
+            decision,
+            effects,
+            window: Some((window, restored)),
+        }),
+        None => Ok(RevertPlan {
+            decision: RevertDecision::Conflicted,
+            effects: ReviewEffects::default(),
+            window: None,
+        }),
+    }
 }
 
 /// The hunk `id` of `d`, once the gate lets a revert of it through.
@@ -155,8 +161,9 @@ fn decide_live(
     decide(&h.span, live_base, live_target, current).map_err(|e| broken(&e))
 }
 
-/// The spans of every non-settled hunk after an applied revert. Refused
-/// when the revert would edit any other live hunk.
+/// The spans of every non-settled hunk after an applied revert; `None`
+/// when the revert would edit any other live hunk, which makes it
+/// conflicted.
 fn revert_effects(
     d: &DocState,
     id: &HunkId,
@@ -165,7 +172,7 @@ fn revert_effects(
     postimage: &str,
     restored: Range,
     broken: &dyn Fn(&str) -> TxnError,
-) -> Result<ReviewEffects, TxnError> {
+) -> Result<Option<ReviewEffects>, TxnError> {
     let op = ReviewOp::HunkRevert {
         hunk_id: id.clone(),
         expected_review_gen: h.review_gen,
@@ -181,14 +188,12 @@ fn revert_effects(
     };
     let derived = derive(&ctx).map_err(|e| broken(&e))?;
     if derived.hit.iter().any(|o| o != id) {
-        return Err(TxnError::InvalidRequest(
-            "the revert would edit another live hunk".into(),
-        ));
+        return Ok(None);
     }
-    Ok(ReviewEffects {
+    Ok(Some(ReviewEffects {
         spans: derived.spans,
         ..Default::default()
-    })
+    }))
 }
 
 impl Writer {

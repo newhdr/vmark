@@ -198,7 +198,7 @@ fn a_v1_record_carrying_a_v2_field_or_kind_is_corrupt() {
 
 #[test]
 fn a_v1_only_build_leaves_a_v2_journal_off_and_untouched() {
-    assert_eq!((SCHEMA_VERSION, MAX_SUPPORTED_SCHEMA), (3, 3));
+    assert_eq!((SCHEMA_VERSION, MAX_SUPPORTED_SCHEMA), (4, 4));
     let dir = tmp();
     let doc = DocId::new();
     // A transaction left open by the newer build: its reservation died with

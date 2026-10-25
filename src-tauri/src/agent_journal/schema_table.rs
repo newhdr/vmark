@@ -13,8 +13,9 @@
 //! that field. The v1 → v2 field differences are vetted earlier, in JSON,
 //! by `codec_v1`.
 
+use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse, Receipt};
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::record::{Envelope, Record, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3};
+use crate::agent_journal::record::{Envelope, Record, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4};
 
 /// The lowest schema version that may carry `record`.
 pub(crate) fn min_schema(record: &Record) -> u32 {
@@ -49,14 +50,24 @@ pub(crate) fn label(record: &Record) -> u32 {
     min_schema(record).max(SCHEMA_V2)
 }
 
+/// The schema a receipt's outcome belongs to: a controlled write's or a
+/// restore's reply is v3; an applied revert's reply and a revert's
+/// decision are v4. An envelope with a receipt is labelled exactly this
+/// (`receipt::check_binding`).
+pub(crate) fn receipt_min(receipt: &Receipt) -> u32 {
+    match &receipt.outcome {
+        Outcome::Prepared(PreparedResponse::Controlled(_) | PreparedResponse::Restore(_)) => {
+            SCHEMA_V3
+        }
+        Outcome::Prepared(PreparedResponse::Revert(_)) | Outcome::Decision(_) => SCHEMA_V4,
+    }
+}
+
 /// Refuse a record labelled below the version of its kind or fields (a
-/// receipt is a v3 field of any envelope that may carry one).
+/// receipt is a field of any envelope that may carry one, of its
+/// outcome's version).
 pub(crate) fn check(env: &Envelope) -> Result<(), TxnError> {
-    let receipt = if env.receipt.is_some() {
-        SCHEMA_V3
-    } else {
-        SCHEMA_V1
-    };
+    let receipt = env.receipt.as_ref().map_or(SCHEMA_V1, receipt_min);
     let min = min_schema(&env.record).max(receipt);
     if env.schema_version < min {
         return Err(TxnError::Corrupt(format!(

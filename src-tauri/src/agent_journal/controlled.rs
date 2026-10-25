@@ -27,7 +27,7 @@
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
-use crate::agent_journal::admission::receipt::{PayloadDigest, PreparedResponse};
+use crate::agent_journal::admission::receipt::{Outcome, PayloadDigest, PreparedResponse};
 use crate::agent_journal::capture_seq::CaptureId;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
@@ -68,8 +68,8 @@ pub fn prepare_controlled_with(
     let prep = controlled_prep(req)?;
     let prepared = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
     match prepared {
-        PreparedResponse::Controlled(p) => Ok(p),
-        PreparedResponse::Restore(_) => Err(reused_id()),
+        Outcome::Prepared(PreparedResponse::Controlled(p)) => Ok(p),
+        _ => Err(reused_id()),
     }
 }
 

@@ -195,7 +195,7 @@ fn future_format_two_document_journal_is_off_for_every_document() {
 
 #[test]
 fn a_v3_labelled_record_of_a_v2_kind_opens_under_schema_v3() {
-    assert_eq!(MAX_SUPPORTED_SCHEMA, 3, "this build reads schema v3");
+    const { assert!(MAX_SUPPORTED_SCHEMA >= 3, "this build reads schema v3") };
     let dir = tmp();
     let doc = DocId::new();
     let live = {

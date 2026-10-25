@@ -247,6 +247,7 @@ pub(crate) fn end_owned_in(w: &Writer, g: &mut Inner, txn: TxnId) -> OwnedEnd {
             | TxnError::ReviewBacklogFull { .. }
             | TxnError::ReviewStateExhausted { .. }
             | TxnError::AmbiguousRevert { .. }
+            | TxnError::RevertRefused { .. }
             | TxnError::Saturated(_)
             | TxnError::StalePage(_)
             | TxnError::StaleRegistration(_)

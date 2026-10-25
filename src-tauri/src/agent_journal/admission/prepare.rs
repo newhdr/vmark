@@ -15,12 +15,16 @@
 //! Direct versus staged by record count: a prepare that appends exactly
 //! one record (nothing pending, no baseline) is one top-level `prepared`;
 //! anything more is one `admission` frame staged on a clone
-//! (`admission::stage`). A receipted envelope is schema 3 either way.
+//! (`admission::stage`). A revert is always staged, since its outcome — a
+//! `prepared` or a review decision — is decided against the text its
+//! baseline leaves; a frame of one item is written as that item. A
+//! receipted envelope is labelled its outcome's schema (v3, or v4 for a
+//! revert's).
 //!
 //! @module agent_journal/admission/prepare
 
 use crate::agent_journal::admission::blobs::BlobRead;
-use crate::agent_journal::admission::prepared_record::prepared_record;
+use crate::agent_journal::admission::prepared_record::{prepared_record, RevertPatch};
 use crate::agent_journal::admission::publish::Staging;
 use crate::agent_journal::admission::receipt::{
     Outcome, PayloadDigest, PreparedResponse, Receipt, RequestId,
@@ -30,6 +34,7 @@ use crate::agent_journal::admission::reduce::preflight;
 use crate::agent_journal::admission::stage::{staged, Live};
 use crate::agent_journal::controlled::Prep;
 use crate::agent_journal::controlled_restore::{source_text, RestorePrepared};
+use crate::agent_journal::controlled_revert::RevertPrepared;
 use crate::agent_journal::controlled_wire::ControlledPrepared;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
@@ -74,6 +79,7 @@ pub(crate) struct Minted {
     pub(crate) baseline: Option<RevisionId>,
     pub(crate) certified: bool,
     pub(crate) fallback_reason: Option<FallbackReason>,
+    pub(crate) revert: Option<RevertPatch>,
 }
 
 /// The text a restore applies and the transaction it resolves.
@@ -87,6 +93,21 @@ pub(crate) struct Responder {
 
 impl Responder {
     pub(crate) fn reply(&self, m: &Minted) -> PreparedResponse {
+        if let Some(r) = &m.revert {
+            return PreparedResponse::Revert(RevertPrepared {
+                doc: self.doc,
+                txn: m.txn,
+                revision: m.revision,
+                generation: m.generation,
+                baseline: m.baseline,
+                hunk: r.hunk.clone(),
+                review_gen: r.review_gen,
+                from: r.from,
+                to: r.to,
+                insert: r.insert.clone(),
+                postimage_hash: r.postimage_hash.clone(),
+            });
+        }
         match &self.restore {
             None => PreparedResponse::Controlled(ControlledPrepared {
                 doc: self.doc,
@@ -109,11 +130,12 @@ impl Responder {
         }
     }
 
-    pub(crate) fn receipt(&self, request: Option<&Request>, m: &Minted) -> Option<Receipt> {
+    /// The receipt `request` stores for `outcome`, if it has an id.
+    pub(crate) fn receipt(request: Option<&Request>, outcome: &Outcome) -> Option<Receipt> {
         request.map(|r| Receipt {
             request_id: r.id,
             digest: r.digest.clone(),
-            outcome: Outcome::Prepared(self.reply(m)),
+            outcome: outcome.clone(),
         })
     }
 }
@@ -125,7 +147,7 @@ pub(crate) fn prepare_admitted(
     doc: DocId,
     mut prep: Prep,
     request: Option<Request>,
-) -> Result<PreparedResponse, TxnError> {
+) -> Result<Outcome, TxnError> {
     if let Some(r) = &request {
         if let Some(stored) = lookup(g, r)? {
             return Ok(stored);
@@ -148,7 +170,8 @@ pub(crate) fn prepare_admitted(
     let responder = Responder { doc, restore };
     let capture = prep.capture.take();
     let pending = g.proj.docs.get(&doc).is_some_and(|d| !d.pending.is_empty());
-    let staging = if pending || needs_baseline(&g.proj, head, &prep) {
+    let revert = matches!(prep.review_op, ReviewOp::HunkRevert { .. });
+    let staging = if revert || pending || needs_baseline(&g.proj, head, &prep) {
         let live = Live {
             next_seq: g.next_generation()?,
             proj: &g.proj,
@@ -223,7 +246,7 @@ fn direct(
     let certified = certificate.is_some();
     req.certificate = certificate;
     let blobs: &mut dyn BlobRead = &mut g.blobs;
-    let r = prepared_record(&g.proj, blobs, req)?;
+    let r = prepared_record(&g.proj, blobs, req)?.prepared()?;
     let seq = g.next_generation()?;
     let minted = Minted {
         txn: r.txn,
@@ -232,8 +255,10 @@ fn direct(
         baseline: None,
         certified,
         fallback_reason: fallback,
+        revert: r.revert,
     };
-    let receipt = responder.receipt(request, &minted);
+    let response = Outcome::Prepared(responder.reply(&minted));
+    let receipt = Responder::receipt(request, &response);
     let env = Envelope {
         schema_version: match receipt {
             Some(_) => SCHEMA_V3,
@@ -252,7 +277,7 @@ fn direct(
         staged: None,
         doc,
         txn: r.txn,
-        response: responder.reply(&minted),
+        response,
         fallback,
     })
 }

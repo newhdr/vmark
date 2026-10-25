@@ -1,12 +1,21 @@
 //! A request receipt: the id a window minted for one prepare, the SHA-256
 //! of the raw payload it sent, and the reply exactly as first returned.
-//! Stored on the `prepared` envelope it answers (schema v3 only), so an
-//! identical retry after a lost reply gets the same bytes back with no
-//! second write, and a different payload under the same id is refused.
+//! Stored on the record it answers, so an identical retry after a lost
+//! reply gets the same bytes back with no second write, and a different
+//! payload under the same id is refused.
 //!
-//! Static binding: the stored response names the record's own document,
-//! transaction and revision. A receipt anywhere else — another kind, a v1
-//! or v2 envelope, an admission frame itself — is corrupt.
+//! Outcomes: a `prepared` reply (a controlled write's or a restore's from
+//! schema v3, an applied revert's from v4), or the review decision a
+//! revert that did not apply recorded instead (v4). An envelope with a
+//! receipt is labelled exactly its outcome's schema (`schema_table`).
+//!
+//! Static binding: the stored reply names the record's own document,
+//! transaction and revision; a revert's names the hunk and `reviewGen` its
+//! `hunkRevert` op prepared, and only a `hunkRevert` carries one. A
+//! decision names the record's document, action, its one hunk, head and
+//! seq; the `reviewGen` it reports is checked once the record applies
+//! (`Projection::apply`). A receipt anywhere else — another kind, a v1 or
+//! v2 envelope, an admission frame itself — is corrupt.
 //!
 //! @module agent_journal/admission/receipt
 
@@ -18,10 +27,13 @@ use sha2_v011::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use crate::agent_journal::controlled_restore::RestorePrepared;
+use crate::agent_journal::controlled_revert::{RevertDecided, RevertPrepared};
 use crate::agent_journal::controlled_wire::ControlledPrepared;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
-use crate::agent_journal::record::{Envelope, Record, SCHEMA_V3};
+use crate::agent_journal::record::{Envelope, Record};
+use crate::agent_journal::review::ReviewOp;
+use crate::agent_journal::schema_table::receipt_min;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -31,8 +43,8 @@ pub struct Receipt {
     pub outcome: Outcome,
 }
 
-/// What the request produced. Only `prepared` exists in schema v3; a
-/// decision or comment receipt is a later schema's.
+/// What the request produced: a `prepared` reply, or the review decision
+/// a revert that did not apply recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -42,15 +54,18 @@ pub struct Receipt {
 )]
 pub enum Outcome {
     Prepared(PreparedResponse),
+    Decision(RevertDecided),
 }
 
-/// A controlled prepare's reply, or a restore's (which also carries the
-/// text to apply). Told apart by their fields; both refuse unknown ones.
+/// A controlled prepare's reply, a restore's (which also carries the text
+/// to apply), or an applied revert's (its exact patch). Told apart by
+/// their fields; each refuses unknown ones.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PreparedResponse {
     Controlled(ControlledPrepared),
     Restore(RestorePrepared),
+    Revert(RevertPrepared),
 }
 
 impl PreparedResponse {
@@ -58,6 +73,7 @@ impl PreparedResponse {
         match self {
             Self::Controlled(p) => (p.doc, p.txn, p.revision),
             Self::Restore(p) => (p.doc, p.txn, p.revision),
+            Self::Revert(p) => (p.doc, p.txn, p.revision),
         }
     }
 
@@ -67,40 +83,96 @@ impl PreparedResponse {
     }
 }
 
-impl Receipt {
-    /// The transaction whose `prepared` stores this receipt.
-    pub fn txn(&self) -> TxnId {
-        let Outcome::Prepared(r) = &self.outcome;
-        r.names().1
+impl Outcome {
+    /// The document the outcome is about.
+    pub(crate) fn doc(&self) -> DocId {
+        match self {
+            Self::Prepared(r) => r.names().0,
+            Self::Decision(d) => d.doc,
+        }
+    }
+
+    /// The transaction a `prepared` reply opened; a decision opens none.
+    pub(crate) fn txn(&self) -> Option<TxnId> {
+        match self {
+            Self::Prepared(r) => Some(r.txn()),
+            Self::Decision(_) => None,
+        }
     }
 }
 
-/// A receipt is legal only on a v3 `prepared` and must name that record's
-/// document, transaction and revision.
+impl Receipt {
+    /// The transaction whose `prepared` stores this receipt; `None` for a
+    /// decision's.
+    pub fn txn(&self) -> Option<TxnId> {
+        self.outcome.txn()
+    }
+}
+
+/// A receipt is legal only on the record it answers, labelled exactly its
+/// outcome's schema, naming that record. See the module docs.
 pub fn check_binding(env: &Envelope) -> Result<(), TxnError> {
     let Some(receipt) = &env.receipt else {
         return Ok(());
     };
-    let Record::Prepared { doc, revision, .. } = &env.record else {
-        return Err(TxnError::Corrupt(format!(
-            "seq {}: a receipt on a record that is not a prepared",
-            env.seq
-        )));
-    };
-    if env.schema_version != SCHEMA_V3 {
+    let corrupt = |why: &str| TxnError::Corrupt(format!("seq {}: {why}", env.seq));
+    if env.schema_version != receipt_min(receipt) {
         return Err(TxnError::Corrupt(format!(
             "seq {}: a receipt on a schema {} envelope",
             env.seq, env.schema_version
         )));
     }
-    let Outcome::Prepared(response) = &receipt.outcome;
-    if response.names() != (*doc, env.txn, *revision) {
-        return Err(TxnError::Corrupt(format!(
-            "seq {}: the receipt names another document, transaction or revision",
-            env.seq
-        )));
+    match (&receipt.outcome, &env.record) {
+        (
+            Outcome::Prepared(response),
+            Record::Prepared {
+                doc,
+                revision,
+                review_op,
+                ..
+            },
+        ) => {
+            if response.names() != (*doc, env.txn, *revision) {
+                return Err(corrupt(
+                    "the receipt names another document, transaction or revision",
+                ));
+            }
+            match (response, review_op) {
+                (
+                    PreparedResponse::Revert(r),
+                    ReviewOp::HunkRevert {
+                        hunk_id,
+                        expected_review_gen,
+                    },
+                ) if r.hunk == *hunk_id && r.review_gen == *expected_review_gen => Ok(()),
+                (PreparedResponse::Revert(_), _) | (_, ReviewOp::HunkRevert { .. }) => {
+                    Err(corrupt("the receipt names another revert"))
+                }
+                _ => Ok(()),
+            }
+        }
+        (
+            Outcome::Decision(d),
+            Record::ReviewDecision {
+                doc,
+                expected_head,
+                action,
+                items,
+            },
+        ) => {
+            let one = matches!(items.as_slice(), [i] if i.hunk_id == d.hunk);
+            if d.doc != *doc
+                || d.action != *action
+                || !one
+                || d.head != *expected_head
+                || d.generation != env.seq
+            {
+                return Err(corrupt("the receipt names another decision"));
+            }
+            Ok(())
+        }
+        _ => Err(corrupt("a receipt on a record it does not answer")),
     }
-    Ok(())
 }
 
 /// A window-minted request id: a lowercase, hyphenated RFC 4122 v4 UUID.

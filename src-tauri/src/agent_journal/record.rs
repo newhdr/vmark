@@ -19,7 +19,7 @@ use crate::agent_journal::review::{
 /// The newest schema version this build writes. A record is labelled with
 /// the lowest version that has its kind and fields (`schema_table::label`),
 /// so a record that uses nothing newer than v2 is still written as v2.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 /// The newest schema version this build can read. A record above it turns
 /// the journal off for every document before anything is repaired
 /// (`JOURNAL_FUTURE_FORMAT`; see `writer_replay`).
@@ -31,6 +31,9 @@ pub const SCHEMA_V1: u32 = 1;
 pub const SCHEMA_V2: u32 = 2;
 /// The selection edit schema: a `prepared` record may carry a certificate.
 pub const SCHEMA_V3: u32 = 3;
+/// The revert schema: a request receipt may store a revert's prepared
+/// reply or the review decision a revert recorded instead.
+pub const SCHEMA_V4: u32 = 4;
 
 /// The framed unit. Unknown fields are corruption at every level: a
 /// current-version record this build only half understands would otherwise

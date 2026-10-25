@@ -115,8 +115,16 @@ impl Rewrite {
     ///
     /// # Errors
     /// `Invariant` when a victim's transaction has a record that is not
-    /// one the collector drops or tombstones.
+    /// one the collector drops or tombstones, or when a revert's receipted
+    /// decision (its own transaction, kept by `expected`) would be dropped.
     pub fn map(&self, env: Envelope) -> Result<Option<Envelope>, TxnError> {
+        let collected = self.victims.contains_key(&env.txn) || self.dropped.contains(&env.txn);
+        if collected && env.receipt.is_some() && matches!(env.record, Record::ReviewDecision { .. })
+        {
+            return Err(TxnError::Invariant(
+                "a revert's decision shares a collected transaction".into(),
+            ));
+        }
         let Some(m) = self.victims.get(&env.txn) else {
             return Ok((!self.dropped.contains(&env.txn)).then_some(env));
         };
@@ -165,8 +173,9 @@ fn tombstone(m: &RevisionMeta, env: &Envelope, effects: &ReviewEffects) -> Envel
         txn: env.txn,
         at: env.at,
         record,
-        // Receipts ride only on `prepared` (`admission::receipt`), never on
-        // the revision records a tombstone replaces.
+        // Receipts ride only on `prepared` and a revert's decision
+        // (`admission::receipt`), never on the revision records a
+        // tombstone replaces.
         receipt: None,
     }
 }
@@ -192,6 +201,7 @@ pub fn expected(
     }
     e.txns.retain(|id, _| !dropped.contains(id));
     e.observations.retain(|id, _| !dropped.contains(id));
-    e.requests.retain(|_, r| !dropped.contains(&r.txn()));
+    e.requests
+        .retain(|_, r| r.txn().is_none_or(|t| !dropped.contains(&t)));
     Ok(e)
 }

@@ -10,7 +10,8 @@
 //! resolved outside the lock. The second critical section re-checks the
 //! generation and that the entry is still the attempt's (an abandon takes
 //! it), runs the prepare, and on success swaps the entry for the
-//! transaction's owner in the same step.
+//! transaction's owner in the same step (a revert's recorded decision
+//! opens no transaction, so it has no owner).
 //!
 //! Key decisions:
 //!   - The identity fields are decoded by `payload` before anything is
@@ -31,7 +32,7 @@ use crate::agent_journal::admission::bound::{Bound, RequestBind};
 use crate::agent_journal::admission::page_table::{Liveness, PageTable};
 use crate::agent_journal::admission::payload::{admit_identity, Frame};
 use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
-use crate::agent_journal::admission::receipt::PreparedResponse;
+use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse};
 use crate::agent_journal::admission::reconcile::{lookup, receipt_doc};
 use crate::agent_journal::admission::requests::{Owner, RequestGuard};
 use crate::agent_journal::controlled::{controlled_prep, decode_prepare, reused_id, Prep};
@@ -48,7 +49,7 @@ use crate::command_error::CommandError;
 
 enum Begun {
     /// Answered from the request's own receipt, about this document.
-    Stored(PreparedResponse, Option<DocId>),
+    Stored(Outcome, Option<DocId>),
     Refused(TxnError, Option<DocId>),
     Held(u64),
 }
@@ -70,11 +71,11 @@ impl Controller {
         let key = req.doc_key.clone();
         let prep = controlled_prep(req).map_err(|e| refusal(&e))?;
         match self.run_framed(pages, label, &frame, &request, &key, prep)? {
-            PreparedResponse::Controlled(reply) => Ok(Bound {
+            Outcome::Prepared(PreparedResponse::Controlled(reply)) => Ok(Bound {
                 bind: frame.bind(&request),
                 reply,
             }),
-            PreparedResponse::Restore(_) => Err(refusal(&reused_id())),
+            _ => Err(refusal(&reused_id())),
         }
     }
 
@@ -94,11 +95,11 @@ impl Controller {
         let key = req.doc_key.clone();
         let prep = restore_prep(req).map_err(|e| refusal(&e))?;
         match self.run_framed(pages, label, &frame, &request, &key, prep)? {
-            PreparedResponse::Restore(reply) => Ok(Bound {
+            Outcome::Prepared(PreparedResponse::Restore(reply)) => Ok(Bound {
                 bind: frame.bind(&request),
                 reply,
             }),
-            PreparedResponse::Controlled(_) => Err(refusal(&reused_id())),
+            _ => Err(refusal(&reused_id())),
         }
     }
 
@@ -110,7 +111,7 @@ impl Controller {
         request: &Request,
         key: &str,
         prep: Prep,
-    ) -> Result<PreparedResponse, CommandError> {
+    ) -> Result<Outcome, CommandError> {
         let w = &*self.writer;
         let owner = Owner {
             label: label.into(),
@@ -208,7 +209,7 @@ fn admit(
     attempt: &Attempt<'_>,
     doc: DocId,
     prep: Prep,
-) -> Result<PreparedResponse, TxnError> {
+) -> Result<Outcome, TxnError> {
     let Attempt {
         owner,
         frame,
@@ -230,7 +231,9 @@ fn admit(
     g.requests.end(id, invocation);
     match out {
         Ok(reply) => {
-            g.requests.owners.insert(reply.txn(), owner.clone());
+            if let Some(txn) = reply.txn() {
+                g.requests.owners.insert(txn, owner.clone());
+            }
             Ok(reply)
         }
         Err(e @ TxnError::Request(_)) => Err(e),

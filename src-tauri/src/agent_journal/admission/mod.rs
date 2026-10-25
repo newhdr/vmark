@@ -81,6 +81,15 @@ mod admission_torn_tests;
 #[cfg(test)]
 #[path = "../admission_clone_cost.test.rs"]
 mod admission_clone_cost_tests;
+#[cfg(test)]
+#[path = "../revert_admission.test.rs"]
+mod revert_admission_tests;
+#[cfg(test)]
+#[path = "../revert_receipts.test.rs"]
+mod revert_receipts_tests;
+#[cfg(test)]
+#[path = "../revert_support.test.rs"]
+mod revert_support;
 
 #[cfg(test)]
 #[path = "../request_commit.test.rs"]

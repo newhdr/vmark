@@ -18,7 +18,7 @@
 //! whole first (`admission::reduce`); the frame's items then apply in order
 //! through this same `apply`, and a receipt is indexed by request id.
 
-use crate::agent_journal::admission::reduce::preflight;
+use crate::agent_journal::admission::reduce::{check_decided_gen, preflight};
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::TxnId;
 use crate::agent_journal::projection::*;
@@ -55,6 +55,7 @@ impl Projection {
         let (seq, txn) = (env.seq, env.txn);
         check_generation(env)?;
         preflight(self, env)?;
+        check_decided_gen(self, env)?;
         self.apply_record(env, seq, txn)?;
         if let Some(r) = &env.receipt {
             self.requests.insert(r.request_id, r.clone());

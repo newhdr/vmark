@@ -34,6 +34,11 @@ pub enum TxnError {
     /// (`None`). Returned before `prepare` reserves anything: no record, no
     /// state, `reviewGen` or generation change. Not a record kind.
     AmbiguousRevert { hunk: HunkId, block: Option<Block> },
+    /// A revert that does not apply and has no review decision to record:
+    /// a conflicted hunk that conflicts again (`"conflicted"`), or a
+    /// reverted hunk whose target cannot be put back (`"reapply"`).
+    /// Nothing is appended.
+    RevertRefused { hunk: HunkId, reason: &'static str },
     /// A bounded request table is full (in-flight requests, a label's page
     /// registrations, the generation counter). Nothing was inserted.
     Saturated(String),
@@ -83,6 +88,7 @@ impl TxnError {
             Self::ReviewBacklogFull { .. } => "REVIEW_BACKLOG_FULL",
             Self::ReviewStateExhausted { .. } => "REVIEW_STATE_EXHAUSTED",
             Self::AmbiguousRevert { .. } => "AMBIGUOUS_REVERT",
+            Self::RevertRefused { .. } => "REVERT_REFUSED",
             Self::Saturated(_) => "JOURNAL_BUSY",
             Self::StalePage(_) => "STALE_PAGE",
             Self::StaleRegistration(_) => "STALE_REQUEST",

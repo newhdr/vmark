@@ -31,7 +31,15 @@ import { noteStalePage, type PagePair } from "./pageRegistration";
 import { journalWarn } from "@/utils/debug";
 
 const ABANDON = "agent_journal_abandon";
-const ABANDON_STATES: readonly string[] = ["fenced", "aborted", "abortQueued", "terminalPending", "terminal"];
+const ABANDON_STATES: readonly string[] = [
+  "fenced",
+  "aborted",
+  "abortQueued",
+  "terminalPending",
+  "terminal",
+  "abandoned",
+  "decided",
+];
 
 /** Append `aborted` for `txn`, bounded; see the header. */
 export async function abortTxn(txn: string, reason: JournalAbortReason, pair: PagePair): Promise<void> {

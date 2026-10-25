@@ -1,6 +1,7 @@
 //! Static shape of an `admission` frame, checked at decode and again on
 //! staging: at least two child envelopes; `seq` contiguous from the outer
-//! envelope's; one shared `at`; one document; no nesting; only the kinds a
+//! envelope's; one shared `at`; one schema, v3 or v4, on the frame and
+//! every item; one document; no nesting; only the kinds a
 //! multi-record write produces (an observation, its linearization, a
 //! `prepared`, a review decision); at most one receipt, on the last item;
 //! and the outer `txn` is that last item's. A linearization names no
@@ -10,7 +11,7 @@
 
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::DocId;
-use crate::agent_journal::record::{Envelope, Record, SCHEMA_V3};
+use crate::agent_journal::record::{Envelope, Record, SCHEMA_V3, SCHEMA_V4};
 
 /// Every rule above, on a decoded or staged `admission` envelope. Other
 /// kinds pass untouched.
@@ -37,8 +38,10 @@ pub fn check(env: &Envelope) -> Result<(), TxnError> {
         if item.at != env.at {
             return Err(bad("items carry more than one `at`"));
         }
-        if item.schema_version != SCHEMA_V3 || env.schema_version != SCHEMA_V3 {
-            return Err(bad("is not schema v3 throughout"));
+        if item.schema_version != env.schema_version
+            || !(SCHEMA_V3..=SCHEMA_V4).contains(&env.schema_version)
+        {
+            return Err(bad("is not one schema, v3 or v4, throughout"));
         }
         if item.receipt.is_some() && i + 1 != items.len() {
             return Err(bad("carries a receipt before its last item"));

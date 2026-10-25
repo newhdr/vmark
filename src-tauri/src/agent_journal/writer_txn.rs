@@ -4,8 +4,10 @@
 //! Prepare checks, in order: readable format, degraded, busy, parent CAS,
 //! preimage = head text, then the op (slot admission, restore source,
 //! revert CAS), then for a `hunkRevert` the revert plan (`writer_revert`):
-//! a blocked span is `AMBIGUOUS_REVERT`, a revert that would not apply
-//! cleanly or would edit another live hunk is `INVALID_REQUEST`. A refusal
+//! a blocked span is `AMBIGUOUS_REVERT`; a revert that would not apply
+//! cleanly (one that would edit another live hunk is conflicted) is
+//! `INVALID_REQUEST` here, and recorded as a review decision only through
+//! `controlled_revert`. A refusal
 //! appends nothing. A commit refused for its effects keeps the transaction
 //! open so the worker can recompute; a caller that cannot recompute ends it
 //! with `record_uncommitted`. The checks after admission live in
@@ -51,7 +53,7 @@ impl Writer {
         g.not_busy(req.doc)?;
         g.admit_reservation()?;
         let doc = req.doc;
-        let r = prepared_record(&g.proj, &mut g.blobs, req)?;
+        let r = prepared_record(&g.proj, &mut g.blobs, req)?.prepared()?;
         let env = self.append(g, r.txn, r.record, &[(&r.pre, &r.preimage)])?;
         g.reservations.insert(doc, Reservation { txn: r.txn });
         Ok(Prepared {

@@ -29,6 +29,7 @@ fn class(e: &TxnError) -> ErrorCode {
         | TxnError::JournalDegraded
         | TxnError::StaleReview { .. }
         | TxnError::AmbiguousRevert { .. }
+        | TxnError::RevertRefused { .. }
         | TxnError::ReviewBacklogFull { .. }
         | TxnError::ReviewStateExhausted { .. }
         | TxnError::Saturated(_)
@@ -61,6 +62,9 @@ fn detail(e: &TxnError) -> Value {
         TxnError::StaleParent { head } => json!({ "journalCode": e.code(), "head": head }),
         TxnError::AmbiguousRevert { hunk, block } => {
             json!({ "journalCode": e.code(), "hunk": hunk, "block": block })
+        }
+        TxnError::RevertRefused { hunk, reason } => {
+            json!({ "journalCode": e.code(), "hunk": hunk, "reason": reason })
         }
         TxnError::InvalidProvenance(_) => json!({ "journalCode": e.code(), "field": "provenance" }),
         TxnError::Indeterminate(_) => {

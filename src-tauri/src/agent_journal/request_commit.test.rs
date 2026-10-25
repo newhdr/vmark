@@ -41,6 +41,10 @@ fn every_refusal() -> Vec<TxnError> {
             hunk: HunkId(String::new()),
             block: None,
         },
+        TxnError::RevertRefused {
+            hunk: HunkId(String::new()),
+            reason: "",
+        },
         TxnError::Saturated(String::new()),
         TxnError::StalePage(String::new()),
         TxnError::StaleRegistration(String::new()),
@@ -62,6 +66,7 @@ fn every_refusal() -> Vec<TxnError> {
             | TxnError::ReviewBacklogFull { .. }
             | TxnError::ReviewStateExhausted { .. }
             | TxnError::AmbiguousRevert { .. }
+            | TxnError::RevertRefused { .. }
             | TxnError::Saturated(_)
             | TxnError::StalePage(_)
             | TxnError::StaleRegistration(_)

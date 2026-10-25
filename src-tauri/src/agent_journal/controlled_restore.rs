@@ -30,7 +30,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
-use crate::agent_journal::admission::receipt::{PayloadDigest, PreparedResponse, RequestId};
+use crate::agent_journal::admission::receipt::{
+    Outcome, PayloadDigest, PreparedResponse, RequestId,
+};
 use crate::agent_journal::capture_seq::CaptureId;
 use crate::agent_journal::controlled::{reused_id, Prep};
 use crate::agent_journal::controlled_wire::decode;
@@ -127,8 +129,8 @@ pub fn prepare_restore_with(
     let prep = restore_prep(req)?;
     let prepared = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
     match prepared {
-        PreparedResponse::Restore(p) => Ok(p),
-        PreparedResponse::Controlled(_) => Err(reused_id()),
+        Outcome::Prepared(PreparedResponse::Restore(p)) => Ok(p),
+        _ => Err(reused_id()),
     }
 }
 

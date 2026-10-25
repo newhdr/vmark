@@ -4,7 +4,7 @@
 //! |---|---|
 //! | the writer cannot persist, a blob put fails, a write error the file truncates back | refused: journal, projection, reservations and events unchanged |
 //! | an fsync or truncate-back failure that poisons the journal | indeterminate (`JOURNAL_IO`, `indeterminate`): the frame may or may not be durable; the live state is unchanged and the writer refuses writes until reopen, which replays the whole frame or none of it |
-//! | the frame is durable | the staged projection (or the record applied) becomes live, the reservation is taken, one `Appended` per record |
+//! | the frame is durable | the staged projection (or the record applied) becomes live, the reservation is taken (a `prepared` outcome only; a review decision holds none), one `Appended` per record |
 //!
 //! Staged blobs are stored before the frame, so a durable frame never
 //! names a missing text; a refused frame may leave unreferenced blobs,
@@ -12,7 +12,7 @@
 //!
 //! @module agent_journal/admission/publish
 
-use crate::agent_journal::admission::receipt::PreparedResponse;
+use crate::agent_journal::admission::receipt::Outcome;
 use crate::agent_journal::codec;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, TxnId};
@@ -23,7 +23,7 @@ use crate::agent_journal::writer::{Inner, JournalEvent, Reservation, Writer};
 
 /// A prepare built in full, waiting to be written.
 pub(crate) struct Staging {
-    /// The top-level `prepared`, or the `admission` frame.
+    /// The top-level record, or the `admission` frame.
     pub(crate) env: Envelope,
     /// Texts the envelope names that the pack does not hold yet.
     pub(crate) blobs: Vec<(BlobHash, String)>,
@@ -31,8 +31,9 @@ pub(crate) struct Staging {
     /// applied to the live projection once durable.
     pub(crate) staged: Option<Projection>,
     pub(crate) doc: DocId,
+    /// The transaction a `prepared` opens, or the decision record's.
     pub(crate) txn: TxnId,
-    pub(crate) response: PreparedResponse,
+    pub(crate) response: Outcome,
     pub(crate) fallback: Option<FallbackReason>,
 }
 
@@ -71,7 +72,9 @@ impl Writer {
                 }
             }
         }
-        g.reservations.insert(s.doc, Reservation { txn: s.txn });
+        if let Outcome::Prepared(_) = &s.response {
+            g.reservations.insert(s.doc, Reservation { txn: s.txn });
+        }
         let records = match s.env.record {
             Record::Admission { items } => items,
             _ => vec![s.env],

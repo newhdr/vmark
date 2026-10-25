@@ -17,7 +17,7 @@ use serde::Deserialize;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::BlobHash;
 use crate::agent_journal::record::{
-    Envelope, LegacyAnchor, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V3,
+    Envelope, LegacyAnchor, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V3, SCHEMA_V4,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,8 +70,9 @@ pub fn decode_with_max(payload: &[u8], max: u32) -> Result<Decoded, TxnError> {
 }
 
 /// One envelope of a version this reader supports. An `admission`'s items
-/// go through this same path, each required to be v3 like its frame (a v1
-/// or v4 child, or a nested frame, is corrupt — never upgraded or skipped).
+/// go through this same path, each required to carry its frame's version,
+/// v3 or v4 (any other child, or a nested frame, is corrupt — never
+/// upgraded or skipped).
 fn decode_known(mut value: serde_json::Value, version: u32) -> Result<Envelope, TxnError> {
     refuse_fields_on_unit_kinds(&value)?;
     let children = take_admission_items(&mut value);
@@ -82,9 +83,9 @@ fn decode_known(mut value: serde_json::Value, version: u32) -> Result<Envelope, 
             let v = child
                 .get("schemaVersion")
                 .and_then(serde_json::Value::as_u64);
-            if v != Some(u64::from(SCHEMA_V3)) || version != SCHEMA_V3 {
+            if v != Some(u64::from(version)) || !(SCHEMA_V3..=SCHEMA_V4).contains(&version) {
                 return Err(TxnError::Corrupt(format!(
-                    "seq {}: an admission item is not schema v3",
+                    "seq {}: an admission item is not its frame's schema v3 or v4",
                     env.seq
                 )));
             }
@@ -94,7 +95,7 @@ fn decode_known(mut value: serde_json::Value, version: u32) -> Result<Envelope, 
                     env.seq
                 )));
             }
-            items.push(decode_known(child, SCHEMA_V3)?);
+            items.push(decode_known(child, version)?);
         }
     }
     check_shape(&env)?;

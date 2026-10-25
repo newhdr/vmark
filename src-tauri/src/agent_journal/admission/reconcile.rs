@@ -12,6 +12,9 @@
 //!   - A receipt under another digest is a conflict, before any status is
 //!     read: an id reused for another payload learns nothing about the
 //!     first.
+//!   - A revert's recorded decision is final: an identical retry is
+//!     answered with it whatever the writer's health, since nothing it
+//!     names is open.
 //!   - Every answer read from a request's own receipt (a stored reply,
 //!     `terminal`, `terminalPending`, `unavailable`, `abandoned`) names
 //!     the receipt's document, and its caller restarts that document's
@@ -24,6 +27,7 @@
 use crate::agent_journal::admission::answer::{Ended, Ending, RequestRefusal, RequestState};
 use crate::agent_journal::admission::prepare::Request;
 use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse, Receipt};
+use crate::agent_journal::controlled_revert::RevertDecided;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, TxnId};
 use crate::agent_journal::projection::TxnStatus;
@@ -36,19 +40,23 @@ use crate::agent_journal::writer_txn::open_txn;
 pub(crate) enum Classified {
     /// Return the stored reply byte for byte.
     Executable(PreparedResponse),
+    /// Return the recorded decision byte for byte.
+    Decided(RevertDecided),
     /// Refuse with this state.
     Refused(RequestState),
 }
 
-/// The stored reply for an identical retry of an executable request;
-/// `None` for an id never receipted; the request's answer otherwise.
-pub(crate) fn lookup(g: &Inner, r: &Request) -> Result<Option<PreparedResponse>, TxnError> {
+/// The stored reply for an identical retry of an executable or decided
+/// request; `None` for an id never receipted; the request's answer
+/// otherwise.
+pub(crate) fn lookup(g: &Inner, r: &Request) -> Result<Option<Outcome>, TxnError> {
     let Some(receipt) = g.proj.requests.get(&r.id) else {
         return Ok(None);
     };
     let state = if receipt.digest == r.digest {
         match classify(g, receipt) {
-            Classified::Executable(reply) => return Ok(Some(reply)),
+            Classified::Executable(reply) => return Ok(Some(Outcome::Prepared(reply))),
+            Classified::Decided(d) => return Ok(Some(Outcome::Decision(d))),
             Classified::Refused(state) => state,
         }
     } else {
@@ -57,25 +65,29 @@ pub(crate) fn lookup(g: &Inner, r: &Request) -> Result<Option<PreparedResponse>,
     Err(r.refused(state))
 }
 
-/// The document of the transaction `r`'s receipt names, when the receipt
-/// is `r`'s own (same digest): the document an answer from it is about.
+/// The document `r`'s receipt names, when the receipt is `r`'s own (same
+/// digest): the document an answer from it is about.
 pub(crate) fn receipt_doc(g: &Inner, r: &Request) -> Option<DocId> {
     let receipt = g.proj.requests.get(&r.id)?;
     if receipt.digest != r.digest {
         return None;
     }
-    g.proj.txns.get(&receipt.txn()).map(|t| t.doc)
+    Some(receipt.outcome.doc())
 }
 
 /// Classify `receipt`'s transaction. See the module docs.
 pub(crate) fn classify(g: &Inner, receipt: &Receipt) -> Classified {
-    let txn = receipt.txn();
+    let reply = match &receipt.outcome {
+        Outcome::Prepared(reply) => reply,
+        Outcome::Decision(d) => return Classified::Decided(d.clone()),
+    };
+    let txn = reply.txn();
     let Some(entry) = g.proj.txns.get(&txn) else {
         log::error!("agent journal: receipt names unknown transaction {}", txn.0);
         return Classified::Refused(RequestState::Unavailable);
     };
     let state = match entry.status {
-        TxnStatus::Prepared => return prepared(g, receipt, txn),
+        TxnStatus::Prepared => return prepared(g, reply, txn),
         TxnStatus::Aborted => Ended::Aborted,
         TxnStatus::Committed => Ended::Committed,
         TxnStatus::Uncommitted => Ended::Uncommitted,
@@ -85,7 +97,7 @@ pub(crate) fn classify(g: &Inner, receipt: &Receipt) -> Classified {
     Classified::Refused(RequestState::Terminal(state))
 }
 
-fn prepared(g: &Inner, receipt: &Receipt, txn: TxnId) -> Classified {
+fn prepared(g: &Inner, reply: &PreparedResponse, txn: TxnId) -> Classified {
     if let Some(queued) = queued_terminal(g, txn) {
         let ending = match queued {
             Record::Committed { .. } => Ending::Committed,
@@ -104,7 +116,6 @@ fn prepared(g: &Inner, receipt: &Receipt, txn: TxnId) -> Classified {
     if open_txn(g, txn).is_err() {
         return Classified::Refused(RequestState::Abandoned);
     }
-    let Outcome::Prepared(reply) = &receipt.outcome;
     Classified::Executable(reply.clone())
 }
 
