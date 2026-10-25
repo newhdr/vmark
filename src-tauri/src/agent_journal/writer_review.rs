@@ -1,7 +1,10 @@
 //! Review-only decisions (keep, unkeep, mark handled, conflicted, Clear
 //! reviewed): one record, CAS on the document head and on every item's
 //! `reviewGen`, all-or-nothing. Refused while the document is reserved
-//! (`JOURNAL_BUSY`) or degraded. A failed append is an error, not a queued
+//! (`JOURNAL_BUSY`) or degraded, and while a captured save of it is not
+//! linearized yet (`JOURNAL_BUSY`): such a save moves neither the head nor
+//! any `reviewGen`, so the CAS alone would admit a decision on text the
+//! panel no longer shows. A failed append is an error, not a queued
 //! record: no content changed, so the panel simply retries.
 
 use crate::agent_journal::errors::TxnError;
@@ -26,6 +29,9 @@ impl Writer {
         let mut g = self.lock();
         g.healthy()?;
         g.not_busy(req.doc)?;
+        if let Some(&holder) = g.proj.docs.get(&req.doc).and_then(|d| d.pending.first()) {
+            return Err(TxnError::JournalBusy { holder });
+        }
         if g.proj.head(req.doc) != req.expected_head {
             return Err(TxnError::StaleReview {
                 hunk: None,

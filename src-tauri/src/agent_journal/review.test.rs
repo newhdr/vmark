@@ -390,3 +390,37 @@ fn review_decision_records_survive_restart() {
     let kinds: Vec<_> = w.debug_records().iter().map(|e| e.record.kind()).collect();
     assert_eq!(kinds.iter().filter(|k| *k == "uncommitted").count(), 0);
 }
+
+/// A save captured but not yet linearized changes neither the head nor any
+/// `reviewGen`, yet the text the panel rendered is gone: a decision is
+/// refused `JOURNAL_BUSY` until the save lands, and appends nothing.
+#[test]
+fn a_review_decision_waits_for_a_captured_save_to_land() {
+    let dir = tmp();
+    let (w, _) = open(dir.path());
+    let doc = DocId::new();
+    let (a, _) = two_hunks(&w, doc);
+    let before = w.head(doc);
+    observe(&w, doc, "zz", None);
+    assert_eq!(w.head(doc), before, "the save is pending, not linearized");
+    let len = w.lock().journal.len();
+    assert_eq!(
+        decide(&w, doc, ReviewAction::Keep, &[(&a, 0)])
+            .unwrap_err()
+            .code(),
+        "JOURNAL_BUSY"
+    );
+    assert_eq!(
+        w.lock().journal.len(),
+        len,
+        "a refused decision appends nothing"
+    );
+    linearize(&w, doc);
+    assert_ne!(w.head(doc), before);
+    let (st, rg) = state(&w, doc, &a);
+    assert_eq!(
+        decide(&w, doc, ReviewAction::Keep, &[(&a, rg)]).is_ok(),
+        st == HunkState::Pending || st == HunkState::Conflicted,
+        "once the save lands the panel decides against what it now reads"
+    );
+}
