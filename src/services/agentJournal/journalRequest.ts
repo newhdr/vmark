@@ -37,6 +37,9 @@
  *     discards the request: nothing is applied and nothing abandoned.
  *   - A prepared reply that lands after its attempt is aborted `timedOut`
  *     with the request's pair, unless it is the transaction adopted.
+ *   - A reply with no transaction (a revert's recorded decision) is a
+ *     success: accepted even once the budget is spent (nothing is left to
+ *     apply), and never aborted when it lands late.
  *
  * @coordinates-with services/agentJournal/pageRegistration.ts — the page pair and lifetime
  * @coordinates-with services/agentJournal/requestEnding.ts — abandon and abort
@@ -81,11 +84,11 @@ const refused = <P>(refusal: JournalRefusal, disposition: RequestDisposition, ab
 const pairOf = ({ pageIdentity, webviewGeneration }: RegisteredPage): PagePair => ({ pageIdentity, webviewGeneration });
 
 /** Run one prepare request; see the header. */
-export function runPrepareRequest<P extends { txn: string }>(request: PrepareRequest<P>): Promise<PrepareRun<P>> {
+export function runPrepareRequest<P extends { readonly txn?: string }>(request: PrepareRequest<P>): Promise<PrepareRun<P>> {
   return new PrepareRequestRun(request, request.budget ?? startJournalBudget()).run();
 }
 
-class PrepareRequestRun<P extends { txn: string }> {
+class PrepareRequestRun<P extends { readonly txn?: string }> {
   private spec: PrepareSpec<P> | null = null;
   /** The page this request holds (acquired once, released once). */
   private page: RegisteredPage | null = null;
@@ -201,9 +204,10 @@ class PrepareRequestRun<P extends { txn: string }> {
   }
 
   private afterPrepared({ prepared, page }: Answered<P>): Step<P> {
-    this.adopted = prepared.txn;
+    this.adopted = prepared.txn ?? null;
     if (pageLifetime() !== this.lifetime) return this.discard();
-    if (this.spent()) return this.giveUp(true);
+    // A decision (no transaction) leaves nothing to apply, so a spent budget does not undo it.
+    if (prepared.txn !== undefined && this.spent()) return this.giveUp(true);
     return { kind: "prepared", prepared, page };
   }
 
@@ -264,8 +268,9 @@ class PrepareRequestRun<P extends { txn: string }> {
       return;
     }
     // A retry resends the same request, so two late replies can name one txn: abort it once.
+    // A late decision holds no transaction: there is nothing to abort.
     const txn = answered.prepared.txn;
-    if (txn === this.adopted || this.abortedLate.has(txn)) return;
+    if (txn === undefined || txn === this.adopted || this.abortedLate.has(txn)) return;
     this.abortedLate.add(txn);
     void abortTxn(txn, "timedOut", pairOf(answered.page));
   }

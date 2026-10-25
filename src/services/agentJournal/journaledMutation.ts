@@ -33,7 +33,8 @@
  *     the baseline its prepare recorded; a refusal releases the freeze only
  *     when its disposition says so (the journal proved nothing was
  *     admitted, or nothing was sent: `journalRequest.ts`); anything left
- *     unsettled is invalidated.
+ *     unsettled is invalidated. A caller may supply its own `freeze` (a
+ *     hunk revert freezes only an epoch already armed, never arming one).
  *   - An apply that throws is read back through `recover`, never assumed
  *     undone: a changed buffer bumps the tab's MCP revision (the store may
  *     have thrown before its own bump), forks like an applied text, and is
@@ -51,6 +52,12 @@
  *     committed without extras (the journal records its conservative
  *     barrier) and the outcome is the degraded `appliedWithError`, carrying
  *     the hook's error. It never runs after an abort or a thrown apply.
+ *   - A prepare answered with a decision (a hunk revert recorded as a
+ *     review decision, `controlledMutation.ts`) changed no text: the tab's
+ *     basis becomes the decision's head (the baseline it consumed) and the
+ *     freeze is recorded there; with no head both are dropped. The
+ *     caller's `decided` adapter maps it; a caller that can be answered a
+ *     decision and has none fails loud.
  *   - The outcome mapper runs before the freeze and forks are invalidated,
  *     as each caller's answer did.
  *   - Every await is bounded, so the answer fits the MCP bridge's total
@@ -67,13 +74,13 @@
  */
 
 import { useRevisionStore } from "@/stores/documentStore";
-import type { AbortReason, CommitExtras, JournalBaseRef, PreparedTxn, PrepareSpec } from "./journalClient";
+import type { AbortReason, CommitExtras, DecidedReply, JournalBaseRef, PreparedTxn, PrepareSpec } from "./journalClient";
 import { expectedHead, observedParentFor } from "./expectedHead";
 import { runPreparedWrite } from "./controlledMutation";
 import { JournalRefusal } from "./journalRefusal";
 import { JOURNAL_PREAPPLY_BUDGET_MS, journalTimeout, settleWithin, startJournalBudget } from "./journalDeadline";
 import { forkUnsavedProvenance, freezeUnsavedProvenance, type JournalProvenancePayload } from "./unsavedProvenance";
-import type { ProvenanceFork } from "./provenance/session";
+import type { ProvenanceFork, ProvenanceFreeze } from "./provenance/session";
 import type { CaptureId } from "./provenance/captureId";
 import { forgetJournalBasis, isJournalBasisEvicted, isJournalTabLive, outstandingSaveBase, rememberJournalBasis } from "./documentIdentity";
 
@@ -104,7 +111,7 @@ export type JournaledOutcome<T> =
   /** The apply threw and the tab could not be read back; the journal keeps the transaction open. */
   | { status: "recoveryRequired"; error: unknown };
 
-export interface JournaledMutation<T, P extends PreparedTxn, O> {
+interface MutationAdapters<T, P extends PreparedTxn, O, D> {
   tabId: string;
   /** The tab's journal lifecycle token, taken before the caller's first await. */
   life: number;
@@ -114,10 +121,12 @@ export interface JournaledMutation<T, P extends PreparedTxn, O> {
   preimage: string;
   /** Ends the evicted-basis refusal's message (`retry`, `re-read and retry`). */
   retryHint: string;
+  /** Freezes the tab's provenance at the preimage instead of `freezeUnsavedProvenance` (a hunk revert's never arms). */
+  freeze?: (preimage: string) => ProvenanceFreeze | null;
   /** After the provenance payload was awaited: why the tab must not be prepared now, or `null`. */
   recheck?: () => AbortReason | null;
   /** The prepare request (`controlledPrepare`, `restorePrepare`); the coordinator sends it. */
-  prepare: (baseline: MutationBaseline) => Promise<PrepareSpec<P>> | PrepareSpec<P>;
+  prepare: (baseline: MutationBaseline) => Promise<PrepareSpec<P | DecidedReply<D>>> | PrepareSpec<P | DecidedReply<D>>;
   /** After the prepare ack, synchronously: why the mutation must not go ahead, or `null`. */
   verify: (prepared: P) => AbortReason | null;
   /** Apply now, synchronously; `postimage` is the text the store then holds. */
@@ -128,6 +137,15 @@ export interface JournaledMutation<T, P extends PreparedTxn, O> {
   effects?: (preimage: string, postimage: string) => Promise<CommitExtras>;
   outcome: (outcome: JournaledOutcome<T>) => O | Promise<O>;
 }
+
+/** Maps a decision the journal recorded instead of preparing a write (see the header). */
+interface DecidedAdapter<D, O> {
+  decided: (decision: D) => O | Promise<O>;
+}
+
+/** A tab mutation; one whose prepare can be answered a decision (`D` not `never`) must map it. */
+export type JournaledMutation<T, P extends PreparedTxn, O, D = never> = MutationAdapters<T, P, O, D> &
+  ([D] extends [never] ? unknown : DecidedAdapter<D, O>);
 
 /** `run()`, or a rejection once `EFFECTS_DEADLINE_MS` passes without it settling. */
 function withinEffectsDeadline(run: () => Promise<CommitExtras>): Promise<CommitExtras> {
@@ -140,7 +158,7 @@ function withinEffectsDeadline(run: () => Promise<CommitExtras>): Promise<Commit
 }
 
 /** Run one journaled mutation of `m.tabId`; the outcome mapper's answer. Rethrows an apply that threw with nothing changed. */
-export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: JournaledMutation<T, P, O>): Promise<O> {
+export async function runJournaledMutation<T, P extends PreparedTxn, O, D = never>(m: JournaledMutation<T, P, O, D>): Promise<O> {
   const { tabId, docKey, preimage } = m;
   const budget = startJournalBudget();
   if (isJournalBasisEvicted(tabId, docKey)) {
@@ -149,7 +167,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     return m.outcome({ status: "refused", refusal: evicted });
   }
   const inFlightSave = outstandingSaveBase(tabId, docKey);
-  const freeze = freezeUnsavedProvenance(tabId, preimage);
+  const freeze = m.freeze ? m.freeze(preimage) : freezeUnsavedProvenance(tabId, preimage);
   const forks: ProvenanceFork[] = [];
   const fork = (postimage: string): void => {
     const f = forkUnsavedProvenance(tabId, postimage);
@@ -181,7 +199,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
     if (changed) return await m.outcome({ status: "aborted", reason: changed });
     // Stated once the prepare is built (see the header).
     let parent: string | null = null;
-    const prepare = async (): Promise<PrepareSpec<P>> => {
+    const prepare = async (): Promise<PrepareSpec<P | DecidedReply<D>>> => {
       const expected = await expectedHead(tabId, docKey, budget, inFlightSave);
       if ("refusal" in expected) throw expected.refusal;
       parent = expected.parent;
@@ -226,6 +244,17 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O>(m: Journ
       if (outcome.disposition === "release") releaseFreeze();
       if (outcome.refusal.journalCode === "STALE_PARENT") settleBasis(null);
       return await m.outcome({ status: "refused", refusal: outcome.refusal });
+    }
+    if (outcome.status === "decided") {
+      settleBasis(outcome.head);
+      if (outcome.head !== null) {
+        freezeSettled = true;
+        freeze?.recorded(outcome.head);
+      }
+      // The type requires the adapter of every prepare that can answer a decision; fail loud on a caller that slipped past it.
+      const { decided } = m as Partial<DecidedAdapter<D, O>>;
+      if (!decided) throw new Error("the journal recorded a decision, and this mutation has no decided adapter");
+      return await decided(outcome.decision);
     }
     if (outcome.status === "recoveryRequired") {
       settleBasis(null);

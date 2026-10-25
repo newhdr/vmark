@@ -10,6 +10,11 @@
  * never reported as an error. A queued commit lands later (basis: its
  * revision); a refused one ends `uncommitted` (basis: the pre-write head).
  *
+ * A prepare answered with a decision (`DecidedReply`: a hunk revert the
+ * journal recorded as a review decision instead) holds no transaction:
+ * nothing is verified, applied, committed or aborted, and the outcome is
+ * `decided`, carrying the head the decision was recorded on.
+ *
  * An apply that THROWS may have changed the document part-way, so it is
  * never aborted on trust: `recover()` reads the document back. Unchanged
  * (the preimage) → `aborted`, carrying the error in `thrown`. Changed → the text
@@ -56,7 +61,15 @@
  * @module services/agentJournal/controlledMutation
  */
 
-import { commitControlledWrite, type AbortReason, type CommitExtras, type PreparedTxn, type PrepareSpec } from "./journalClient";
+import {
+  commitControlledWrite,
+  isDecidedReply,
+  type AbortReason,
+  type CommitExtras,
+  type DecidedReply,
+  type PreparedTxn,
+  type PrepareSpec,
+} from "./journalClient";
 import { JOURNAL_DEADLINE_MS, withJournalDeadline, type JournalBudget } from "./journalDeadline";
 import { JournalRefusal } from "./journalRefusal";
 import { runPrepareRequest, type RequestDisposition } from "./journalRequest";
@@ -65,7 +78,7 @@ import { noteStalePage, type PagePair } from "./pageRegistration";
 import { journalWarn } from "@/utils/debug";
 import { beginWriteReport } from "./recordingReport";
 
-export type ControlledOutcome<T> =
+export type ControlledOutcome<T, D = never> =
   /** `disposition`: what the caller does with the freeze it took (`journalRequest.ts`). */
   | { status: "refused"; refusal: JournalRefusal; disposition: RequestDisposition }
   /**
@@ -95,10 +108,12 @@ export type ControlledOutcome<T> =
    * document's reservation for the journal's recovery. The tab's basis is
    * unknown.
    */
-  | { status: "recoveryRequired"; error: unknown; txn: string };
+  | { status: "recoveryRequired"; error: unknown; txn: string }
+  /** The journal recorded decision `decision` instead; `head`: the tab's basis now (a decision never moves it). */
+  | { status: "decided"; decision: D; head: string | null };
 
 /** A controlled write; its prepare is the caller's (an MCP edit, a restore). */
-export interface PreparedWrite<T, P extends PreparedTxn> {
+export interface PreparedWrite<T, P extends PreparedTxn, D = never> {
   /** The parent the prepare stated, read once it was built; the basis when it records no baseline. */
   parent: () => string | null;
   /** The text the prepare records as overwritten: what `recover` reads when nothing changed. */
@@ -106,7 +121,7 @@ export interface PreparedWrite<T, P extends PreparedTxn> {
   /** The document's journal key, so an applied write's durability is reported. */
   docKey?: string;
   /** The prepare request; built inside its first attempt's deadline. */
-  prepare: () => Promise<PrepareSpec<P>> | PrepareSpec<P>;
+  prepare: () => Promise<PrepareSpec<P | DecidedReply<D>>> | PrepareSpec<P | DecidedReply<D>>;
   verify: (prepared: P) => AbortReason | null;
   apply: (prepared: P) => { postimage: string; value: T } | { refused: AbortReason };
   /** After an apply that threw: settle the document and return its text; throw when it cannot be read. */
@@ -159,9 +174,9 @@ async function commit(
 type Aborted<T> = (reason: AbortReason, thrown?: { error: unknown }) => Promise<ControlledOutcome<T>>;
 
 /** Run a controlled write with the caller's prepare: verify → apply → commit, or abort. */
-export async function runPreparedWrite<T, P extends PreparedTxn>(
-  write: PreparedWrite<T, P>,
-): Promise<ControlledOutcome<T>> {
+export async function runPreparedWrite<T, P extends PreparedTxn, D = never>(
+  write: PreparedWrite<T, P, D>,
+): Promise<ControlledOutcome<T, D>> {
   const report = beginWriteReport(write.docKey);
   const run = await runPrepareRequest({
     build: write.prepare,
@@ -171,15 +186,17 @@ export async function runPreparedWrite<T, P extends PreparedTxn>(
   });
   if (!run.ok) return { status: "refused", refusal: run.refusal, disposition: run.disposition };
   try {
-    return await settlePrepared(write, { prepared: run.prepared, pair: run.pair, report });
+    const { prepared } = run;
+    if (isDecidedReply<D, P>(prepared)) return { status: "decided", decision: prepared.decision, head: prepared.head };
+    return await settlePrepared(write, { prepared, pair: run.pair, report });
   } finally {
     run.finish();
   }
 }
 
 /** Verify, apply and commit (or abort) a prepared write. */
-async function settlePrepared<T, P extends PreparedTxn>(
-  write: PreparedWrite<T, P>,
+async function settlePrepared<T, P extends PreparedTxn, D>(
+  write: PreparedWrite<T, P, D>,
   { prepared, pair, report }: { prepared: P; pair: PagePair; report: (durable: boolean) => void },
 ): Promise<ControlledOutcome<T>> {
   const basis = prepared.baseline ?? write.parent();
@@ -195,7 +212,7 @@ async function settlePrepared<T, P extends PreparedTxn>(
     return aborted("applyRefused", { error });
   }
   if (reason !== null) return aborted(reason);
-  let applied: ReturnType<PreparedWrite<T, P>["apply"]>;
+  let applied: ReturnType<PreparedWrite<T, P, D>["apply"]>;
   try {
     applied = write.apply(prepared);
   } catch (error) {
@@ -225,8 +242,8 @@ async function settleEffects(
 }
 
 /** An apply threw: abort only once the document reads back unchanged (see the header). */
-async function recoverFromThrownApply<T, P extends PreparedTxn>(
-  write: PreparedWrite<T, P>,
+async function recoverFromThrownApply<T, P extends PreparedTxn, D>(
+  write: PreparedWrite<T, P, D>,
   prepared: P,
   { ctx, aborted }: { ctx: CommitContext; aborted: Aborted<T> },
   error: unknown,

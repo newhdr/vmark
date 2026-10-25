@@ -46,12 +46,29 @@ export type JournalAbortReason = AbortReason | "timedOut";
 
 /** What a prepare sends and how its reply is read (run by `journalRequest.ts`). */
 export interface PrepareSpec<P> {
-  command: "agent_journal_prepare" | "agent_journal_restore_prepare";
+  command: "agent_journal_prepare" | "agent_journal_restore_prepare" | "agent_journal_revert_prepare";
   /** The request's fields, without `requestId` and the page identity. */
   fields: { readonly baselineProvenance: unknown };
   /** Read the bound reply's `reply`. Throws `malformed`. */
   parse: (command: string, reply: unknown) => P;
 }
+
+/**
+ * A prepare answered by a recorded decision instead of a transaction (a
+ * revert that did not apply): nothing to verify, apply, commit or abort.
+ */
+export interface DecidedReply<D> {
+  readonly kind: "decided";
+  readonly decision: D;
+  /** The head the decision was recorded on (a decision never moves it): the tab's basis next. */
+  readonly head: string | null;
+  /** A decision holds no transaction: nothing to commit or abort. */
+  readonly txn?: never;
+}
+
+/** Whether a prepare's reply is a decision rather than a transaction. */
+export const isDecidedReply = <D, P extends object>(reply: P | DecidedReply<D>): reply is DecidedReply<D> =>
+  (reply as { kind?: unknown }).kind === "decided";
 
 export interface PrepareInput {
   /** `path:<file>` or `tab:<window>/<tab>` (see `documentIdentity.ts`). */
