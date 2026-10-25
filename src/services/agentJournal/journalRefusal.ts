@@ -22,7 +22,10 @@
  *     validated into `settlement` by `journalSettlement.ts`; every other
  *     command's refusal stays this lossy read.
  *   - `AMBIGUOUS_REVERT` carries the refused `hunk` and its sticky `block`
- *     (`{reason, origin}`, or `null` when coverage is unbounded).
+ *     (`{reason, origin}`, or `null` when coverage is unbounded);
+ *     `REVERT_REFUSED` its `hunk` and why: `conflicted` (conflicted again)
+ *     or `reapply` (a reverted hunk that cannot be re-applied). A reason
+ *     this client does not know is read as none.
  *
  * @coordinates-with src-tauri/src/agent_journal/refusal.rs — the Rust mapping
  * @module services/agentJournal/journalRefusal
@@ -65,12 +68,17 @@ export interface RevertBlock {
   origin: string;
 }
 
+/** Why a revert recorded nothing (`REVERT_REFUSED`). */
+export type RevertRefusedReason = "conflicted" | "reapply";
+const isRevertRefusedReason = (v: unknown): v is RevertRefusedReason => v === "conflicted" || v === "reapply";
+
 /** What a refusal carries beyond its code, message, head and field. */
 export interface RefusalExtras {
   uncertain?: boolean;
   settlement?: JournalSettlement | null;
   hunk?: string | null;
   block?: RevertBlock | null;
+  revertReason?: RevertRefusedReason | null;
 }
 
 /** A journal command refused; nothing was recorded for this request. */
@@ -88,6 +96,8 @@ export class JournalRefusal extends Error {
   readonly hunk: string | null;
   /** The break blocking the revert, for `AMBIGUOUS_REVERT`. */
   readonly block: RevertBlock | null;
+  /** Why the revert was refused, for `REVERT_REFUSED`. */
+  readonly revertReason: RevertRefusedReason | null;
 
   constructor(
     journalCode: JournalCode,
@@ -105,6 +115,7 @@ export class JournalRefusal extends Error {
     this.settlement = extras.settlement ?? null;
     this.hunk = extras.hunk ?? null;
     this.block = extras.block ?? null;
+    this.revertReason = extras.revertReason ?? null;
   }
 }
 
@@ -128,6 +139,7 @@ export function toJournalRefusal(error: unknown): JournalRefusal {
       uncertain: detail?.uncertain === true,
       hunk: stringOrNull(detail?.hunk),
       block: revertBlock(detail?.block),
+      revertReason: isRevertRefusedReason(detail?.reason) ? detail.reason : null,
     });
   }
   const message = parsed?.message ?? (error instanceof Error ? error.message : String(error));

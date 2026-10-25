@@ -156,6 +156,23 @@ fn ambiguous_revert_detail_is_what_the_client_reads() {
     }
 }
 
+#[test]
+fn revert_refused_detail_is_what_the_client_reads() {
+    use crate::agent_journal::refusal::refusal;
+    // The same detail literals are read back by journalCodeParity.test.ts.
+    for reason in ["conflicted", "reapply"] {
+        let e = TxnError::RevertRefused {
+            hunk: HunkId("h-1".into()),
+            reason,
+        };
+        let v = serde_json::to_value(refusal(&e)).expect("serializes");
+        assert_eq!(
+            v["detail"],
+            json!({ "journalCode": "REVERT_REFUSED", "hunk": "h-1", "reason": reason })
+        );
+    }
+}
+
 /// `page`'s label with another page's pair.
 fn posing(page: &Page, as_: &Page) -> Page {
     Page {

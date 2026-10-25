@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL2.2g — every Rust journal refusal code is a TypeScript journal code: the codes are read from errors.rs's code() arms, answer.rs's RequestState::code arms and the journalCode literals in the journal's production Rust, so a code added on one side fails here until the other side has it; the only TypeScript-only code is the client-raised JOURNAL_TIMEOUT. AMBIGUOUS_REVERT round-trips with its hunk and block; its block carries a real Rust break reason, the literal the Rust round-trip test pins
+// WI-AL2.2g — every Rust journal refusal code is a TypeScript journal code: the codes are read from errors.rs's code() arms, answer.rs's RequestState::code arms and the journalCode literals in the journal's production Rust, so a code added on one side fails here until the other side has it; the only TypeScript-only code is the client-raised JOURNAL_TIMEOUT. AMBIGUOUS_REVERT round-trips with its hunk and block; its block carries a real Rust break reason, the literal the Rust round-trip test pins; WI-AL2.2e — REVERT_REFUSED round-trips with its hunk and its reason (conflicted or reapply), an unknown reason read as none
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
@@ -68,6 +68,17 @@ describe("journal code parity", () => {
       detail: { journalCode: "AMBIGUOUS_REVERT", hunk: "h-1", block: null },
     });
     expect(unblocked.block).toBeNull();
+  });
+
+  it.each(["conflicted", "reapply"] as const)("REVERT_REFUSED round-trips with its hunk and reason %s", (reason) => {
+    // The detail literals `revert_refused_detail_is_what_the_client_reads` pins on the Rust side.
+    const r = toJournalRefusal({ code: "conflict", message: "m", detail: { journalCode: "REVERT_REFUSED", hunk: "h-1", reason } });
+    expect([r.journalCode, r.hunk, r.revertReason]).toEqual(["REVERT_REFUSED", "h-1", reason]);
+  });
+
+  it("a REVERT_REFUSED reason the client does not know is read as none", () => {
+    const r = toJournalRefusal({ code: "conflict", message: "m", detail: { journalCode: "REVERT_REFUSED", hunk: "h-1", reason: "later" } });
+    expect([r.journalCode, r.revertReason]).toEqual(["REVERT_REFUSED", null]);
   });
 
   it("an indeterminate admission is read as uncertain", () => {

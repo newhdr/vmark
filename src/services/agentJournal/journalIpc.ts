@@ -129,9 +129,9 @@ export async function callJournal(command: string, args: Record<string, unknown>
   } catch (error) {
     const refusal = toJournalRefusal(error);
     if (!expect) throw refusal;
-    const { journalCode, message, head, field, uncertain, hunk, block } = refusal;
+    const { journalCode, message, head, field, uncertain, hunk, block, revertReason } = refusal;
     const settlement = settleRequestRefusal(error, expect);
-    throw new JournalRefusal(journalCode, message, head, field, { uncertain, hunk, block, settlement });
+    throw new JournalRefusal(journalCode, message, head, field, { uncertain, hunk, block, revertReason, settlement });
   }
 }
 
