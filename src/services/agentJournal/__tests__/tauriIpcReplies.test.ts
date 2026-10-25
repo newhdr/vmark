@@ -1,5 +1,6 @@
 // WI-AL2.2g — on Tauri's real webview IPC scripts (core.js and ipc-protocol.js from the pinned crate, located by cargo metadata, failing when absent) with forced callback ids: a command whose response-body read fails is executed again through the postMessage fallback with its payload byte for byte, so a prepare is resent under the same request; a reloaded page reuses the old page's callback ids, and the old page's prepared replies and commit acknowledgement delivered into the new page's callbacks apply nothing and confirm nothing; a prepare reply bound to another request is rejected before apply; a commit acknowledgement bound to another txn or page pair is not durable
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { untilReady } from "@/test/untilReady";
 
 vi.unmock("@tauri-apps/api/core");
 vi.unmock("@/services/agentJournal/journalTransport");
@@ -36,12 +37,6 @@ function backend(e: Execution): Answer {
 
 let harness: ReturnType<typeof installTauriIpc>;
 const of = (cmd: string) => harness.executions.filter((e) => e.cmd === cmd);
-
-/** Yield real turns of the event loop until `ready()` holds. */
-async function until(ready: () => boolean): Promise<void> {
-  for (let i = 0; i < 2000 && !ready(); i += 1) await new Promise((r) => setTimeout(r, 0));
-  expect(ready()).toBe(true);
-}
 
 /** Registration echoes; everything else is the test's. */
 const withRegister = (rest: Script): Script => (e, args) =>
@@ -116,11 +111,11 @@ describe("replies are bound to their request", () => {
     harness.executions.length = 0;
     script = withRegister(() => "hold");
     const out = runJournaledMutation(mutation());
-    await until(() => of(PREPARE).length === 1);
+    await untilReady(() => of(PREPARE).length === 1);
     harness.deliver(aIds[1], aPrepared);
-    await until(() => of(PREPARE).length === 2);
+    await untilReady(() => of(PREPARE).length === 2);
     harness.deliver(aIds[2], aPrepared);
-    await until(() => of("agent_journal_abandon").length === 1);
+    await untilReady(() => of("agent_journal_abandon").length === 1);
     harness.deliver(aIds[3], aCommitted);
 
     expect(harness.executions.map((e) => e.callback)).toEqual(aIds);

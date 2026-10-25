@@ -4,6 +4,7 @@
 // page registration → request coordinator → the coordinator — on a fake
 // clock (timers and `performance` only: the payload digest is real async work).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { untilReady } from "@/test/untilReady";
 
 vi.unmock("@/services/agentJournal/journalTransport");
 import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
@@ -42,12 +43,6 @@ function deferred(): { reply: () => Promise<unknown>; resolve: (v: unknown) => v
 /** The journal commands sent, page registrations aside. */
 const commands = () => wire.calls.map((c) => c.command).filter((c) => c !== "agent_journal_register_page");
 const sent = (command: string) => commands().filter((c) => c === command).length;
-
-/** Yield real turns of the event loop until `ready()` holds. */
-async function until(ready: () => boolean): Promise<void> {
-  for (let i = 0; i < 1000 && !ready(); i += 1) await new Promise((r) => setImmediate(r));
-  expect(ready()).toBe(true);
-}
 
 /** Watch a run settle without awaiting it, so a hang is a failed assertion, not a test timeout. */
 function track<T>(run: Promise<T>): { done: boolean; value?: T; error?: unknown } {
@@ -97,7 +92,7 @@ describe("runJournaledMutation — the commit and the abort are bounded", () => 
     const ack = deferred();
     wire.on("agent_journal_commit", ack.reply);
     const run = track(runJournaledMutation(mutation()));
-    await until(() => sent("agent_journal_commit") === 1);
+    await untilReady(() => sent("agent_journal_commit") === 1);
     await vi.advanceTimersByTimeAsync(JOURNAL_DEADLINE_MS - 1);
     expect(run.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
@@ -117,7 +112,7 @@ describe("runJournaledMutation — the commit and the abort are bounded", () => 
   it("an abort that never settles keeps the refusal outcome at the deadline, with nothing else invoked", async () => {
     wire.on("agent_journal_abort", never);
     const run = track(runJournaledMutation(mutation({ verify: () => "edited" })));
-    await until(() => sent("agent_journal_abort") === 1);
+    await untilReady(() => sent("agent_journal_abort") === 1);
     await vi.advanceTimersByTimeAsync(JOURNAL_DEADLINE_MS - 1);
     expect(run.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
@@ -167,12 +162,12 @@ describe("runJournaledMutation — the pre-apply budget", () => {
 
   /** Run a mutation whose prepare never answers in time through its retry and its abandon. */
   async function exhaust(run: { done: boolean }): Promise<void> {
-    await until(() => sent(PREPARE) === 1);
+    await untilReady(() => sent(PREPARE) === 1);
     await vi.advanceTimersByTimeAsync(JOURNAL_DEADLINE_MS);
-    await until(() => sent(PREPARE) === 2);
+    await untilReady(() => sent(PREPARE) === 2);
     expect(run.done).toBe(false);
     await vi.advanceTimersByTimeAsync(JOURNAL_PREAPPLY_BUDGET_MS - JOURNAL_DEADLINE_MS);
-    await until(() => run.done);
+    await untilReady(() => run.done);
   }
 
   it("a prepare that never settles is retried once with the same payload, then abandoned with no apply; its late reply is aborted once, reason timedOut", async () => {
@@ -189,7 +184,7 @@ describe("runJournaledMutation — the pre-apply budget", () => {
 
     // Both attempts carried the same request: its one transaction is aborted once.
     reply.resolve(await boundPrepare(payload, PREPARED));
-    await until(() => sent("agent_journal_abort") === 1);
+    await untilReady(() => sent("agent_journal_abort") === 1);
     await vi.advanceTimersByTimeAsync(0);
     expect(apply).not.toHaveBeenCalled();
     expect(commands()).toEqual([PREPARE, PREPARE, "agent_journal_abandon", "agent_journal_abort"]);
@@ -226,11 +221,11 @@ describe("runJournaledMutation — the pre-apply budget", () => {
     slowPayload(6000);
     const run = track(runJournaledMutation(mutation()));
     await vi.advanceTimersByTimeAsync(6000);
-    await until(() => sent(PREPARE) === 1);
+    await untilReady(() => sent(PREPARE) === 1);
     await vi.advanceTimersByTimeAsync(JOURNAL_PREAPPLY_BUDGET_MS - 6000 - 1);
     expect(run.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    await until(() => run.done);
+    await untilReady(() => run.done);
     expect(run.value).toMatchObject(abandoned);
     expect(commands()).toEqual([PREPARE, "agent_journal_abandon"]);
   });
@@ -248,12 +243,12 @@ describe("runJournaledMutation — the worst case", () => {
     const t0 = performance.now();
     const run = track(runJournaledMutation(mutation({ effects: () => never() })));
     await vi.advanceTimersByTimeAsync(3000);
-    await until(() => sent(PREPARE) === 1);
+    await untilReady(() => sent(PREPARE) === 1);
     await vi.advanceTimersByTimeAsync(3999);
     await vi.advanceTimersByTimeAsync(EFFECTS_DEADLINE_MS);
-    await until(() => sent("agent_journal_commit") === 1);
+    await untilReady(() => sent("agent_journal_commit") === 1);
     await vi.advanceTimersByTimeAsync(JOURNAL_DEADLINE_MS);
-    await until(() => run.done);
+    await untilReady(() => run.done);
     expect(performance.now() - t0).toBeLessThanOrEqual(worst);
     const out = run.value as JournaledOutcome<string>;
     expect(out).toMatchObject({ status: "appliedWithError", durable: false });

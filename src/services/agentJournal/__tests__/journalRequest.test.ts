@@ -1,5 +1,6 @@
 // WI-AL2.2g — one prepare request through the real transport, IPC validation and page registration: the payload is frozen once and resent byte for byte (retry and abandon); each attempt is bounded by min(5000, remaining budget) and readiness that never settles invokes nothing, while a prepare answered in time leaves no timer; a second uncertain answer (JOURNAL_UNAVAILABLE) or budget expiry after dispatch (JOURNAL_TIMEOUT, both uncertain) abandons once with the original payload, and a timeout before dispatch is a clean, released JOURNAL_TIMEOUT; an own staleGeneration ends with no retry and no abandon and renews the registration; a confirmed provenance refusal falls back once under a new request id, an uncertain one retries the same payload; a page hidden while a prepare is in flight discards its reply with no abandon, even when the budget also ran out; late prepared replies are aborted timedOut with the request's pair; the generation stays an opaque string; a capture turn that fails after its send was dispatched invalidates and abandons once, as JOURNAL_TIMEOUT when the budget is spent or the turn itself timed out; a restored page's next registration names the old pair in replaces
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { untilReady } from "@/test/untilReady";
 
 vi.unmock("@/services/agentJournal/journalTransport");
 
@@ -36,12 +37,6 @@ const decoded = (p: string): Record<string, unknown> => JSON.parse(p);
 
 /** Fake only the clocks the coordinator reads; the payload digest still settles on its own. */
 const fakeClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-
-/** Yield real turns of the event loop until `ready()` holds. */
-async function until(ready: () => boolean): Promise<void> {
-  for (let i = 0; i < 1000 && !ready(); i += 1) await new Promise((r) => setImmediate(r));
-  expect(ready()).toBe(true);
-}
 
 function pagehide(persisted: boolean): void {
   window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted }));
@@ -221,7 +216,7 @@ describe("journal request — deadlines", () => {
     const out = run();
     let settled = false;
     void out.then(() => (settled = true));
-    await until(() => prepares().length === 1);
+    await untilReady(() => prepares().length === 1);
     await vi.advanceTimersByTimeAsync(5000);
     expect(prepares()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(2000);
@@ -255,12 +250,12 @@ describe("journal request — deadlines", () => {
       return boundPrepare(String(a.payload), preparedReply(1));
     });
     const out = run();
-    await until(() => prepares().length === 1);
+    await untilReady(() => prepares().length === 1);
     await vi.advanceTimersByTimeAsync(5000);
     const done = await out;
     expect(done).toMatchObject({ ok: true, prepared: { txn: "txn-1" } });
     late(null);
-    await until(() => wire.argsOf("agent_journal_abort").length > 0);
+    await untilReady(() => wire.argsOf("agent_journal_abort").length > 0);
     const p = decoded(prepares()[0]);
     expect(wire.argsOf("agent_journal_abort")).toEqual([
       { txn: "txn-9", reason: "timedOut", pageIdentity: p.pageIdentity, webviewGeneration: p.webviewGeneration },

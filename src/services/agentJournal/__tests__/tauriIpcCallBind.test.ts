@@ -1,5 +1,6 @@
 // WI-AL2.2i — on Tauri's real webview IPC scripts with forced callback ids (a_misdelivered_capture_reply_cannot_mark_a_save_recorded): a reloaded page reuses the old page's callback ids, so the old page's capture reply, journaled yes, lands in the new page's capture callback; bound to the old call's callId, it is refused as JOURNAL_UNAVAILABLE and never reports the new save recorded, while the new call's own reply, delivered into its own callback, is read
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { untilReady } from "@/test/untilReady";
 
 vi.unmock("@tauri-apps/api/core");
 vi.unmock("@/services/agentJournal/journalTransport");
@@ -35,12 +36,6 @@ function callIdOf(e: Execution): string {
   return args.callId;
 }
 
-/** Yield real turns of the event loop until `ready()` holds. */
-async function until(ready: () => boolean): Promise<void> {
-  for (let i = 0; i < 2000 && !ready(); i += 1) await new Promise((r) => setTimeout(r, 0));
-  expect(ready()).toBe(true);
-}
-
 beforeEach(() => {
   harness = installTauriIpc(() => "hold", IDS);
 });
@@ -53,7 +48,7 @@ afterEach(() => {
 describe("a capture reply delivered into another page's callback", () => {
   it("a_misdelivered_capture_reply_cannot_mark_a_save_recorded", async () => {
     void captureSaveToJournal(capture("old page")).catch(() => undefined);
-    await until(() => harness.executions.length === 1);
+    await untilReady(() => harness.executions.length === 1);
     const old = harness.executions[0];
 
     harness.reload();
@@ -61,7 +56,7 @@ describe("a capture reply delivered into another page's callback", () => {
       (v) => ({ ok: true as const, v }),
       (e: unknown) => ({ ok: false as const, e }),
     );
-    await until(() => harness.executions.length === 2);
+    await untilReady(() => harness.executions.length === 2);
     const fresh = harness.executions[1];
     expect(fresh.callback).toBe(old.callback);
     expect(callIdOf(fresh)).not.toBe(callIdOf(old));
@@ -75,7 +70,7 @@ describe("a capture reply delivered into another page's callback", () => {
 
   it("reads the new call's own reply in its own callback", async () => {
     const settled = captureSaveToJournal(capture("new page"));
-    await until(() => harness.executions.length === 1);
+    await untilReady(() => harness.executions.length === 1);
     const e = harness.executions[0];
     harness.deliver(e.callback, { bind: { callId: callIdOf(e) }, reply: recorded(NEW_REV) });
     await expect(settled).resolves.toEqual(recorded(NEW_REV));
