@@ -14,7 +14,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { rustMountChain } from "./rust-target-mount.mjs";
+import { diskChildModules, rustMountChain } from "./rust-target-mount.mjs";
 import { targetNamed } from "./lib/dodSyntaxRustAttrs.mjs";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -29,7 +29,9 @@ const crate = ({ lib = "pub mod a;", mount = "#[cfg(test)]", modInner = "", tail
   [`${R}/a/mod.rs`]: `${modInner}\npub fn f() {}\n${mount}\n#[path = "x.test.rs"]\nmod x_tests;\n${tail}`,
   [TEST]: "#[test]\nfn t() {}\n",
 });
-const chain = (files, target, file = TEST) => rustMountChain(file, target, (p) => files[p]);
+/** The `.rs` files one directory below `dir` in the `files` map. */
+const childModules = (files) => (dir) => Object.keys(files).filter((p) => p.startsWith(`${dir}/`) && p.slice(dir.length + 1).split("/").length === 2);
+const chain = (files, target, file = TEST) => rustMountChain(file, target, (p) => files[p], undefined, childModules(files));
 
 describe("rustMountChain", () => {
   it("returns the chain from lib.rs to a mounted test file", () => {
@@ -90,6 +92,26 @@ describe("rustMountChain", () => {
       [TEST]: "#[test]\nfn t() {}\n",
     };
     expect(chain(files, WIN).error).toMatch(/compiled out/);
+  });
+
+  it("follows a child directory's module mounting a test beside its directory as ../x.test.rs", () => {
+    const files = {
+      [`${R}/lib.rs`]: "pub mod a;\n",
+      [`${R}/a/mod.rs`]: "mod adm;\n",
+      [`${R}/a/adm/mod.rs`]: '#[cfg(test)]\n#[path = "../x.test.rs"]\nmod x_tests;\n',
+      [TEST]: "#[test]\nfn t() {}\n",
+    };
+    expect(chain(files, WIN)).toEqual({ chain: [`${R}/lib.rs`, `${R}/a/mod.rs`, `${R}/a/adm/mod.rs`, TEST] });
+    const compiledOut = { ...files, [`${R}/a/adm/mod.rs`]: '#[cfg(unix)]\n#[path = "../x.test.rs"]\nmod x_tests;\n' };
+    expect(chain(compiledOut, WIN).error).toMatch(/compiled out/);
+  });
+
+  it("mounts a real test that a child directory's module mounts from beside it", () => {
+    const file = `${R}/agent_journal/page_lifecycle.test.rs`;
+    const read = (p) => (existsSync(path.join(REPO, p)) ? readFileSync(path.join(REPO, p), "utf8") : undefined);
+    const children = (dir) => diskChildModules(path.join(REPO, dir)).map((f) => path.relative(REPO, f));
+    const r = rustMountChain(file, MAC, read, undefined, children);
+    expect(r.chain?.at(-2), r.error).toBe(`${R}/agent_journal/admission/mod.rs`);
   });
 
   it("mounts the real Windows witness for windows and for macos", () => {

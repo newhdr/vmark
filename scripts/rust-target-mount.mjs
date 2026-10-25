@@ -11,7 +11,8 @@
  * directory's `mod.rs`, in `d.rs`'s sibling directory-module file, or in
  * `lib.rs` at the crate root; `d/x.rs` by `mod x;` in `d/mod.rs` or `d.rs`
  * (`lib.rs` at the root); a `#[path = "…"]` mount (`#[path = "x.test.rs"]
- * mod x_tests;`) by `d/mod.rs`, `d/<stem>.rs` or `d.rs` (`"d/x.test.rs"`).
+ * mod x_tests;`) by `d/mod.rs`, `d/<stem>.rs`, `d.rs` (`"d/x.test.rs"`) or a
+ * module one directory down (`"../x.test.rs"` in `d/<sub>/*.rs`).
  * One declaration must be LIVE for the target: code (not a comment or a
  * literal), at the top level of its file, its outer attributes and the
  * declaring file's inner attributes known and every `cfg` true there
@@ -31,7 +32,7 @@
  * @coordinates-with scripts/lib/dod-assertions.sh — rust_mount_owner, the host-side mount lookup
  * @module scripts/rust-target-mount
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { attributeVerdict, innerAttributes, onTarget, outerAttributes, TARGETS, targetNamed } from "./lib/dodSyntaxRustAttrs.mjs";
 import { isMainModule } from "./lib/isMainModule.mjs";
@@ -67,8 +68,16 @@ function declarations(source, want, target) {
   return out;
 }
 
+/** The `.rs` files one directory below `dir`, read from disk relative to the working directory. */
+export function diskChildModules(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .flatMap((e) => readdirSync(path.posix.join(dir, e.name)).filter((f) => f.endsWith(".rs")).map((f) => path.posix.join(dir, e.name, f)));
+}
+
 /** The files that may declare `file`, each with what its declaration names. */
-function declarers(file, crate) {
+function declarers(file, crate, children) {
   const dir = path.posix.dirname(file);
   const base = path.posix.basename(file);
   const atRoot = (d) => d === crate;
@@ -85,7 +94,8 @@ function declarers(file, crate) {
   const mounts = [...new Set([`${dir}/mod.rs`, owner, ...(atRoot(dir) ? [`${crate}/lib.rs`] : [])])]
     .filter((f) => f !== file).map((f) => ({ file: f, want: { rel: base } }));
   const up = atRoot(dir) ? [] : [{ file: `${dir}.rs`, want: { rel: `${path.posix.basename(dir)}/${base}` } }];
-  return [...plain, ...mounts, ...up];
+  const down = children(dir).filter((f) => f !== file).map((f) => ({ file: f, want: { rel: `../${base}` } }));
+  return [...plain, ...mounts, ...up, ...down];
 }
 
 /**
@@ -93,15 +103,16 @@ function declarers(file, crate) {
  * next live for `target` — or `{ error }`. Every live declarer is tried: one
  * whose own chain breaks (an orphan file that is never mounted) does not hide
  * another that reaches the crate root. `read(p)` returns a file's text or
- * undefined when it does not exist.
+ * undefined when it does not exist; `children(dir)` lists the `.rs` files one
+ * directory below `dir`.
  */
-export function rustMountChain(file, target, read, crate = CRATE) {
+export function rustMountChain(file, target, read, crate = CRATE, children = diskChildModules) {
   const why = [];
   const walk = (cur, below) => {
     if (cur === `${crate}/lib.rs`) return [cur, ...below];
     if (below.includes(cur) || below.length > 64) return null;
     let declared = false;
-    for (const d of declarers(cur, crate)) {
+    for (const d of declarers(cur, crate, children)) {
       const source = read(d.file);
       if (source === undefined) continue;
       const found = declarations(source, d.want, target);
