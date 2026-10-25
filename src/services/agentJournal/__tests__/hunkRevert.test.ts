@@ -1,4 +1,4 @@
-// WI-AL2.2e — a hunk revert from the review panel (R34 frontend, R31): the prepare names the hunk and the reviewGen the panel rendered and freezes the tab's provenance only on an epoch already armed — with none it arms nothing and its snapshot baseline is answered AMBIGUOUS_REVERT; after a delayed prepare ack the tab is re-verified synchronously and every injection — typing, a net-zero edit, an uncertified editor remount, close and reopen, Save As, an IME composition — aborts with nothing applied; a reply bound to another hunk or reviewGen aborts; the writer's patch is applied exactly and committed; an applied text whose hash is not the reply's postimageHash is reported appliedWithError, never a refusal; a decision is answered as the panel's decision
+// WI-AL2.2e — a hunk revert from the review panel (R34 frontend, R31): the prepare names the hunk and the reviewGen the panel rendered and freezes the tab's provenance only on an epoch already armed — with none it arms nothing and its snapshot baseline is answered AMBIGUOUS_REVERT; after a delayed prepare ack the tab is re-verified synchronously and every injection — typing, a net-zero edit, an uncertified editor remount, close and reopen, Save As, an IME composition, the tab's journal life ending under the same session — aborts with nothing applied; a reply bound to another hunk or reviewGen, or whose range runs past the buffer, aborts; the writer's patch is applied exactly and committed; an applied text whose hash is not the reply's postimageHash is reported appliedWithError, never a refusal; a decision is answered as the panel's decision
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 import { Editor } from "@tiptap/core";
@@ -15,7 +15,7 @@ import { useEditorStore } from "@/stores/editorStore";
 import { useTabStore } from "@/stores/tabStore";
 import type { DocumentTab } from "@/stores/tabStoreTypes";
 import type { PrepareInput } from "../journalClient";
-import { resetJournalBases } from "../documentIdentity";
+import { releaseTabJournal, resetJournalBases } from "../documentIdentity";
 import { provenanceSessionFor, startProvenanceSessions } from "../provenanceSessions";
 import type { RevertDecided } from "../revertReplies";
 import type { RevertPrepareInput } from "../revertClient";
@@ -33,6 +33,7 @@ interface Reply {
   hunk?: string;
   reviewGen?: string;
   postimageHash?: string;
+  to?: number;
 }
 
 /** Answer the revert prepare through the journal fake, running `during` before the ack. */
@@ -52,6 +53,7 @@ function journal(during?: () => void, reply: Reply = {}) {
         hunk: reply.hunk ?? HUNK.hunkId,
         reviewGen: reply.reviewGen ?? HUNK.reviewGen,
         ...PATCH,
+        to: reply.to ?? PATCH.to,
         postimageHash: reply.postimageHash ?? hashOf("axc"),
       };
       return { kind: "prepared", response };
@@ -145,6 +147,7 @@ describe("revertHunk — the synchronous re-verify after a delayed ack", () => {
     ["close and reopen", reopen, "closed", "abc"],
     ["Save As", saveAs, "closed", "abc"],
     ["an IME composition", compose, "composing", "abc"],
+    ["the tab's journal life ending", () => releaseTabJournal(TAB), "closed", "abc"],
   ] as const)("%s aborts and applies nothing", async (_label, inject, reason, left) => {
     journal(inject);
     expect(await revertHunk(TAB, HUNK)).toEqual({ status: "aborted", reason });
@@ -155,6 +158,7 @@ describe("revertHunk — the synchronous re-verify after a delayed ack", () => {
   it.each([
     ["another hunk", { hunk: "h-2" }],
     ["another reviewGen", { reviewGen: "8" }],
+    ["a range past the buffer", { to: 4 }],
   ])("a reply bound to %s aborts and applies nothing", async (_label, reply) => {
     journal(undefined, reply);
     expect(await revertHunk(TAB, HUNK)).toEqual({ status: "aborted", reason: "applyRefused" });
