@@ -27,12 +27,10 @@
 import { callJournalBound, isDecimal, isEpochMillis, isNullableString, isObject, isString, malformed } from "./journalIpc";
 import { parseJournalActor, type JournalActor } from "./journalActor";
 import { BREAK_REASONS, type BreakReason } from "./provenance/accumulator";
+import { HUNK_STATES, type HunkState } from "./review/reviewTransitions";
 
 export const REVISION_KINDS = ["controlled", "observed", "concurrent", "gap", "tombstone"] as const;
 export type RevisionKind = (typeof REVISION_KINDS)[number];
-
-const HUNK_STATES = ["pending", "kept", "reverted", "conflicted", "superseded", "resolvedByHumanEdit", "settled"] as const;
-type HunkState = (typeof HUNK_STATES)[number];
 
 const HUNK_KINDS = ["change", "largeChange", "tooComplex", "restore"] as const;
 export type HunkKind = (typeof HUNK_KINDS)[number];

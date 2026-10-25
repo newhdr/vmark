@@ -150,6 +150,7 @@ const CALL_BOUND = new Set([
   "agent_journal_status",
   "agent_journal_git_export",
   "agent_journal_head",
+  "agent_journal_review_decide",
 ]);
 
 type Answerer = (command: string, args: Args) => Promise<unknown>;

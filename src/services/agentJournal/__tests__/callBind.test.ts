@@ -13,6 +13,7 @@ import { forgetJournalCheckpoints, listJournalCheckpoints, resetJournalCheckpoin
 import { listDocumentHistory } from "../docHistoryClient";
 import { readJournalHealth } from "../journalStatusClient";
 import { exportDocumentToGit } from "../gitExportClient";
+import { decideReview } from "../reviewClient";
 import { JournalRefusal } from "../journalRefusal";
 
 const invokeMock = vi.mocked(invoke);
@@ -56,6 +57,11 @@ const CASES: Array<[string, () => Promise<unknown>, unknown]> = [
     "agent_journal_git_export",
     () => exportDocumentToGit("path:/a.md", "/repo"),
     { branch: `vmark-journal/${DOC}`, head: null, commitsCreated: 0, syntheticCreated: 0 },
+  ],
+  [
+    "agent_journal_review_decide",
+    () => decideReview({ docKey: "path:/a.md", expectedHead: REV, action: "keep", items: [{ hunkId: "h:1", expectedReviewGen: "0" }] }),
+    { generation: "1" },
   ],
 ];
 
