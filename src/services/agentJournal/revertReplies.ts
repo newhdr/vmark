@@ -31,7 +31,7 @@ export interface PreparedRevert extends PreparedTxn {
 }
 
 /** The decision a revert that did not apply recorded. */
-export type RevertDecisionAction = "conflicted" | "revertFoundBase";
+type RevertDecisionAction = "conflicted" | "revertFoundBase";
 
 export interface RevertDecided {
   doc: string;
