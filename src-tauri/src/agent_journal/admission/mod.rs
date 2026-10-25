@@ -96,6 +96,9 @@ mod revert_differential_tests;
 #[path = "../revert_receipts.test.rs"]
 mod revert_receipts_tests;
 #[cfg(test)]
+#[path = "../revert_refusal_retention.test.rs"]
+mod revert_refusal_retention_tests;
+#[cfg(test)]
 #[path = "../revert_support.test.rs"]
 mod revert_support;
 
