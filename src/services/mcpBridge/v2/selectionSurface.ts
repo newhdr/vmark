@@ -24,7 +24,10 @@
  *     says: a YAML SourcePane and a split's source pane register a source
  *     view while `sourceMode` is false.
  *   - `wouldChange` proves a no-op without dispatching anything. Source
- *     compares the replacement with the selected characters exactly.
+ *     compares the text CodeMirror would insert (its line breaks: CRLF and
+ *     CR become LF) with the selected characters exactly; that same text is
+ *     what `replaceSelection` measures the caret by and what `exactChange`
+ *     certifies, so a line-ending-only replacement changes nothing.
  *     WYSIWYG builds the very transaction `replaceSelection` would dispatch
  *     and compares its document with the editor's, node for node, marks and
  *     attributes included: equal selected Markdown is not enough, since the
@@ -32,7 +35,8 @@
  *     text) and a block-spanning slice re-inserted splits its paragraphs.
  *   - `captureApply` runs an apply and returns what the WYSIWYG provenance
  *     collector saw of its flushes (the window its commit certificate is
- *     built from); Source has nothing to capture, its change is exact.
+ *     built from); Source has nothing to capture, its change is exact
+ *     (`exactChange`).
  *   - While an IME composition is in progress in the editor (or has just
  *     ended and is not yet cleaned up), `writeRefusal` answers BUSY and
  *     `replaceSelection` throws: a replacement dispatched under the preedit
@@ -65,6 +69,7 @@ import { hasContentApplied } from "@/services/editor/contentApplied";
 import { isCaretRestorePending } from "@/services/editor/caretRestorePending";
 import { captureWysiwygApply } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCollector";
 import type { WysiwygApplyCapture } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCertificate";
+import type { ExactChange } from "@/services/agentJournal/selectionCertificate";
 import { composingRefusal } from "./liveEditor";
 import type { V2Error } from "./types";
 
@@ -95,6 +100,8 @@ export interface SelectionSurface {
   replaceSelection(content: string): void;
   /** Whether `replaceSelection(content)` would change the document; `false` only when provably not. */
   wouldChange(content: string): boolean;
+  /** The exact change `replaceSelection(content)` makes, in the editor's text offsets; `null` in WYSIWYG, whose change is known only after the apply. */
+  exactChange(content: string): ExactChange | null;
   /** Run `apply` (the replacement and its flush) and what the editor's provenance collector saw of it; `null` in Source or when nothing reported. */
   captureApply<T>(apply: () => T): { value: T; capture: WysiwygApplyCapture | null };
 }
@@ -206,6 +213,7 @@ function wysiwygSurface(editor: TiptapEditor): SelectionSurface {
     writeRefusal: () => (isCompositionInProgress(editor.view) ? composingRefusal() : null),
     replaceSelection: (content) => replaceTiptapSelection(editor, content),
     wouldChange: (content) => tiptapWouldChange(editor, content),
+    exactChange: () => null,
     captureApply: (apply) => captureWysiwygApply(editor, apply),
   };
 }
@@ -220,6 +228,8 @@ function sourceSurface(view: CMView): SelectionSurface {
     const { from, to } = range();
     return from === to ? "" : view.state.sliceDoc(from, to);
   };
+  /** The text CodeMirror inserts for `content`: its line breaks become LF. */
+  const inserted = (content: string) => view.state.toText(content).toString();
   return {
     mode: "source",
     range,
@@ -230,12 +240,14 @@ function sourceSurface(view: CMView): SelectionSurface {
     replaceSelection: (content) => {
       assertNotComposing(composing());
       const { from, to } = range();
+      const insert = inserted(content);
       view.dispatch({
-        changes: { from, to, insert: content },
-        selection: { anchor: from + content.length },
+        changes: { from, to, insert },
+        selection: { anchor: from + insert.length },
       });
     },
-    wouldChange: (content) => content !== selectedText(),
+    wouldChange: (content) => inserted(content) !== selectedText(),
+    exactChange: (content) => ({ ...range(), insert: inserted(content) }),
     captureApply: (apply) => ({ value: apply(), capture: null }),
   };
 }

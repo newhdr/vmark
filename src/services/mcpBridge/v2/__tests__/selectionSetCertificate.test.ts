@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // WI-AL2.1c — a Source selection.set sends its exact change as a certificate with the prepare (no document, epoch or basis; its map reproduces the applied text), CJK and emoji included; a WYSIWYG set sends none with the prepare and its post-apply certificate with the commit (bounded breaks over the touched block, an untouched block mapped exactly); a WYSIWYG editor without a provenance collector, and a Source editor whose text is not the journal's preimage, send none (the commit stays a whole-document barrier)
+// Also under WI-AL2.5 — a Source set whose content differs from the selection only by CRLF or CR is a provable no-op (nothing journaled, revision unchanged), and one that changes text certifies the LF text CodeMirror inserts, so its commit is certified rather than a barrier, with the caret after the inserted text
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
@@ -30,6 +31,8 @@ import { registerWysiwygFlusher } from "@/utils/wysiwygFlush";
 import { noteWysiwygFlush, wysiwygProvenanceExtension } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCollector";
 import { provenanceSessionFor, startProvenanceSessions } from "@/services/agentJournal/provenanceSessions";
 import { mapHunk } from "@/test/wysiwygNetZeroHarness";
+import { respond } from "@/services/mcpBridge/utils";
+import { useRevisionStore } from "@/stores/documentStore";
 
 let view: CMView | null = null;
 let editor: Editor | null = null;
@@ -162,5 +165,34 @@ describe("selection.set — certificates", () => {
 
     expect(fake.prepareControlledWrite).toHaveBeenCalledTimes(1);
     expect(sent().certificate ?? null).toBeNull();
+  });
+
+  it.each([
+    ["CRLF", "a\r\nb"],
+    ["CR", "a\rb"],
+  ])("a Source set that differs from the selection only by %s line breaks is a no-op", async (_label, content) => {
+    const text = "a\nb\nc\n";
+    seed(text);
+    sourceView(text, 0, 3);
+    const revision = useRevisionStore.getState().getRevision("a");
+    await handleSelectionSet("c5", { content }, TEST_WRITE_CONTEXT);
+
+    expect(fake.prepareControlledWrite).not.toHaveBeenCalled();
+    expect(vi.mocked(respond)).toHaveBeenCalledWith({ id: "c5", success: true, data: { revision, replaced_chars: 0 } });
+    expect(useDocumentStore.getState().documents.a.content).toBe(text);
+  });
+
+  it("a Source set with CRLF content certifies the LF text CodeMirror inserts, up to the document's end", async () => {
+    const text = "a\nb\nc\n";
+    const post = "a\nB\nC\n";
+    seed(text);
+    sourceView(text, 2, 6);
+    await handleSelectionSet("c6", { content: "B\r\nC\r\n" }, TEST_WRITE_CONTEXT);
+
+    expect(useDocumentStore.getState().documents.a.content).toBe(post);
+    expect(view!.state.selection.main.anchor).toBe(post.length);
+    const bound = { ...sent().certificate, document: "d", epoch: "0", basis: "r" };
+    await expect(verifyPayloadTexts(bound, text, post)).resolves.toBeDefined();
+    expect(fake.commitControlledWrite.mock.calls[0]?.[1]).toBe(post);
   });
 });

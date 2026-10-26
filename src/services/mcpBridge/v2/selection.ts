@@ -222,7 +222,7 @@ export async function handleSelectionSet(
     flushLiveEditors();
     const preimage = useDocumentStore.getState().documents[tab.tabId]?.content ?? contentBefore;
     // Source offsets name preimage positions only when the editor holds the preimage.
-    const change = surface.mode === "source" && contentBefore === preimage ? { ...surface.range(), insert: content } : undefined;
+    const change = contentBefore === preimage ? surface.exactChange(content) : null;
     // WYSIWYG: certified after the apply, from what its collector saw.
     let capture: WysiwygApplyCapture | null = null;
     const certify =
