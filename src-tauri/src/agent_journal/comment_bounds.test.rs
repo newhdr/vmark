@@ -1,10 +1,11 @@
-// WI-AL3.1b — comment bounds at the boundary: a body of 16 KiB is accepted and one byte more refused (create and reply, UTF-8 bytes); the 200th reply and the 1000th comment are accepted and the next refused; the thread, document and global byte limits hold exactly at the limit; a refusal appends nothing; and the largest resolve and delete frames fit the terminal reserve constants
+// WI-AL3.1b — comment bounds at the boundary: a body of 16 KiB is accepted and one byte more refused (create and reply, UTF-8 bytes); the 200th reply and the 1000th comment are accepted and the next refused; the thread, document and global byte limits hold exactly at the limit; a refusal appends nothing; and the largest resolve and delete frames fit the terminal reserve constants; a heading of MAX_SEGMENT_BYTES UTF-8 bytes above the selection is accepted and one byte more refused headingSegment
 //! R37 and R45 (usage) and R107 rule 6, through the comment handles and
 //! `CommentBook::plan`.
 
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::agent_journal::admission::admission_support::doc;
+use crate::agent_journal::admission::request_support::Rig;
 use crate::agent_journal::comment::book::CommentBook;
 use crate::agent_journal::comment::bounds::{
     charge, reserve, Limits, GLOBAL_BYTES, KIB, MAX_DELETE_FRAME, MAX_RESOLVE_FRAME, MIB,
@@ -17,6 +18,8 @@ use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, TxnId};
 use crate::agent_journal::record::{Envelope, Record, SCHEMA_V5};
 use crate::agent_journal::{codec, frame};
+use crate::coherence::anchors::MAX_SEGMENT_BYTES;
+use crate::command_error::CommandError;
 
 #[test]
 fn a_16384_byte_body_is_accepted_and_16385_is_refused() {
@@ -93,6 +96,55 @@ fn the_1000th_comment_is_accepted_and_the_1001st_is_refused() {
     u.delete(&state_req(c, 1)).expect("delete");
     create(&r, &page, "in the freed slot").expect("the slot is free again");
     assert!(create(&r, &page, "over again").is_err());
+}
+
+/// A fresh thread on `# heading` over `hello`, selected below it; the
+/// journal length before the create.
+fn create_under(heading: &str) -> (Rig, u64, Result<Value, CommandError>) {
+    let (r, page) = rig();
+    let len = r.journal_len();
+    let text = format!("# {heading}\n\nhello world\n");
+    let start = (2 + heading.encode_utf16().count() + 2) as u64;
+    let p = r.frame(
+        &page,
+        create_body(&r, &text, (start, start + 5), "under a long heading"),
+    );
+    let out = create_as(&r, &page, CommentCaller::User, &p);
+    (r, len, out)
+}
+
+#[test]
+fn a_heading_segment_of_max_bytes_is_accepted_and_one_byte_more_is_refused() {
+    let cjk_fit = format!(
+        "{}{}",
+        "中".repeat(MAX_SEGMENT_BYTES / 3),
+        "x".repeat(MAX_SEGMENT_BYTES % 3)
+    );
+    for heading in ["x".repeat(MAX_SEGMENT_BYTES), cjk_fit] {
+        assert_eq!(heading.len(), MAX_SEGMENT_BYTES);
+        let (_r, _, out) = create_under(&heading);
+        out.unwrap_or_else(|e| panic!("{} bytes: {e:?}", heading.len()));
+    }
+    // Bytes, not characters: 171 CJK characters are 513 bytes.
+    let cjk_over = "中".repeat(MAX_SEGMENT_BYTES / 3 + 1);
+    for heading in ["x".repeat(MAX_SEGMENT_BYTES + 1), cjk_over] {
+        assert!(heading.chars().count() <= MAX_SEGMENT_BYTES + 1);
+        let (r, len, out) = create_under(&heading);
+        let e = out.unwrap_err();
+        assert_eq!(code(&e), "COMMENT_LIMIT");
+        let detail = e.detail().cloned().expect("detail");
+        assert_eq!(
+            (&detail["bound"], &detail["limit"], &detail["total"]),
+            (
+                &json!("headingSegment"),
+                &json!(MAX_SEGMENT_BYTES),
+                &json!(heading.len())
+            ),
+            "{detail}"
+        );
+        assert_eq!(r.journal_len(), len, "a refused create appends nothing");
+        assert!(r.c.writer.lock().proj.comments.threads.is_empty());
+    }
 }
 
 /// Move `comment`'s charges so its logical usage is `target`, carrying
