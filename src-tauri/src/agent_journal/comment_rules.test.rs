@@ -54,14 +54,14 @@ fn offered(caller: CommentCaller, action: Action) -> bool {
 }
 
 use ThreadState::{Addressed, Open, Reopened, Resolved};
-const USER: CommentCaller = CommentCaller::User;
-const AGENT: CommentCaller = CommentCaller::Agent;
+pub(crate) const USER: CommentCaller = CommentCaller::User;
+pub(crate) const AGENT: CommentCaller = CommentCaller::Agent;
 
 /// R36's matrix, written out by hand so the test does not ask the code
 /// under test what it should do: (from, caller, action, the state an
 /// allowed action leaves). A delete leaves `resolved`, marked deleted.
 #[rustfmt::skip]
-const MATRIX: [(ThreadState, CommentCaller, Action, Option<ThreadState>); 40] = [
+pub(crate) const MATRIX: [(ThreadState, CommentCaller, Action, Option<ThreadState>); 40] = [
     (Open, USER, Action::Reply, Some(Open)),
     (Open, USER, Action::MarkAddressed, Some(Addressed)),
     (Open, USER, Action::Resolve, Some(Resolved)),
@@ -292,6 +292,8 @@ fn a_thread_reopens_after_its_creation_revision_is_collected() {
     let (r, page) = rig();
     let c = comment_of(&create(&r, &page, "outlives its revision").expect("create"));
     let created_on = thread(&r, c).revision;
+    // Only a resolved thread lets its creation revision go (ADR-AL13).
+    user(&r, Action::Resolve, c, 0).expect("resolve");
     let d = doc(&r.c);
     for text in ["one\n", "two\n", "three\n"] {
         human_save(&r.c.writer, d, text);
@@ -304,7 +306,6 @@ fn a_thread_reopens_after_its_creation_revision_is_collected() {
             })
             .expect("collect");
     assert!(report.collected.contains(&created_on), "{report:?}");
-    user(&r, Action::Resolve, c, 0).expect("resolve");
     user(&r, Action::Reopen, c, 1).expect("reopen");
     let live = r.c.writer.lock().proj.comments.clone();
     let (r, _) = reopen(r);

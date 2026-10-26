@@ -12,6 +12,9 @@
  *     a diff the worker could not split says so, and a pair with no
  *     difference says that rather than showing an empty box.
  *   - A refused or failed read shows an error and no diff.
+ *   - Each diff box scrolls on its own, so it takes keyboard focus
+ *     (`tabIndex=0`) under its own name and shows the focus outline; the
+ *     pair spans the whole history row, not its first column.
  *
  * @coordinates-with components/McpHistory/useConcurrentPair.ts — the load
  * @coordinates-with components/McpHistory/pairDiffView.ts — the segments
@@ -50,7 +53,8 @@ function PairSection({ title, diff }: { title: string; diff: PairDiff }): React.
       {segments.length === 0 ? (
         <p className="concurrent-pair__note">{t("review.pairNoDifference")}</p>
       ) : (
-        <pre className="concurrent-pair__text">
+        // A scroll box: focusable so the keyboard can scroll it, named for its diff.
+        <pre className="concurrent-pair__text" tabIndex={0} role="region" aria-label={t("review.pairDiffText", { title })}>
           {segments.map((segment, i) => (
             <Segment key={i} segment={segment} />
           ))}

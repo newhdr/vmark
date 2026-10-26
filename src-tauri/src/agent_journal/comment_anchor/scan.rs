@@ -19,6 +19,7 @@ use super::lines::{
     setext_underline, thematic, Line, ListKind,
 };
 use super::math::MathIndex;
+use super::work;
 
 /// What a root block is, as far as the outline cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +67,9 @@ pub(super) struct Scanner<'a> {
 }
 
 impl Scanner<'_> {
+    /// Line `i`'s text; every line read is counted.
     pub(super) fn text(&self, i: usize) -> &str {
+        work::add(1);
         self.lines[i].text
     }
 

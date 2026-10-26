@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use super::html::{details_close_at, details_open_at, details_probe};
 use super::lines::{fence_close, fence_open, split_lines, Line};
 use super::scan::{scan, Block, Kind};
+use super::work;
 
 /// A root-level heading; `offset` is its first line's start.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +92,7 @@ pub(super) fn outline(text: &str) -> Outline {
 pub(super) fn heading_path_at(headings: &[Heading], offset: u64) -> Vec<String> {
     let mut stack: Vec<&Heading> = Vec::new();
     for h in headings.iter().take_while(|h| h.offset <= offset) {
+        work::add(1);
         while stack.last().is_some_and(|top| top.depth >= h.depth) {
             stack.pop();
         }
@@ -109,7 +111,10 @@ fn frontmatter_close(text: &str, lines: &[Line<'_>]) -> Option<usize> {
     if !text.starts_with("---") || !is_frontmatter_fence(lines.first()?.text) {
         return None;
     }
-    (1..lines.len()).find(|&k| is_frontmatter_fence(lines[k].text))
+    (1..lines.len()).find(|&k| {
+        work::add(lines[k].text.len());
+        is_frontmatter_fence(lines[k].text)
+    })
 }
 
 /// An indented lone list marker (`  -`) outside fences and indented code,
@@ -117,6 +122,7 @@ fn frontmatter_close(text: &str, lines: &[Line<'_>]) -> Option<usize> {
 fn has_ambiguous_list_underline(text: &str) -> bool {
     let mut fence: Option<(char, usize)> = None;
     for line in text.split('\n') {
+        work::add(line.len() + 1);
         if let Some((ch, run)) = fence {
             if fence_close(line.strip_suffix('\r').unwrap_or(line), ch, run) {
                 fence = None;
@@ -148,7 +154,10 @@ fn has_ambiguous_list_underline(text: &str) -> bool {
 /// alone; an opening node runs to the HTML node whose `</details>` brings
 /// the nesting depth back to zero. Unclosed openers stay as they are.
 fn group_details(text: &str, blocks: Vec<Block>) -> Vec<Block> {
-    let value = |b: &Block| &text[b.start..b.end];
+    let value = |b: &Block| {
+        work::add(b.end - b.start);
+        &text[b.start..b.end]
+    };
     let html = |b: &Block| b.kind == Kind::Html;
     // Each HTML node moves the depth by +1 per opening and -1 per closing
     // tag it holds; an opener at `i` closes at the first later node where
@@ -223,6 +232,7 @@ impl Utf16Cursor<'_> {
         if byte < self.byte {
             (self.byte, self.unit) = (0, 0);
         }
+        work::add(byte - self.byte);
         self.unit += self.text[self.byte..byte].encode_utf16().count() as u64;
         self.byte = byte;
         self.unit

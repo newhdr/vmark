@@ -31,9 +31,11 @@ mod create;
 mod html;
 mod lines;
 mod math;
+mod multi;
 mod outline;
 mod resolve;
 mod scan;
+pub(crate) mod work;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +44,7 @@ use crate::agent_journal::ids::RevisionId;
 
 pub use create::create_anchor;
 pub use outline::{headings, Heading};
-pub use resolve::resolve;
+pub use resolve::{resolve, resolve_all};
 
 /// Context kept on each side of a quote, in UTF-16 code units.
 pub const CONTEXT_UNITS: usize = 32;
@@ -89,6 +91,7 @@ pub enum Resolution {
         tier: Tier,
         start: u64,
         end: u64,
+        #[serde(rename = "byHint")]
         by_hint: bool,
     },
     /// Several candidates in the deciding tier, by start offset.
@@ -174,3 +177,11 @@ pub fn admit_quote(quote: &str) -> Result<usize, AnchorError> {
 #[cfg(test)]
 #[path = "comment_anchor.test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "comment_anchor_multi.test.rs"]
+mod multi_tests;
+
+#[cfg(test)]
+#[path = "comment_anchor_work.test.rs"]
+mod work_tests;

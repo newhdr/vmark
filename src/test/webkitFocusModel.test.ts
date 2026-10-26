@@ -1,0 +1,17 @@
+// WI-AL3.2 — jsdom with the WebKit focus model installed obeys the same focus facts measured in real WebKit: a click focuses nothing, a focused button that becomes disabled falls to the page with a focusout at the end of the next modelled frame (after its animation-frame callbacks) unless re-enabled first, a click elsewhere takes focus to the page with a focusout, focus() on a disabled button does nothing, and removing the focused element fires no focusout
+import { afterEach, beforeEach } from "vitest";
+// timer-isolation: intentional real timers — the model is a frame clock built on timers, held to the same facts the real-WebKit runner measures on real time; uninstall clears its pending frame.
+import { describeFocusFacts } from "./focusFacts";
+import { installWebKitFocusModel, mouseClick, nextFrame } from "./webkitFocusModel";
+
+let uninstall: () => void = () => undefined;
+beforeEach(() => {
+  uninstall = installWebKitFocusModel();
+});
+afterEach(() => uninstall());
+
+describeFocusFacts({
+  name: "jsdom with the WebKit focus model",
+  click: async (el) => mouseClick(el),
+  settle: nextFrame,
+});

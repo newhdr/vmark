@@ -46,9 +46,18 @@ export type JournalAbortReason = AbortReason | "timedOut";
 
 /** What a prepare sends and how its reply is read (run by `journalRequest.ts`). */
 export interface PrepareSpec<P> {
-  command: "agent_journal_prepare" | "agent_journal_restore_prepare" | "agent_journal_revert_prepare";
-  /** The request's fields, without `requestId` and the page identity. */
-  fields: { readonly baselineProvenance: unknown };
+  command:
+    | "agent_journal_prepare"
+    | "agent_journal_restore_prepare"
+    | "agent_journal_revert_prepare"
+    | "comment_user_create"
+    | "comment_user_reply";
+  /**
+   * The request's fields, without `requestId` and the page identity. A
+   * comment reply records no baseline: it has no `baselineProvenance`, so
+   * a provenance refusal is never resent for it.
+   */
+  fields: { readonly baselineProvenance: unknown } | { readonly expectedCommentGen: string };
   /** Read the bound reply's `reply`. Throws `malformed`. */
   parse: (command: string, reply: unknown) => P;
 }

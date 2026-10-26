@@ -35,6 +35,7 @@ use crate::agent_journal::ids::{DocId, TxnId};
 use crate::agent_journal::record::{Envelope, Record, SCHEMA_V5};
 use crate::agent_journal::writer::{Inner, Writer};
 use crate::agent_journal::writer_types::now_ms;
+use crate::command_error::CommandError;
 
 /// A decoded reply and the route it came by.
 pub(crate) struct ReplyPrep {
@@ -119,6 +120,30 @@ pub(crate) fn reply_admitted(
 pub enum Transitioned {
     State(CommentStateReply),
     Deleted(CommentDeletedReply),
+}
+
+impl Transitioned {
+    /// The state reply of a state change.
+    ///
+    /// # Errors
+    /// An internal error when the change was a deletion.
+    pub fn into_state(self) -> Result<CommentStateReply, CommandError> {
+        match self {
+            Self::State(r) => Ok(r),
+            Self::Deleted(_) => Err(CommandError::internal("a state change answered a deletion")),
+        }
+    }
+
+    /// The deletion reply of a deletion.
+    ///
+    /// # Errors
+    /// An internal error when the change was not a deletion.
+    pub fn into_deleted(self) -> Result<CommentDeletedReply, CommandError> {
+        match self {
+            Self::Deleted(r) => Ok(r),
+            Self::State(_) => Err(CommandError::internal("a deletion answered a state change")),
+        }
+    }
 }
 
 /// Take `action` (not a reply) on `comment` of `doc` for `caller`. See the

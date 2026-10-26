@@ -46,9 +46,13 @@ pub(crate) fn mock_app() -> tauri::App<MockRuntime> {
 }
 
 pub(crate) fn ready() -> App {
+    ready_with(mock_app())
+}
+
+/// `app` (which manages an `AgentJournalState`) with its journal ready.
+pub(crate) fn ready_with(app: tauri::App<MockRuntime>) -> App {
     let dir = tempfile::tempdir().expect("tempdir");
     let (c, faults) = controller(dir.path());
-    let app = mock_app();
     app.state::<AgentJournalState>().finish(Ok(Started {
         writer: c.writer.clone(),
         journal_dir: dir.path().to_path_buf(),

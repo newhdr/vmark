@@ -14,6 +14,11 @@
   margin-top: var(--space-1);
 }
 
+/* A history row lays its children in its first column; the pair takes the whole row. */
+.mcp-history-popover__row > .concurrent-pair {
+  grid-column: 1 / -1;
+}
+
 .concurrent-pair__body {
   display: flex;
   flex-direction: column;
@@ -47,6 +52,12 @@
   line-height: var(--line-height-normal);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* A focusable scroll box: the standalone focus outline. */
+.concurrent-pair__text:focus-visible {
+  outline: var(--border-medium) solid var(--primary-color);
+  outline-offset: var(--border-medium);
 }
 
 .concurrent-pair__delete {

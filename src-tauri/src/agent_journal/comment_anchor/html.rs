@@ -8,6 +8,7 @@
 //! @module agent_journal/comment_anchor/html
 
 use super::lines::{is_blank, unindented};
+use super::work;
 
 /// Where an HTML block ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +253,7 @@ pub(super) fn delimiter_cells(s: &str) -> Option<usize> {
 
 /// The details plugin loads only when the document holds `<details` then whitespace, `>` or its end.
 pub(super) fn details_probe(text: &str) -> bool {
+    work::add(text.len());
     let lower = text.to_ascii_lowercase();
     lower.match_indices("<details").any(|(at, m)| {
         lower[at + m.len()..]

@@ -27,6 +27,7 @@ page; a release post goes to `website/blog/<YYYY-MM>-<slug>.md` with an entry in
 | Popup plugins (`src/plugins/*Popup/`) | `website/guide/popups.md` |
 | `src/plugins/codemirror/sourceImagePreview.ts` — Source-mode media preview | `website/guide/popups.md` (Media Popup → Source Mode) |
 | `src/plugins/multiCursor/` | `website/guide/multi-cursor.md` |
+| `src/components/Comments/`, `src/components/McpHistory/` — edit checkpoints, review, concurrent pairs, comments | `website/guide/mcp-setup.md` (Edit Checkpoints) |
 | `src-tauri/src/mcp_bridge/`, `src-tauri/src/mcp_config/`, `src/services/mcpBridge/v2/`, `server/mcp/src/tools/` — tools, arguments, results, refusal reasons | `website/guide/mcp-tools.md` + `server/mcp/README.md` |
 | MCP setup process; `src-tauri/src/mcp_config/client_tokens.rs`, `client_token_field.rs`, `src-tauri/src/mcp_bridge/principal.rs` (`VMARK_MCP_TOKEN`) | `website/guide/mcp-setup.md` (Install Configuration, Security Notes) |
 | `src/plugins/mermaid/`, `src/plugins/mermaidPreview/` | `website/guide/mermaid.md` |

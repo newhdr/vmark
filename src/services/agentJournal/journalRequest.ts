@@ -233,7 +233,7 @@ class PrepareRequestRun<P extends { readonly txn?: string }> {
   /** A confirmed provenance refusal: once, a new logical request without the baseline map. */
   private fallBack(refusal: JournalRefusal): Step<P> | null {
     const spec = this.spec;
-    if (refusal.field !== "provenance" || this.fellBack || !spec || spec.fields.baselineProvenance === null) return null;
+    if (refusal.field !== "provenance" || this.fellBack || !spec || !("baselineProvenance" in spec.fields) || spec.fields.baselineProvenance === null) return null;
     journalWarn("baseline provenance refused; recording the baseline snapshot-only:", refusal.message);
     this.fellBack = true;
     this.spec = { ...spec, fields: { ...spec.fields, baselineProvenance: null } };

@@ -7,6 +7,7 @@
 //!
 //! @module agent_journal/comment_anchor/lines
 
+use super::work;
 use crate::coherence::anchor_parse::fence_run;
 
 /// One source line: where it starts and its text without the line ending.
@@ -26,6 +27,7 @@ impl Line<'_> {
 /// Split on every CommonMark line ending (`\r\n`, `\r`, `\n`).
 pub(super) fn split_lines(text: &str) -> Vec<Line<'_>> {
     let bytes = text.as_bytes();
+    work::add(bytes.len());
     let mut out = Vec::new();
     let (mut start, mut i) = (0, 0);
     while i < bytes.len() {

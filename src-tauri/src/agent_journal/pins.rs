@@ -19,9 +19,14 @@
 //! outlive its own revision. Only blob hashes are kept, never the parent
 //! revision: nothing pins an ancestor chain, and identical texts share one
 //! blob.
+//!
+//! An `open`, `addressed` or `reopened` comment pins its creation revision
+//! (ADR-AL13); a resolved one does not, so its creation text may be
+//! collected and a reopen then resolves against the head with no hint.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::agent_journal::comment::ids::{CommentId, ThreadState};
 use crate::agent_journal::ids::{BlobHash, DocId, HunkId, RevisionId, TxnId};
 use crate::agent_journal::projection::{Projection, TxnStatus};
 use crate::agent_journal::record::ObservedRef;
@@ -43,6 +48,9 @@ pub enum PinReason {
     /// The `observedParent` of an unlinearized `pendingObservation`: the
     /// capture's base, which its linearization and export still name.
     CaptureBase,
+    /// The creation revision of an undeleted `open`, `addressed` or
+    /// `reopened` comment.
+    Comment(CommentId),
     /// A window's live editor base; in memory only, gone at restart.
     WindowBase(String),
     External,
@@ -59,6 +67,7 @@ impl PinReason {
             PinReason::LastCertified(_) => "lastCertified",
             PinReason::Barrier(_) => "barrier",
             PinReason::CaptureBase => "captureBase",
+            PinReason::Comment(_) => "comment",
             PinReason::WindowBase(_) => "windowBase",
             PinReason::External => "external",
         }
@@ -98,6 +107,7 @@ pub fn compute(p: &Projection, roots: Roots<'_>) -> PinSet {
     let mut s = PinSet::default();
     pin_heads_and_live_hunks(p, &mut s);
     pin_pending_observations(p, &mut s);
+    pin_unresolved_comments(p, &mut s);
     pin_writer_roots(p, &roots, &mut s);
     expand_revision_blobs(p, &mut s);
     pin_unresolved_txns(p, &mut s);
@@ -146,6 +156,18 @@ fn pin_pending_observations(p: &Projection, s: &mut PinSet) {
         }
         s.blobs.insert(o.postimage.clone());
         s.blobs.insert(o.observed_preimage.clone());
+    }
+}
+
+/// Every undeleted thread not resolved keeps the revision it was created
+/// on, while that revision is still retained.
+fn pin_unresolved_comments(p: &Projection, s: &mut PinSet) {
+    for (id, t) in &p.comments.threads {
+        let unresolved = t.state != ThreadState::Resolved && !t.deleted;
+        let retained = p.revisions.get(&t.revision).is_some_and(|m| !m.collected);
+        if unresolved && retained {
+            s.pin(t.revision, PinReason::Comment(*id));
+        }
     }
 }
 

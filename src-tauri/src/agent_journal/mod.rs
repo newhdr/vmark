@@ -35,7 +35,7 @@
 //!   `generation_events` — the writer's broadcast as one coalesced Tauri event, so every window's panel re-reads when the journal changes.
 //! - `gc_policy` — the collector's caps and warnings. `service_gc`, `service_legacy` — the startup retention pass and the retirement of the old checkpoint JSONL after a verified import.
 //! - `git_export` — one document's journal exported to the Git branch `vmark-journal/<document-uuid>` with plumbing and a compare-and-swap.
-//! - `comment_anchor` — a comment's quote, context and heading path, created from a selection and resolved in later revisions (pure); `comment` — comment threads: records, bounds, storage and the caller-class entry points.
+//! - `comment_anchor` — a comment's quote, context and heading path, created from a selection and resolved in later revisions (pure); `comment` — comment threads: records, bounds, storage, the caller-class entry points and the comment list, and the two comment command families (`comment::commands_user`, `comment::commands_agent`), one per caller class.
 //!
 //! Key decisions:
 //!   - `pub mod`: the API is consumed by the editor wiring that lands next;

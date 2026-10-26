@@ -1,4 +1,4 @@
-// WI-AL1.7 — the history button and panel: the badge counts the focused document's agent revisions, read from the journal under the document's key (path key for a saved file, tab key for an untitled tab); every change in any window reaches it through the generation broadcast, so two windows showing the same document converge after one append; a failed, read-only or behind journal, a queued or refused record of this document, recording suspended because its identity could not be updated, or a blocked revert marks the button as needing attention; the panel holds the status, the unrecorded writes, the revisions and the earlier checkpoints; when live updates never start (the event forwarder could not spawn, so no event ever comes) the panel observes the failure, says so, and still shows a revision appended in another window by polling, as do the panel's unrecorded writes and earlier checkpoints, while polling stops once live updates are ready, for a journal that never started, and on unmount
+// WI-AL1.7 — the history button and panel: the badge counts the focused document's agent revisions, read from the journal under the document's key (path key for a saved file, tab key for an untitled tab); every change in any window reaches it through the generation broadcast, so two windows showing the same document converge after one append; a failed, read-only or behind journal, a queued or refused record of this document, recording suspended because its identity could not be updated, or a blocked revert marks the button as needing attention; the panel holds the status, the unrecorded writes, the revisions and the earlier checkpoints; when live updates never start (the event forwarder could not spawn, so no event ever comes) the panel observes the failure, says so, and still shows a revision appended in another window by polling, as do the panel's unrecorded writes and earlier checkpoints, while polling stops once live updates are ready, for a journal that never started, and on unmount; the Escape that ends an IME composition does not close the panel (WI-AL3.2)
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -208,6 +208,16 @@ describe("McpHistoryButton", () => {
     await user.click(trigger());
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("does not close on the Escape that ends an IME composition", async () => {
+    const user = userEvent.setup();
+    render(<McpHistoryButton />);
+    await user.click(trigger());
+    fireEvent.keyDown(document, { key: "Escape", isComposing: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

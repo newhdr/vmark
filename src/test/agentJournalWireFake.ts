@@ -152,6 +152,12 @@ const CALL_BOUND = new Set([
   "agent_journal_head",
   "agent_journal_review_decide",
   "agent_journal_concurrent_pair",
+  "comment_user_mark_addressed",
+  "comment_user_resolve",
+  "comment_user_reopen",
+  "comment_user_delete",
+  "comment_user_list",
+  "comment_agent_mark_addressed",
 ]);
 
 type Answerer = (command: string, args: Args) => Promise<unknown>;

@@ -17,6 +17,7 @@
 //! @module agent_journal/comment/book
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use crate::agent_journal::comment::bounds::{
     self, check_count, Limits, MAX_COMMENTS_PER_DOC, MAX_DELETE_FRAME, MAX_REPLIES,
@@ -25,6 +26,7 @@ use crate::agent_journal::comment::bounds::{
 use crate::agent_journal::comment::ids::{CommentId, ThreadState};
 use crate::agent_journal::comment::records::{CommentCreated, CommentRecord};
 use crate::agent_journal::comment::rules::{state_action, terminal, Action};
+use crate::agent_journal::comment::text::{record_text, ThreadText};
 use crate::agent_journal::comment::thread::{act, overflow};
 pub use crate::agent_journal::comment::thread::{DocUsage, Thread};
 use crate::agent_journal::errors::TxnError;
@@ -39,6 +41,8 @@ pub struct CommentBook {
     pub docs: BTreeMap<DocId, DocUsage>,
     pub logical: u64,
     pub physical: u64,
+    /// What each undeleted thread says (`comment::text`).
+    pub texts: BTreeMap<CommentId, Arc<ThreadText>>,
 }
 
 /// A checked mutation: the thread and totals it leaves.
@@ -241,6 +245,7 @@ impl CommentBook {
             other => TxnError::Corrupt(format!("seq {}: {other}", env.seq)),
         })?;
         self.commit(step);
+        record_text(&mut self.texts, rec);
         Ok(())
     }
 

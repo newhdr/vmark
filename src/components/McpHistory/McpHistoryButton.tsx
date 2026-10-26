@@ -28,12 +28,17 @@
  *     value — not in the badge, the status or the revisions — so a stale
  *     revision is never offered for restore (as in EarlierCheckpoints).
  *   - The review panel (keep, revert, Clear reviewed) sits above the
- *     revisions and shares their feed; an action re-reads it.
+ *     revisions and shares their feed; an action re-reads it. The comments
+ *     panel follows it, with its own feed.
+ *   - Escape or an outside click closes the popover, except the Escape that
+ *     ends an IME composition; a comment draft is kept across the close by
+ *     the comments panel itself, so this file does not grow for it.
  *   - The popover uses position: fixed and the shared popup CSS tokens.
  *
  * @coordinates-with components/McpHistory/useJournalFeed.ts — live reads
  * @coordinates-with components/McpHistory/journalStatusLines.ts — attention
  * @coordinates-with components/ReviewPanel/ReviewPanel.tsx — the changes to review (loaded lazily, lazyHistoryParts.tsx)
+ * @coordinates-with components/Comments/CommentsPanel.tsx — the comment threads (loaded lazily, lazyHistoryParts.tsx)
  * @coordinates-with components/McpHistory/DocumentHistoryList.tsx — revisions
  * @coordinates-with components/McpHistory/EarlierCheckpoints.tsx — earlier checkpoints
  * @coordinates-with components/McpHistory/UncommittedEntries.tsx — unrecorded writes
@@ -44,6 +49,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { History } from "lucide-react";
 import { ICON_SM } from "@/utils/iconSizes";
+import { isImeKeyEvent } from "@/utils/imeGuard";
 import { useTranslation } from "react-i18next";
 import { useDocumentStore } from "@/stores/documentStore";
 import { useTabStore } from "@/stores/tabStore";
@@ -56,7 +62,7 @@ import { getCurrentWindowLabel } from "@/services/persistence/workspaceStorage";
 import { DocumentHistoryList } from "./DocumentHistoryList";
 import { EarlierCheckpoints } from "./EarlierCheckpoints";
 import { JournalStatusNotice } from "./JournalStatusNotice";
-import { LazyReviewPanel } from "./lazyHistoryParts";
+import { LazyCommentsPanel, LazyReviewPanel } from "./lazyHistoryParts";
 import { journalStatusLines } from "./journalStatusLines";
 import { UncommittedEntries } from "./UncommittedEntries";
 import { useJournalFeed } from "./useJournalFeed";
@@ -96,7 +102,8 @@ export function McpHistoryButton(): React.ReactElement {
   const count = visibleHistory?.rows.filter((r) => r.actor.type === "mcp").length ?? 0;
   const label = attention ? t("mcpHistoryNeedsAttention") : t("mcpHistoryTitle", { count });
 
-  // Close on outside click / escape.
+  // Close on outside click / escape. A comment draft survives the close
+  // (components/Comments/commentDrafts.ts), so closing loses nothing.
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
@@ -107,7 +114,8 @@ export function McpHistoryButton(): React.ReactElement {
       setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      // The Escape that ends an IME composition belongs to the composition.
+      if (e.key === "Escape" && !isImeKeyEvent(e)) setOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onKey);
@@ -170,6 +178,7 @@ export function McpHistoryButton(): React.ReactElement {
             <JournalStatusNotice {...status} />
             {tabId && docKey && <UncommittedEntries tabId={tabId} docKey={docKey} pollMs={historyPoll} />}
             {tabId && docKey && <LazyReviewPanel tabId={tabId} docKey={docKey} history={visibleHistory} onChanged={history.refresh} />}
+            {tabId && docKey && <LazyCommentsPanel tabId={tabId} docKey={docKey} pollMs={historyPoll} />}
             {tabId && <DocumentHistoryList tabId={tabId} docKey={docKey} history={visibleHistory} failed={history.failed} />}
             <EarlierCheckpoints windowLabel={windowLabel} pollMs={historyPoll} />
           </div>

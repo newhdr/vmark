@@ -1,4 +1,4 @@
-// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound) | AL2.2d: the revert prepare is request-bound like the restore prepare | AL2.3: the malformed-callId sweep covers every call-bound command, the review decide and the epoch close included | AL2.4: the concurrent pair read is call-bound and swept
+// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound) | AL2.2d: the revert prepare is request-bound like the restore prepare | AL2.3: the malformed-callId sweep covers every call-bound command, the review decide and the epoch close included | AL2.4: the concurrent pair read is call-bound and swept | AL3.2: the comment state changes, deletion and list are call-bound and swept; the comment creates and replies are request-bound
 //! Each command is invoked the way a webview invokes it: through the mock
 //! runtime's IPC layer and the generated handler. Gated off Windows, where
 //! `tauri::test` does not exist.
@@ -14,12 +14,13 @@ use tauri::Manager;
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::admission_support::controller;
+use crate::agent_journal::comment::{commands_agent, commands_user};
 use crate::agent_journal::service::{AgentJournalState, Started};
 use crate::agent_journal::{commands, commands_history, git_export};
 use crate::ipc_caller::{invoke_from, window};
 
 /// The commands bound by a call id, in the order they were converted.
-const CALL_BOUND: [&str; 16] = [
+const CALL_BOUND: [&str; 22] = [
     "agent_journal_capture",
     "agent_journal_arm_epoch",
     "agent_journal_close_epoch",
@@ -36,6 +37,12 @@ const CALL_BOUND: [&str; 16] = [
     "agent_journal_head",
     "agent_journal_review_decide",
     "agent_journal_concurrent_pair",
+    "comment_user_mark_addressed",
+    "comment_user_resolve",
+    "comment_user_reopen",
+    "comment_user_delete",
+    "comment_user_list",
+    "comment_agent_mark_addressed",
 ];
 
 const CALL: &str = "0123456789abcdef0123456789abcdef";
@@ -67,6 +74,12 @@ fn ready() -> Ready {
             commands_history::agent_journal_review_decide,
             commands_history::agent_journal_concurrent_pair,
             git_export::command::agent_journal_git_export,
+            commands_user::comment_user_mark_addressed,
+            commands_user::comment_user_resolve,
+            commands_user::comment_user_reopen,
+            commands_user::comment_user_delete,
+            commands_user::comment_user_list,
+            commands_agent::comment_agent_mark_addressed,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build mock app");
@@ -132,6 +145,10 @@ fn answerable(key: &str) -> Vec<(&'static str, Value)> {
         (
             "agent_journal_release_window",
             json!({ "window": "main/t1" }),
+        ),
+        (
+            "comment_user_list",
+            payload(json!({ "docKey": key, "text": "" })),
         ),
     ]
 }
@@ -221,6 +238,16 @@ fn a_missing_or_malformed_call_id_is_refused_before_the_command_runs() {
         "agent_journal_concurrent_pair",
         payload(json!({ "docKey": key, "revision": uuid::Uuid::nil().to_string() })),
     ));
+    let state = json!({ "docKey": key, "comment": "c1", "expectedCommentGen": "0" });
+    for command in [
+        "comment_user_mark_addressed",
+        "comment_user_resolve",
+        "comment_user_reopen",
+        "comment_user_delete",
+        "comment_agent_mark_addressed",
+    ] {
+        calls.push((command, payload(state.clone())));
+    }
     let mut swept: Vec<&str> = calls.iter().map(|(c, _)| *c).collect();
     swept.sort_unstable();
     swept.dedup();
@@ -267,6 +294,8 @@ fn module_source(path: &str) -> &'static str {
         "agent_journal::commands::document" => include_str!("commands_document.rs"),
         "agent_journal::commands_history" => include_str!("commands_history.rs"),
         "agent_journal::git_export::command" => include_str!("git_export/command.rs"),
+        "agent_journal::comment::commands_user" => include_str!("comment/commands_user.rs"),
+        "agent_journal::comment::commands_agent" => include_str!("comment/commands_agent.rs"),
         other => panic!("journal command module {other} is not known to this test: add it"),
     }
 }
@@ -307,7 +336,11 @@ fn every_journal_command_reply_is_bound() {
             // R98: bound by the request's own id and digest, or its pair.
             "agent_journal_prepare"
             | "agent_journal_restore_prepare"
-            | "agent_journal_revert_prepare" => {
+            | "agent_journal_revert_prepare"
+            | "comment_user_create"
+            | "comment_user_reply"
+            | "comment_agent_create"
+            | "comment_agent_reply" => {
                 assert!(returns.contains("Bound<RequestBind"), "{name}: {sig}")
             }
             "agent_journal_commit" | "agent_journal_abort" => {

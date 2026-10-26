@@ -1,4 +1,4 @@
-// WI-AL2.4 — "Show both changes" on a revision edited in two windows: only a concurrent row whose text is kept offers it; it loads the pair on demand and shows two labelled whole-document diffs (against the version this save started from, and against the version before it) with the exact inserted and deleted text, CJK and emoji included; a refused or failed read shows an error and no diff, and a later open retries; a diff the worker could not split says so
+// WI-AL2.4 — "Show both changes" on a revision edited in two windows: only a concurrent row whose text is kept offers it; it loads the pair on demand and shows two labelled whole-document diffs (against the version this save started from, and against the version before it) with the exact inserted and deleted text, CJK and emoji included; a refused or failed read shows an error and no diff, and a later open retries; a diff the worker could not split says so; each scrollable diff is keyboard-focusable under its own name (WI-AL3.2)
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -100,6 +100,12 @@ describe("DocumentHistoryList — show both changes", () => {
     expect(texts(against, "del")).toEqual(["!"]);
     expect(texts(against, "ins")).toEqual(["🎉"]);
     expect(screen.queryByText(en("review.pairCoarse"))).toBeNull();
+    // Each scrollable diff is reachable by keyboard, under its own name.
+    for (const title of [en("review.pairAgainstStart"), en("review.pairAgainstBefore")]) {
+      const text = screen.getByRole("region", { name: en("review.pairDiffText", { title }) });
+      expect(text).toHaveAttribute("tabindex", "0");
+      expect(text.querySelector("ins, del")).not.toBeNull();
+    }
     expect(invoke).toHaveBeenCalledWith("agent_journal_concurrent_pair", expect.objectContaining({ payload: JSON.stringify({ docKey: KEY, revision: "r3" }) }));
 
     const hide = screen.getByRole("button", { name: en("review.hideBothChanges") });

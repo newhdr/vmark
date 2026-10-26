@@ -2,7 +2,9 @@
 //! the handle, never a request field: the user handle records `user` and
 //! may take every action the state machine gives a user; the agent handle
 //! records `agent`, names an MCP actor on create, and offers only create,
-//! reply and `markAddressed`. No Tauri command is wired to either yet.
+//! reply and `markAddressed`. The Tauri `comment_user_*` and
+//! `comment_agent_*` families (`commands_user`,
+//! `commands_agent`) each reach exactly one handle.
 //!
 //! Create and reply are framed requests (`admission::framed`): their
 //! payload's digest is over the raw bytes and their receipt answers an
@@ -17,6 +19,7 @@ use crate::agent_journal::admission::payload::Frame;
 use crate::agent_journal::admission::receipt::Outcome;
 use crate::agent_journal::comment::create::{create_admitted, create_prep};
 use crate::agent_journal::comment::ids::CommentCaller;
+use crate::agent_journal::comment::list::CommentList;
 use crate::agent_journal::comment::ops::{reply_admitted, reply_prep, transition, Transitioned};
 use crate::agent_journal::comment::replies::{CommentCreatedReply, CommentRepliedReply};
 use crate::agent_journal::comment::rules::Action;
@@ -181,6 +184,14 @@ impl UserComments<'_> {
     /// The journal refusal.
     pub fn reopen(self, req: &StateRequest) -> Result<Transitioned, CommandError> {
         self.0.act(req, Action::Reopen)
+    }
+
+    /// The document's threads against the window's text (`comment::list`).
+    ///
+    /// # Errors
+    /// An invalid payload or document key.
+    pub fn list(self, payload: &str) -> Result<CommentList, CommandError> {
+        self.0.c.comment_list(payload)
     }
 
     /// Delete a resolved thread. Always allowed at any `commentGen`.

@@ -8,6 +8,7 @@
 //! @module agent_journal/comment_anchor/math
 
 use super::lines::{is_blank, up_to_three_spaces, Line};
+use super::work;
 
 fn dollar_run(s: &str) -> Option<(usize, &str)> {
     let r = up_to_three_spaces(s)?;
@@ -43,6 +44,7 @@ pub(super) struct MathIndex {
 impl MathIndex {
     pub fn new(lines: &[Line<'_>]) -> Self {
         let n = lines.len();
+        work::add(n);
         let open: Vec<usize> = lines
             .iter()
             .map(|l| math_open(l.text).unwrap_or(0))

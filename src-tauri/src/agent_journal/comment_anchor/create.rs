@@ -3,6 +3,7 @@
 //! @module agent_journal/comment_anchor/create
 
 use super::outline::{heading_path_at, outline};
+use super::work::utf16;
 use super::{
     admit_quote, AnchorError, AnchorSelection, CreatedAnchor, Mapping, OffsetHint,
     SelectionPrecision, StoredAnchor, CONTEXT_UNITS,
@@ -18,7 +19,7 @@ pub fn create_anchor(
     selection: &AnchorSelection,
     revision: RevisionId,
 ) -> Result<CreatedAnchor, AnchorError> {
-    let units: Vec<u16> = text.encode_utf16().collect();
+    let units = utf16(text);
     if selection.start > selection.end || selection.end > units.len() as u64 {
         return Err(AnchorError::InvalidSelection(format!(
             "selection {}..{} is not within a text of {} UTF-16 units",
