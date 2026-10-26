@@ -1,7 +1,7 @@
 //! The startup retention pass (ADR-AL13).
 //!
 //! Startup runs the collector once under the default caps, after the
-//! legacy import, and keeps a summary for the status: how many revisions
+//! legacy import (pruning deleted comment threads), and keeps a summary for the status: how many revisions
 //! were tombstoned, every cap warning (at 80% of a cap, or over it with
 //! only pinned records left), why the pass deferred, and why it could not
 //! run. Each warning is logged, so a journal held over its cap by pins is
@@ -35,7 +35,7 @@ pub struct GcSummary {
 
 /// Run one collection under `policy`, log it and summarize it.
 pub fn startup_gc(writer: &Writer, policy: &GcPolicy) -> GcSummary {
-    let report = match writer.collect(policy) {
+    let report = match writer.collect_startup(policy) {
         Ok(report) => report,
         Err(e) => {
             let error = format!("{}: {e}", e.code());

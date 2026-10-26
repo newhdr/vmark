@@ -20,6 +20,8 @@
 //! compaction after it fails (the pack then keeps extra blobs, which only
 //! costs space; the next collection or forget retries it, even one with
 //! nothing to remove, because the pack itself shows what is unreached).
+//! The startup pass (`collect_startup`) also prunes deleted comment
+//! threads (`gc_compact`); an ordinary collection never does.
 //! A deferred collection runs no plan: it reports its reason and no usage
 //! warnings, and does not compact, since its roots may be incomplete.
 //!
@@ -203,6 +205,21 @@ impl Writer {
     /// rewritten, a reachable blob is missing (`Corrupt`), or the rewrite
     /// would not replay to the expected state.
     pub fn collect(&self, policy: &GcPolicy) -> Result<GcReport, TxnError> {
+        self.collect_with(policy, false)
+    }
+
+    /// `collect`, also pruning every deleted comment thread (rewriting the
+    /// journal even when no revision is collected). Only startup prunes:
+    /// a request id retried after a restart is `staleIncarnation` before
+    /// its receipt is read, so dropping the receipt loses no answer.
+    ///
+    /// # Errors
+    /// As `collect`.
+    pub fn collect_startup(&self, policy: &GcPolicy) -> Result<GcReport, TxnError> {
+        self.collect_with(policy, true)
+    }
+
+    fn collect_with(&self, policy: &GcPolicy, prune: bool) -> Result<GcReport, TxnError> {
         let mut g = self.lock();
         g.healthy()?;
         let pins = compute_pins(&g);
@@ -232,14 +249,19 @@ impl Writer {
             warnings: p.warnings,
             ..GcReport::default()
         };
-        if p.victims.is_empty() {
+        let pruned = if prune {
+            g.proj.comments.deleted()
+        } else {
+            BTreeSet::new()
+        };
+        if p.victims.is_empty() && pruned.is_empty() {
             report.blob_error = compact_unreached(&mut g)?;
             return Ok(report);
         }
         let victims: BTreeSet<RevisionId> = p.victims.iter().copied().collect();
         let floor = g.next_generation()?;
-        let rewrite = Rewrite::new(&g.proj, &victims)?;
-        let want = expected(&g.proj, &victims, floor)?;
+        let rewrite = Rewrite::new(&g.proj, &victims, &pruned)?;
+        let want = expected(&g.proj, &victims, &pruned, floor)?;
         report.blob_error = self.publish_rewrite(&mut g, &|env| rewrite.map(env), &want, floor)?;
         report.collected = p.victims;
         Ok(report)

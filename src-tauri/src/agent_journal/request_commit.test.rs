@@ -1,6 +1,7 @@
 // WI-AL2.2f — commit and abort are bound to the page that owns the transaction: a revoked registration is refused STALE_PAGE before any state change and the sweep ends the transaction uncommitted; a live foreign pair is INVALID_REQUEST; the check linearizes at the table lookup and the table lock is never held across the append; success replies are enveloped with their own arguments; restores are owned like agent writes; and every journal token the writer can refuse with is declared on the TypeScript side | AL2.2g: AMBIGUOUS_REVERT is in JOURNAL_CODES too, so every Rust code has a TypeScript twin; its detail (hunk, block with a real break reason, or null) is pinned to the literal the TypeScript round-trip reads
 //! R91, R98, R99 rule 1 and R101, through the `Controller` core methods.
 
+use crate::agent_journal::comment::ids::{CommentCaller, CommentId, ThreadState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -52,6 +53,24 @@ fn every_refusal() -> Vec<TxnError> {
         TxnError::InvalidProvenance(String::new()),
         TxnError::InvalidText(String::new()),
         TxnError::CommentAnchorTooLong { bytes: 0, limit: 0 },
+        TxnError::StaleComment {
+            comment: CommentId::at(1),
+            detail: String::new(),
+        },
+        TxnError::CommentStateExhausted {
+            comment: CommentId::at(1),
+        },
+        TxnError::CommentStorageFull { bytes: 0, limit: 0 },
+        TxnError::CommentLimit {
+            bound: "body",
+            limit: 0,
+            total: 0,
+        },
+        TxnError::CommentNotAllowed {
+            action: "resolve",
+            caller: CommentCaller::Agent,
+            state: ThreadState::Open,
+        },
         TxnError::Io(String::new()),
         TxnError::Indeterminate(String::new()),
         TxnError::Invariant(String::new()),
@@ -75,6 +94,11 @@ fn every_refusal() -> Vec<TxnError> {
             | TxnError::InvalidProvenance(_)
             | TxnError::InvalidText(_)
             | TxnError::CommentAnchorTooLong { .. }
+            | TxnError::StaleComment { .. }
+            | TxnError::CommentStateExhausted { .. }
+            | TxnError::CommentStorageFull { .. }
+            | TxnError::CommentLimit { .. }
+            | TxnError::CommentNotAllowed { .. }
             | TxnError::Io(_)
             | TxnError::Indeterminate(_)
             | TxnError::Invariant(_)

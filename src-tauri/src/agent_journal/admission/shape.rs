@@ -1,9 +1,10 @@
 //! Static shape of an `admission` frame, checked at decode and again on
 //! staging: at least two child envelopes; `seq` contiguous from the outer
-//! envelope's; one shared `at`; one schema, v3 or v4, on the frame and
+//! envelope's; one shared `at`; one schema, v3 to v5, on the frame and
 //! every item; one document; no nesting; only the kinds a
 //! multi-record write produces (an observation, its linearization, a
-//! `prepared`, a review decision); at most one receipt, on the last item;
+//! `prepared`, a review decision, and, last, a `commentCreated` on the
+//! text the frame just linearized); at most one receipt, on the last item;
 //! and the outer `txn` is that last item's. A linearization names no
 //! document, so its document is checked when the frame is reduced.
 //!
@@ -11,7 +12,7 @@
 
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::DocId;
-use crate::agent_journal::record::{Envelope, Record, SCHEMA_V3, SCHEMA_V4};
+use crate::agent_journal::record::{Envelope, Record, SCHEMA_V3, SCHEMA_V5};
 
 /// Every rule above, on a decoded or staged `admission` envelope. Other
 /// kinds pass untouched.
@@ -39,9 +40,12 @@ pub fn check(env: &Envelope) -> Result<(), TxnError> {
             return Err(bad("items carry more than one `at`"));
         }
         if item.schema_version != env.schema_version
-            || !(SCHEMA_V3..=SCHEMA_V4).contains(&env.schema_version)
+            || !(SCHEMA_V3..=SCHEMA_V5).contains(&env.schema_version)
         {
-            return Err(bad("is not one schema, v3 or v4, throughout"));
+            return Err(bad("is not one schema, v3 to v5, throughout"));
+        }
+        if matches!(item.record, Record::CommentCreated(_)) && i + 1 != items.len() {
+            return Err(bad("carries a commentCreated before its last item"));
         }
         if item.receipt.is_some() && i + 1 != items.len() {
             return Err(bad("carries a receipt before its last item"));
@@ -66,6 +70,7 @@ fn item_doc(record: &Record) -> Result<Option<DocId>, &'static str> {
         Record::PendingObservation { doc, .. }
         | Record::Prepared { doc, .. }
         | Record::ReviewDecision { doc, .. } => Ok(Some(*doc)),
+        Record::CommentCreated(c) => Ok(Some(c.doc)),
         Record::ObservedRevision { .. }
         | Record::ConcurrentObservation { .. }
         | Record::Gap { .. } => Ok(None),
@@ -79,6 +84,9 @@ fn item_doc(record: &Record) -> Result<Option<DocId>, &'static str> {
         | Record::EpochArmed { .. }
         | Record::EpochClosed { .. }
         | Record::EpochUnclosed { .. }
-        | Record::LegacyCheckpoint { .. } => Err("carries a kind no admission writes"),
+        | Record::LegacyCheckpoint { .. }
+        | Record::CommentReplied(_)
+        | Record::CommentState(_)
+        | Record::CommentDeleted(_) => Err("carries a kind no admission writes"),
     }
 }

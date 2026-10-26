@@ -11,6 +11,9 @@
 //! A dropped transaction takes its request receipt with it. An
 //! `admission` frame is rewritten as its items, each a top-level record
 //! mapped as above (`writer_gc`).
+//! The startup pass also prunes deleted comment threads: every record of
+//! a pruned thread is dropped, its receipts with it, and `expected` drops
+//! the same set from the comment book and the receipt table.
 //! The rewrite starts with a `journalHeader` one generation past the live
 //! one, so a reader that missed the `Resync` sees a gap at its next event.
 //!
@@ -24,6 +27,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::agent_journal::comment::ids::CommentId;
+use crate::agent_journal::comment::records::CommentRecord;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{RevisionId, TxnId};
 use crate::agent_journal::projection::{Projection, RevisionKind, RevisionMeta, TxnStatus};
@@ -93,12 +98,19 @@ fn unknown_victim(rev: RevisionId) -> TxnError {
 pub struct Rewrite {
     victims: BTreeMap<TxnId, RevisionMeta>,
     dropped: BTreeSet<TxnId>,
+    pruned: BTreeSet<CommentId>,
 }
 
 impl Rewrite {
+    /// `pruned` are deleted comment threads whose records are dropped.
+    ///
     /// # Errors
     /// `Invariant` when a victim is not a revision the projection knows.
-    pub fn new(p: &Projection, victims: &BTreeSet<RevisionId>) -> Result<Self, TxnError> {
+    pub fn new(
+        p: &Projection,
+        victims: &BTreeSet<RevisionId>,
+        pruned: &BTreeSet<CommentId>,
+    ) -> Result<Self, TxnError> {
         let dropped = dropped_txns(p, victims)?;
         let victims = victims
             .iter()
@@ -107,7 +119,11 @@ impl Rewrite {
                 Ok((m.txn, m.clone()))
             })
             .collect::<Result<_, TxnError>>()?;
-        Ok(Rewrite { victims, dropped })
+        Ok(Rewrite {
+            victims,
+            dropped,
+            pruned: pruned.clone(),
+        })
     }
 
     /// `env` as the rewrite keeps it: tombstoned, dropped (`None`) or as
@@ -118,6 +134,9 @@ impl Rewrite {
     /// one the collector drops or tombstones, or when a revert's receipted
     /// decision (its own transaction, kept by `expected`) would be dropped.
     pub fn map(&self, env: Envelope) -> Result<Option<Envelope>, TxnError> {
+        if CommentRecord::of(&env.record).is_some_and(|r| self.pruned.contains(&r.comment())) {
+            return Ok(None);
+        }
         let collected = self.victims.contains_key(&env.txn) || self.dropped.contains(&env.txn);
         if collected && env.receipt.is_some() && matches!(env.record, Record::ReviewDecision { .. })
         {
@@ -181,13 +200,16 @@ fn tombstone(m: &RevisionMeta, env: &Envelope, effects: &ReviewEffects) -> Envel
 }
 
 /// The projection the rewrite must replay to: the live one with the
-/// victims tombstoned and the dropped transactions and observations gone.
+/// victims tombstoned, the dropped transactions and observations gone, and
+/// the `pruned` comment threads gone with their receipts.
 ///
 /// # Errors
-/// `Invariant` when a victim is not a revision the projection knows.
+/// `Invariant` when a victim is not a revision the projection knows;
+/// `Corrupt` when the pruned threads exceed the comment physical usage.
 pub fn expected(
     p: &Projection,
     victims: &BTreeSet<RevisionId>,
+    pruned: &BTreeSet<CommentId>,
     floor: u64,
 ) -> Result<Projection, TxnError> {
     let dropped = dropped_txns(p, victims)?;
@@ -201,7 +223,10 @@ pub fn expected(
     }
     e.txns.retain(|id, _| !dropped.contains(id));
     e.observations.retain(|id, _| !dropped.contains(id));
-    e.requests
-        .retain(|_, r| r.txn().is_none_or(|t| !dropped.contains(&t)));
+    e.requests.retain(|_, r| {
+        r.txn().is_none_or(|t| !dropped.contains(&t))
+            && r.outcome.comment().is_none_or(|c| !pruned.contains(&c))
+    });
+    e.comments.prune(pruned)?;
     Ok(e)
 }

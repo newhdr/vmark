@@ -39,6 +39,7 @@ const ABANDON_STATES: readonly string[] = [
   "terminal",
   "abandoned",
   "decided",
+  "answered",
 ];
 
 /** Append `aborted` for `txn`, bounded; see the header. */

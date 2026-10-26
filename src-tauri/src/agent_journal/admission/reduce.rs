@@ -17,15 +17,17 @@
 
 use crate::agent_journal::admission::receipt::Outcome;
 use crate::agent_journal::admission::{receipt, shape};
+use crate::agent_journal::comment::binding;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::DocId;
 use crate::agent_journal::projection::Projection;
 use crate::agent_journal::record::{Envelope, Record};
 
-/// Static binding, frame shape, request-id uniqueness and the document of
+/// Static binding (receipts, comment records), frame shape, request-id uniqueness and the document of
 /// every linearization, all against `proj` as it stands.
 pub(crate) fn preflight(proj: &Projection, env: &Envelope) -> Result<(), TxnError> {
     receipt::check_binding(env)?;
+    binding::check(env)?;
     shape::check(env)?;
     check_unindexed(proj, env)?;
     let Record::Admission { items } = &env.record else {
@@ -34,11 +36,13 @@ pub(crate) fn preflight(proj: &Projection, env: &Envelope) -> Result<(), TxnErro
     let mut doc: Option<DocId> = None;
     for (i, item) in items.iter().enumerate() {
         receipt::check_binding(item)?;
+        binding::check(item)?;
         check_unindexed(proj, item)?;
         let named = match &item.record {
             Record::PendingObservation { doc, .. }
             | Record::Prepared { doc, .. }
             | Record::ReviewDecision { doc, .. } => *doc,
+            Record::CommentCreated(c) => c.doc,
             _ => linearized_doc(proj, &items[..i], item)?,
         };
         if doc.is_some_and(|d| d != named) {

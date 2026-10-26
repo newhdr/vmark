@@ -12,9 +12,11 @@
 //! followed by a v2 record that depends on it (must be `FUTURE_FORMAT`, not
 //! `JOURNAL_CORRUPT`); two documents, with an open transaction and an armed
 //! epoch that a writable open would close. WI-AL2.2a adds the deferred
-//! receipt kinds (R103 rule 8): a `decision` receipt and a comment-create
-//! record under a newer schema, top level and inside an admission, behind
-//! torn tails, are `FUTURE_FORMAT`; labelled schema 3 they are `Corrupt`.
+//! receipt kinds (R103 rule 8): a `decision` receipt and, since WI-AL3.1b
+//! (R107 rule 1), every real schema-5 comment carrier, under a newer
+//! schema behind torn tails, are `FUTURE_FORMAT`; labelled schema 3 they
+//! are `Corrupt`. A schema-4 reader meeting a real schema-5 journal is
+//! `FUTURE_FORMAT` with both files unchanged.
 //! Every journal command, through
 //! IPC dispatch, is in `future_format_dispatch.test.rs`.
 
@@ -248,25 +250,47 @@ fn receipted_prepared(dir: &Path) -> serde_json::Value {
         .expect("a receipted prepared")
 }
 
-/// The deferred receipt kinds, as the work item that adds them would write
-/// them under `version`: a `prepared` answered by a `decision` receipt and
-/// a comment-create record, at top level and inside an admission.
+/// The receipt kinds and comment carriers, labelled `version`: a
+/// `prepared` answered by a `decision` receipt, and every real schema-5
+/// comment carrier (a create's `admission` frame, a receipted top-level
+/// create and reply, a resolve and a delete) written through the handles.
 fn deferred_kinds(prepared: &serde_json::Value, version: u32) -> Vec<serde_json::Value> {
+    use crate::agent_journal::comment::comment_support::{carrier_journal, relabel, v5_records};
     let mut decision = prepared.clone();
     decision["schemaVersion"] = version.into();
-    decision["receipt"]["outcome"] =
-        serde_json::json!({"kind": "decision", "response": {"applied": ["h1"]}});
-    let comment = serde_json::json!({
-        "schemaVersion": version, "seq": "900", "txn": TxnId::new(), "at": 0,
-        "record": {"kind": "commentCreated", "doc": DocId::new(), "body": "注释 — note"},
-        "receipt": {"requestId": uuid::Uuid::new_v4().to_string(), "digest": prepared["receipt"]["digest"],
-                    "outcome": {"kind": "commentCreated", "response": {"commentId": "c1"}}},
-    });
-    let admission = serde_json::json!({
-        "schemaVersion": version, "seq": "901", "txn": decision["txn"], "at": 0,
-        "record": {"kind": "admission", "items": [comment.clone(), decision.clone()]},
-    });
-    vec![decision, comment, admission]
+    // The frozen revert decision (fixtures/receipts.json), so the case is
+    // refused for its label and not for a malformed outcome.
+    let fixtures: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/receipts.json")).expect("fixtures");
+    let decided = fixtures["receipts"]
+        .as_array()
+        .expect("receipts")
+        .iter()
+        .find(|f| f["name"] == "revertDecided")
+        .expect("the revert decision fixture");
+    let receipt: serde_json::Value =
+        serde_json::from_str(decided["receipt"].as_str().expect("receipt")).expect("receipt");
+    decision["receipt"]["outcome"] = receipt["outcome"].clone();
+    let (r, _) = carrier_journal();
+    let carriers = v5_records(&r);
+    let kinds: Vec<_> = carriers
+        .iter()
+        .map(|v| v["record"]["kind"].clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "admission",
+            "commentCreated",
+            "commentReplied",
+            "commentState",
+            "commentDeleted"
+        ],
+        "every schema-5 carrier is real"
+    );
+    let mut out = vec![decision];
+    out.extend(carriers.iter().map(|v| relabel(v, version)));
+    out
 }
 
 #[test]
@@ -291,6 +315,21 @@ fn deferred_receipt_kinds_under_a_newer_schema_are_future_format_with_torn_tails
 }
 
 #[test]
+fn a_schema_4_reader_meeting_real_comment_records_is_future_format_with_torn_tails() {
+    use crate::agent_journal::comment::comment_support::carrier_journal;
+    let (r, _) = carrier_journal();
+    let dir = r.dir.path().to_path_buf();
+    let _keep = {
+        let crate::agent_journal::admission::request_support::Rig { dir: d, c, .. } = r;
+        drop(c);
+        d
+    };
+    append_raw(&dir.join(JOURNAL_FILE), &torn_frame(9));
+    append_raw(&dir.join(BLOB_PACK), &torn_frame(5));
+    assert_off_and_untouched(&dir, 4);
+}
+
+#[test]
 fn deferred_receipt_kinds_labelled_schema_3_are_corrupt() {
     use crate::agent_journal::codec;
     let source = tmp();
@@ -302,13 +341,14 @@ fn deferred_receipt_kinds_labelled_schema_3_are_corrupt() {
         ),
         "the unmodified receipted prepared decodes"
     );
-    for (case, v3) in deferred_kinds(&prepared, MAX_SUPPORTED_SCHEMA)
-        .into_iter()
-        .enumerate()
-    {
+    for (case, v3) in deferred_kinds(&prepared, 3).into_iter().enumerate() {
         let err = codec::decode(&serde_json::to_vec(&v3).unwrap())
             .err()
             .unwrap_or_else(|| panic!("case {case}: decoded a deferred kind inside schema 3"));
         assert_eq!(err.code(), "JOURNAL_CORRUPT", "case {case}: {err}");
+        assert!(
+            err.to_string().contains("labelled schemaVersion 3"),
+            "case {case} is refused for its label, not another defect: {err}"
+        );
     }
 }

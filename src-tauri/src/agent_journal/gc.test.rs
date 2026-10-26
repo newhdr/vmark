@@ -390,7 +390,7 @@ fn a_rewrite_naming_an_unknown_victim_is_an_invariant_error_not_a_panic() {
     use crate::agent_journal::projection::Projection;
     use std::collections::BTreeSet;
     let unknown: BTreeSet<RevisionId> = [RevisionId::new()].into_iter().collect();
-    let err = Rewrite::new(&Projection::default(), &unknown)
+    let err = Rewrite::new(&Projection::default(), &unknown, &BTreeSet::new())
         .err()
         .expect("an unknown victim is refused");
     assert_eq!(err.code(), "INVARIANT_BROKEN", "{err:?}");

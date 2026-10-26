@@ -6,7 +6,10 @@
 //! with `uncertain: true` for a prepare whose frame may or may not be
 //! durable (the client treats it as any uncertain answer); a request answer
 //! adds `uncertain` and `request` (`admission::answer`); a registration
-//! for a window that is not open adds `uncertain` and `state`. Messages are for agents and logs, never shown to a user.
+//! for a window that is not open adds `uncertain` and `state`. A comment
+//! refusal adds what it is about: the thread, the bound and its limit, or
+//! the action, caller and state the matrix refused. Messages are for
+//! agents and logs, never shown to a user.
 //!
 //! @module agent_journal/refusal
 
@@ -34,7 +37,15 @@ fn class(e: &TxnError) -> ErrorCode {
         | TxnError::ReviewStateExhausted { .. }
         | TxnError::Saturated(_)
         | TxnError::StalePage(_)
-        | TxnError::StaleRegistration(_) => ErrorCode::Conflict,
+        | TxnError::StaleRegistration(_)
+        | TxnError::StaleComment { .. }
+        | TxnError::CommentStateExhausted { .. }
+        | TxnError::CommentStorageFull { .. }
+        | TxnError::CommentNotAllowed { .. } => ErrorCode::Conflict,
+        TxnError::CommentLimit { bound, .. } => match *bound {
+            "body" | "headingPath" => ErrorCode::InvalidInput,
+            _ => ErrorCode::Conflict,
+        },
         TxnError::Request(r) => match &r.state {
             RequestState::NotAdmitted(cause) => class(cause),
             RequestState::Conflict => ErrorCode::InvalidInput,
@@ -71,6 +82,22 @@ fn detail(e: &TxnError) -> Value {
         TxnError::CommentAnchorTooLong { bytes, limit } => {
             json!({ "journalCode": e.code(), "bytes": bytes, "limit": limit })
         }
+        TxnError::StaleComment { comment, .. } | TxnError::CommentStateExhausted { comment } => {
+            json!({ "journalCode": e.code(), "comment": comment })
+        }
+        TxnError::CommentStorageFull { bytes, limit } => {
+            json!({ "journalCode": e.code(), "bytes": bytes, "limit": limit })
+        }
+        TxnError::CommentLimit {
+            bound,
+            limit,
+            total,
+        } => json!({ "journalCode": e.code(), "bound": bound, "limit": limit, "total": total }),
+        TxnError::CommentNotAllowed {
+            action,
+            caller,
+            state,
+        } => json!({ "journalCode": e.code(), "action": action, "caller": caller, "state": state }),
         TxnError::Indeterminate(_) => {
             json!({ "journalCode": e.code(), "indeterminate": true, "uncertain": true })
         }

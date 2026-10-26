@@ -6,15 +6,17 @@
 //!
 //! Outcomes: a `prepared` reply (a controlled write's or a restore's from
 //! schema v3, an applied revert's from v4), or the review decision a
-//! revert that did not apply recorded instead (v4). An envelope with a
-//! receipt is labelled exactly its outcome's schema (`schema_table`).
+//! revert that did not apply recorded instead (v4), or a created comment
+//! thread or a reply (v5, final: they open no transaction). An envelope
+//! with a receipt is labelled exactly its outcome's schema (`schema_table`).
 //!
 //! Static binding: the stored reply names the record's own document,
 //! transaction and revision; a revert's names the hunk and `reviewGen` its
 //! `hunkRevert` op prepared, and only a `hunkRevert` carries one. A
 //! decision names the record's document, action, its one hunk, head and
 //! seq; the `reviewGen` it reports is checked once the record applies
-//! (`Projection::apply`). A receipt anywhere else — another kind, a v1 or
+//! (`Projection::apply`). A comment answer names its own record
+//! (`comment::binding`). A receipt anywhere else — another kind, a v1 or
 //! v2 envelope, an admission frame itself — is corrupt.
 //!
 //! @module agent_journal/admission/receipt
@@ -26,6 +28,9 @@ use serde::{Deserialize, Serialize};
 use sha2_v011::{Digest as _, Sha256};
 use uuid::Uuid;
 
+use crate::agent_journal::comment::binding;
+use crate::agent_journal::comment::ids::CommentId;
+use crate::agent_journal::comment::replies::{CommentCreatedReply, CommentRepliedReply};
 use crate::agent_journal::controlled_restore::RestorePrepared;
 use crate::agent_journal::controlled_revert::{RevertDecided, RevertPrepared};
 use crate::agent_journal::controlled_wire::ControlledPrepared;
@@ -43,8 +48,9 @@ pub struct Receipt {
     pub outcome: Outcome,
 }
 
-/// What the request produced: a `prepared` reply, or the review decision
-/// a revert that did not apply recorded.
+/// What the request produced: a `prepared` reply, the review decision a
+/// revert that did not apply recorded, or a comment create's or reply's
+/// answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -55,6 +61,8 @@ pub struct Receipt {
 pub enum Outcome {
     Prepared(PreparedResponse),
     Decision(RevertDecided),
+    CommentCreated(CommentCreatedReply),
+    CommentReplied(CommentRepliedReply),
 }
 
 /// A controlled prepare's reply, a restore's (which also carries the text
@@ -89,14 +97,26 @@ impl Outcome {
         match self {
             Self::Prepared(r) => r.names().0,
             Self::Decision(d) => d.doc,
+            Self::CommentCreated(c) => c.doc,
+            Self::CommentReplied(r) => r.doc,
         }
     }
 
-    /// The transaction a `prepared` reply opened; a decision opens none.
+    /// The transaction a `prepared` reply opened; every other outcome is
+    /// final and opens none.
     pub(crate) fn txn(&self) -> Option<TxnId> {
         match self {
             Self::Prepared(r) => Some(r.txn()),
-            Self::Decision(_) => None,
+            Self::Decision(_) | Self::CommentCreated(_) | Self::CommentReplied(_) => None,
+        }
+    }
+
+    /// The thread a comment answer is about.
+    pub(crate) fn comment(&self) -> Option<CommentId> {
+        match self {
+            Self::CommentCreated(c) => Some(c.comment),
+            Self::CommentReplied(r) => Some(r.comment),
+            Self::Prepared(_) | Self::Decision(_) => None,
         }
     }
 }
@@ -171,6 +191,8 @@ pub fn check_binding(env: &Envelope) -> Result<(), TxnError> {
             }
             Ok(())
         }
+        (Outcome::CommentCreated(r), _) => binding::created_receipt(env, r),
+        (Outcome::CommentReplied(r), _) => binding::replied_receipt(env, r),
         _ => Err(corrupt("a receipt on a record it does not answer")),
     }
 }

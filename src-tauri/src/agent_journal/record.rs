@@ -1,4 +1,4 @@
-//! Journal schema records: v2 and v3 (v1 histories decode through `codec`).
+//! Journal schema records, v2 to v5 (v1 histories decode through `codec`).
 //!
 //! One `Envelope` per framed record. `seq` is the writer's generation: it is
 //! strictly increasing across appends, restarts and compactions (compaction
@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::receipt::Receipt;
+use crate::agent_journal::comment::records::{
+    CommentCreated, CommentDeleted, CommentReplied, CommentState,
+};
 use crate::agent_journal::ids::{BlobHash, DocId, HunkId, RevisionId, TxnId};
 use crate::agent_journal::provenance::ProvenancePayload;
 use crate::agent_journal::review::{
@@ -19,7 +22,7 @@ use crate::agent_journal::review::{
 /// The newest schema version this build writes. A record is labelled with
 /// the lowest version that has its kind and fields (`schema_table::label`),
 /// so a record that uses nothing newer than v2 is still written as v2.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 /// The newest schema version this build can read. A record above it turns
 /// the journal off for every document before anything is repaired
 /// (`JOURNAL_FUTURE_FORMAT`; see `writer_replay`).
@@ -34,6 +37,9 @@ pub const SCHEMA_V3: u32 = 3;
 /// The revert schema: a request receipt may store a revert's prepared
 /// reply or the review decision a revert recorded instead.
 pub const SCHEMA_V4: u32 = 4;
+/// The comment schema: the four comment kinds, and receipts storing a
+/// created thread or a reply.
+pub const SCHEMA_V5: u32 = 5;
 
 /// The framed unit. Unknown fields are corruption at every level: a
 /// current-version record this build only half understands would otherwise
@@ -48,8 +54,8 @@ pub struct Envelope {
     /// Unix milliseconds.
     pub at: u64,
     pub record: Record,
-    /// The request this record answers, on a `prepared` (v3): its id, the
-    /// digest of its payload and the reply exactly as first sent
+    /// The request this record answers (a `prepared`, v3; a comment create
+    /// or reply, v5): its id, payload digest and first reply
     /// (`admission::receipt`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt: Option<Receipt>,
@@ -260,6 +266,11 @@ pub enum Record {
     Admission {
         items: Vec<Envelope>,
     },
+    /// Comment threads (v5, `comment::records`); never a content head.
+    CommentCreated(CommentCreated),
+    CommentReplied(CommentReplied),
+    CommentState(CommentState),
+    CommentDeleted(CommentDeleted),
     /// Immutable migrated checkpoint; outside revision chains.
     LegacyCheckpoint {
         legacy_id: String,

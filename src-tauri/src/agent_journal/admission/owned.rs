@@ -256,6 +256,11 @@ pub(crate) fn end_owned_in(w: &Writer, g: &mut Inner, txn: TxnId) -> OwnedEnd {
             | TxnError::InvalidProvenance(_)
             | TxnError::InvalidText(_)
             | TxnError::CommentAnchorTooLong { .. }
+            | TxnError::StaleComment { .. }
+            | TxnError::CommentStateExhausted { .. }
+            | TxnError::CommentStorageFull { .. }
+            | TxnError::CommentLimit { .. }
+            | TxnError::CommentNotAllowed { .. }
             | TxnError::Io(_)
             | TxnError::Indeterminate(_)
             | TxnError::Invariant(_)

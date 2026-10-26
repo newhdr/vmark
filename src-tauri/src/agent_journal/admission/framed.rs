@@ -1,6 +1,7 @@
-//! A framed prepare: an agent write, a restore or a revert whose payload names the
-//! writer incarnation and the page (generation and identity) it was frozen
-//! for, answered by the request protocol.
+//! A framed request (an agent write, a restore, a revert, a comment create
+//! or reply; `run_framed_with`) whose payload names the writer incarnation
+//! and the page (generation and identity) it was frozen for, answered by
+//! the request protocol.
 //!
 //! Order, in the first critical section: the payload's incarnation is the
 //! writer's; its generation is live for the invoking label with that
@@ -123,7 +124,7 @@ impl Controller {
         let reply = match self.run_framed(pages, label, &frame, &request, &key, prep)? {
             Outcome::Prepared(PreparedResponse::Revert(p)) => RevertReply::Prepared(p),
             Outcome::Decision(d) => RevertReply::Decided(d),
-            Outcome::Prepared(_) => return Err(refusal(&reused_id())),
+            _ => return Err(refusal(&reused_id())),
         };
         Ok(Bound {
             bind: frame.bind(&request),
@@ -139,6 +140,22 @@ impl Controller {
         request: &Request,
         key: &str,
         prep: Prep,
+    ) -> Result<Outcome, CommandError> {
+        let work = |w: &Writer, g: &mut Inner, doc, r| prepare_admitted(w, g, doc, prep, Some(r));
+        self.run_framed_with(pages, label, frame, request, key, work)
+    }
+
+    /// The request protocol around `work`, which runs in the second
+    /// critical section on the resolved document (a prepare, a comment
+    /// create or reply).
+    pub(crate) fn run_framed_with(
+        &self,
+        pages: &PageTable,
+        label: &str,
+        frame: &Frame,
+        request: &Request,
+        key: &str,
+        work: impl FnOnce(&Writer, &mut Inner, DocId, Request) -> Result<Outcome, TxnError>,
     ) -> Result<Outcome, CommandError> {
         let w = &*self.writer;
         let owner = Owner {
@@ -182,7 +199,7 @@ impl Controller {
                 request,
                 invocation: guard.invocation,
             };
-            admit(w, &mut g, pages, &attempt, doc, prep)
+            admit(w, &mut g, pages, &attempt, doc, work)
         };
         self.settle_prepare(doc, out.is_ok());
         out.map_err(|e| refusal(&e))
@@ -236,7 +253,7 @@ fn admit(
     pages: &PageTable,
     attempt: &Attempt<'_>,
     doc: DocId,
-    prep: Prep,
+    work: impl FnOnce(&Writer, &mut Inner, DocId, Request) -> Result<Outcome, TxnError>,
 ) -> Result<Outcome, TxnError> {
     let Attempt {
         owner,
@@ -255,7 +272,7 @@ fn admit(
     if !g.requests.holds(id, invocation) {
         return Err(request.refused(RequestState::Abandoned));
     }
-    let out = prepare_admitted(w, g, doc, prep, Some(request.clone()));
+    let out = work(w, g, doc, request.clone());
     g.requests.end(id, invocation);
     match out {
         Ok(reply) => {

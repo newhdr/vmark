@@ -106,6 +106,10 @@ impl Projection {
             Record::EpochArmed { .. }
             | Record::EpochClosed { .. }
             | Record::EpochUnclosed { .. } => self.apply_epoch(&env.record)?,
+            Record::CommentCreated(_)
+            | Record::CommentReplied(_)
+            | Record::CommentState(_)
+            | Record::CommentDeleted(_) => self.comments.apply(env, &self.revisions)?,
             Record::Admission { items } => {
                 for item in items {
                     self.apply(item)?;

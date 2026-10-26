@@ -155,7 +155,7 @@ pub fn prepare_revert_with(
     let outcome = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
     match &outcome {
         Outcome::Prepared(PreparedResponse::Revert(_)) | Outcome::Decision(_) => Ok(outcome),
-        Outcome::Prepared(_) => Err(reused_id()),
+        _ => Err(reused_id()),
     }
 }
 

@@ -40,30 +40,55 @@ pub(crate) struct Staging {
 impl Writer {
     /// Write `s` and make it live. See the module docs for the outcomes.
     pub(crate) fn publish(&self, g: &mut Inner, s: Staging) -> Result<(), TxnError> {
-        let out = self.publish_unannounced(g, s);
+        let reserve = matches!(s.response, Outcome::Prepared(_)).then_some((s.doc, s.txn));
+        self.announce(g, s.env, s.blobs, s.staged, reserve)
+    }
+
+    /// Write one record that names no new text and holds no reservation
+    /// (a comment state change or deletion), preflighted by the caller.
+    pub(crate) fn publish_record(&self, g: &mut Inner, env: Envelope) -> Result<(), TxnError> {
+        self.announce(g, env, Vec::new(), None, None)
+    }
+
+    fn announce(
+        &self,
+        g: &mut Inner,
+        env: Envelope,
+        blobs: Vec<(BlobHash, String)>,
+        staged: Option<Projection>,
+        reserve: Option<(DocId, TxnId)>,
+    ) -> Result<(), TxnError> {
+        let out = self.publish_unannounced(g, env, &blobs, staged, reserve);
         if out.is_err() {
             self.broadcast(JournalEvent::HealthChanged);
         }
         out
     }
 
-    fn publish_unannounced(&self, g: &mut Inner, s: Staging) -> Result<(), TxnError> {
+    fn publish_unannounced(
+        &self,
+        g: &mut Inner,
+        env: Envelope,
+        blobs: &[(BlobHash, String)],
+        staged: Option<Projection>,
+        reserve: Option<(DocId, TxnId)>,
+    ) -> Result<(), TxnError> {
         g.persistable()?;
-        for (hash, text) in &s.blobs {
+        for (hash, text) in blobs {
             g.blobs.put(hash, text)?;
         }
-        self.faults.run_hook(&s.env);
-        if let Err(e) = g.journal.append(&codec::encode(&s.env)) {
+        self.faults.run_hook(&env);
+        if let Err(e) = g.journal.append(&codec::encode(&env)) {
             return Err(if g.journal.is_poisoned() {
                 TxnError::Indeterminate(e.to_string())
             } else {
                 e
             });
         }
-        match s.staged {
+        match staged {
             Some(proj) => g.proj = proj,
             None => {
-                if let Err(e) = g.proj.apply(&s.env) {
+                if let Err(e) = g.proj.apply(&env) {
                     // Preflighted before the write, so this is a writer bug.
                     g.journal.poison();
                     return Err(TxnError::Corrupt(format!(
@@ -72,12 +97,12 @@ impl Writer {
                 }
             }
         }
-        if let Outcome::Prepared(_) = &s.response {
-            g.reservations.insert(s.doc, Reservation { txn: s.txn });
+        if let Some((doc, txn)) = reserve {
+            g.reservations.insert(doc, Reservation { txn });
         }
-        let records = match s.env.record {
+        let records = match env.record {
             Record::Admission { items } => items,
-            _ => vec![s.env],
+            _ => vec![env],
         };
         for env in records {
             self.broadcast(JournalEvent::Appended(Box::new(env)));

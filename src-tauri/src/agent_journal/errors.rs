@@ -2,6 +2,7 @@
 //! review panel branch on; the message is for logs.
 
 use crate::agent_journal::admission::answer::RequestRefusal;
+use crate::agent_journal::comment::ids::{CommentCaller, CommentId, ThreadState};
 use crate::agent_journal::ids::{HunkId, RevisionId, TxnId};
 use crate::agent_journal::provenance::Block;
 
@@ -63,6 +64,28 @@ pub enum TxnError {
     /// the 4,096-byte UTF-8 bound. Refused, never truncated: a shorter
     /// quote would be a different anchor.
     CommentAnchorTooLong { bytes: usize, limit: usize },
+    /// A comment request computed against another `commentGen`, or a
+    /// thread that is deleted. Nothing is appended.
+    StaleComment { comment: CommentId, detail: String },
+    /// `commentGen` reached a reserved value for this action.
+    CommentStateExhausted { comment: CommentId },
+    /// Retained comment bytes, deleted threads included, would pass the
+    /// physical cap. Deleted threads are reclaimed by the startup
+    /// compaction; resolve and delete stay allowed.
+    CommentStorageFull { bytes: u64, limit: u64 },
+    /// A comment bound (`body`, `replies`, `comments`, `headingPath`,
+    /// `threadBytes`, `documentBytes`, `globalBytes`) would be passed.
+    CommentLimit {
+        bound: &'static str,
+        limit: u64,
+        total: u64,
+    },
+    /// The state matrix refuses this action for this caller in this state.
+    CommentNotAllowed {
+        action: &'static str,
+        caller: CommentCaller,
+        state: ThreadState,
+    },
     /// Text that is not well-formed Unicode (a lone surrogate, invalid
     /// UTF-8). Refused at the boundary, never replaced with U+FFFD.
     InvalidText(String),
@@ -99,6 +122,11 @@ impl TxnError {
             Self::Request(r) => r.state.code(),
             Self::InvalidRequest(_) | Self::InvalidProvenance(_) => "INVALID_REQUEST",
             Self::CommentAnchorTooLong { .. } => "COMMENT_ANCHOR_TOO_LONG",
+            Self::StaleComment { .. } => "STALE_COMMENT",
+            Self::CommentStateExhausted { .. } => "COMMENT_STATE_EXHAUSTED",
+            Self::CommentStorageFull { .. } => "COMMENT_STORAGE_FULL",
+            Self::CommentLimit { .. } => "COMMENT_LIMIT",
+            Self::CommentNotAllowed { .. } => "COMMENT_NOT_ALLOWED",
             Self::InvalidText(_) => "INVALID_TEXT",
             Self::Io(_) | Self::Indeterminate(_) => "JOURNAL_IO",
             Self::Invariant(_) => "INVARIANT_BROKEN",

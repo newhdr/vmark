@@ -17,7 +17,7 @@ use serde::Deserialize;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::BlobHash;
 use crate::agent_journal::record::{
-    Envelope, LegacyAnchor, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V3, SCHEMA_V4,
+    Envelope, LegacyAnchor, Record, MAX_SUPPORTED_SCHEMA, SCHEMA_V1, SCHEMA_V3, SCHEMA_V5,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +71,7 @@ pub fn decode_with_max(payload: &[u8], max: u32) -> Result<Decoded, TxnError> {
 
 /// One envelope of a version this reader supports. An `admission`'s items
 /// go through this same path, each required to carry its frame's version,
-/// v3 or v4 (any other child, or a nested frame, is corrupt — never
+/// v3 to v5 (any other child, or a nested frame, is corrupt — never
 /// upgraded or skipped).
 fn decode_known(mut value: serde_json::Value, version: u32) -> Result<Envelope, TxnError> {
     refuse_fields_on_unit_kinds(&value)?;
@@ -83,9 +83,11 @@ fn decode_known(mut value: serde_json::Value, version: u32) -> Result<Envelope, 
             let v = child
                 .get("schemaVersion")
                 .and_then(serde_json::Value::as_u64);
-            if v != Some(u64::from(version)) || !(SCHEMA_V3..=SCHEMA_V4).contains(&version) {
+            if v != Some(u64::from(version)) || !(SCHEMA_V3..=SCHEMA_V5).contains(&version) {
+                let item = v.map_or_else(|| "no schemaVersion".into(), |v| format!("{v}"));
                 return Err(TxnError::Corrupt(format!(
-                    "seq {}: an admission item is not its frame's schema v3 or v4",
+                    "seq {}: an admission labelled schemaVersion {version} carries an item \
+                     labelled {item}; both must be one version, v3 to v5",
                     env.seq
                 )));
             }
@@ -131,11 +133,13 @@ fn refuse_fields_on_unit_kinds(value: &serde_json::Value) -> Result<(), TxnError
 }
 
 /// Invariants serde cannot express: a v2 commit always carries its map; a
-/// receipt names its own `prepared`; an admission keeps its frame rules.
+/// receipt names its own record; an admission keeps its frame rules; a
+/// comment record keeps its static bindings (`comment::binding`).
 fn check_shape(env: &Envelope) -> Result<(), TxnError> {
     crate::agent_journal::schema_table::check(env)?;
     crate::agent_journal::admission::receipt::check_binding(env)?;
     crate::agent_journal::admission::shape::check(env)?;
+    crate::agent_journal::comment::binding::check(env)?;
     match &env.record {
         Record::Committed {
             provenance: None, ..

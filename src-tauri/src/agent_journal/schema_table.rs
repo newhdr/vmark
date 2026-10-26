@@ -15,7 +15,9 @@
 
 use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse, Receipt};
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::record::{Envelope, Record, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4};
+use crate::agent_journal::record::{
+    Envelope, Record, SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5,
+};
 
 /// The lowest schema version that may carry `record`.
 pub(crate) fn min_schema(record: &Record) -> u32 {
@@ -41,6 +43,10 @@ pub(crate) fn min_schema(record: &Record) -> u32 {
             SCHEMA_V2
         }
         Record::Admission { .. } => SCHEMA_V3,
+        Record::CommentCreated(_)
+        | Record::CommentReplied(_)
+        | Record::CommentState(_)
+        | Record::CommentDeleted(_) => SCHEMA_V5,
     }
 }
 
@@ -52,7 +58,7 @@ pub(crate) fn label(record: &Record) -> u32 {
 
 /// The schema a receipt's outcome belongs to: a controlled write's or a
 /// restore's reply is v3; an applied revert's reply and a revert's
-/// decision are v4. An envelope with a receipt is labelled exactly this
+/// decision are v4; a created thread and a reply are v5. An envelope with a receipt is labelled exactly this
 /// (`receipt::check_binding`).
 pub(crate) fn receipt_min(receipt: &Receipt) -> u32 {
     match &receipt.outcome {
@@ -60,6 +66,7 @@ pub(crate) fn receipt_min(receipt: &Receipt) -> u32 {
             SCHEMA_V3
         }
         Outcome::Prepared(PreparedResponse::Revert(_)) | Outcome::Decision(_) => SCHEMA_V4,
+        Outcome::CommentCreated(_) | Outcome::CommentReplied(_) => SCHEMA_V5,
     }
 }
 

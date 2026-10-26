@@ -101,6 +101,9 @@ pub enum AbandonReply {
     Ended(RequestState),
     /// The request was a revert that recorded a decision: nothing is open.
     Decided,
+    /// The request was a comment create or reply that was answered (its
+    /// record kind): it is final and nothing is open.
+    Answered(&'static str),
 }
 
 impl Serialize for AbandonReply {
@@ -110,6 +113,7 @@ impl Serialize for AbandonReply {
             Self::AbortQueued => serde_json::json!({ "state": "abortQueued" }),
             Self::Fenced => serde_json::json!({ "state": "fenced" }),
             Self::Decided => serde_json::json!({ "state": "decided" }),
+            Self::Answered(kind) => serde_json::json!({ "state": "answered", "kind": kind }),
             Self::Ended(state) => serde_json::Value::Object(state.fields()),
         };
         fields.serialize(s)

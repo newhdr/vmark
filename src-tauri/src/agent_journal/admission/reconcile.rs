@@ -12,9 +12,9 @@
 //!   - A receipt under another digest is a conflict, before any status is
 //!     read: an id reused for another payload learns nothing about the
 //!     first.
-//!   - A revert's recorded decision is final: an identical retry is
-//!     answered with it whatever the writer's health, since nothing it
-//!     names is open.
+//!   - A revert's recorded decision, a created comment thread and a reply
+//!     are final: an identical retry is answered with them whatever the
+//!     writer's health, since nothing they name is open.
 //!   - Every answer read from a request's own receipt (a stored reply,
 //!     `terminal`, `terminalPending`, `unavailable`, `abandoned`) names
 //!     the receipt's document, and its caller restarts that document's
@@ -27,7 +27,6 @@
 use crate::agent_journal::admission::answer::{Ended, Ending, RequestRefusal, RequestState};
 use crate::agent_journal::admission::prepare::Request;
 use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse, Receipt};
-use crate::agent_journal::controlled_revert::RevertDecided;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, TxnId};
 use crate::agent_journal::projection::TxnStatus;
@@ -40,8 +39,9 @@ use crate::agent_journal::writer_txn::open_txn;
 pub(crate) enum Classified {
     /// Return the stored reply byte for byte.
     Executable(PreparedResponse),
-    /// Return the recorded decision byte for byte.
-    Decided(RevertDecided),
+    /// Return the final outcome (a decision, a comment answer) byte for
+    /// byte.
+    Final(Outcome),
     /// Refuse with this state.
     Refused(RequestState),
 }
@@ -56,7 +56,7 @@ pub(crate) fn lookup(g: &Inner, r: &Request) -> Result<Option<Outcome>, TxnError
     let state = if receipt.digest == r.digest {
         match classify(g, receipt) {
             Classified::Executable(reply) => return Ok(Some(Outcome::Prepared(reply))),
-            Classified::Decided(d) => return Ok(Some(Outcome::Decision(d))),
+            Classified::Final(outcome) => return Ok(Some(outcome)),
             Classified::Refused(state) => state,
         }
     } else {
@@ -79,7 +79,9 @@ pub(crate) fn receipt_doc(g: &Inner, r: &Request) -> Option<DocId> {
 pub(crate) fn classify(g: &Inner, receipt: &Receipt) -> Classified {
     let reply = match &receipt.outcome {
         Outcome::Prepared(reply) => reply,
-        Outcome::Decision(d) => return Classified::Decided(d.clone()),
+        final_outcome @ (Outcome::Decision(_)
+        | Outcome::CommentCreated(_)
+        | Outcome::CommentReplied(_)) => return Classified::Final(final_outcome.clone()),
     };
     let txn = reply.txn();
     let Some(entry) = g.proj.txns.get(&txn) else {

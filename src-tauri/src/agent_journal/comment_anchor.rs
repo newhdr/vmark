@@ -51,7 +51,7 @@ pub const MAX_QUOTE_UTF8_BYTES: usize = 4096;
 
 /// Where an anchor was created: the revision and the quote's start in it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OffsetHint {
     pub revision: RevisionId,
     pub offset: u64,
@@ -59,7 +59,7 @@ pub struct OffsetHint {
 
 /// What a comment stores to find its passage again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StoredAnchor {
     pub quote: String,
     pub prefix: String,
@@ -144,7 +144,7 @@ pub enum SelectionPrecision {
 
 /// A selection in canonical Markdown, in UTF-16 units.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnchorSelection {
     pub start: u64,
     pub end: u64,

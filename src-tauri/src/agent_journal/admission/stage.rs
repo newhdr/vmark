@@ -43,23 +43,23 @@ use crate::agent_journal::writer_revert::referenced_blob;
 use crate::agent_journal::writer_types::now_ms;
 
 /// The items staged so far, applied to `proj` as they are pushed.
-struct Frame {
-    proj: Projection,
-    items: Vec<Envelope>,
-    next_seq: u64,
-    at: u64,
-    /// The schema of every item and of the frame: v4 when a revert's
-    /// receipt is among them, v3 otherwise.
-    schema: u32,
+pub(crate) struct Frame {
+    pub(crate) proj: Projection,
+    pub(crate) items: Vec<Envelope>,
+    pub(crate) next_seq: u64,
+    pub(crate) at: u64,
+    /// The schema of every item and of the frame: v5 for a comment
+    /// create, v4 when a revert's receipt is among them, v3 otherwise.
+    pub(crate) schema: u32,
 }
 
 impl Frame {
     /// Stamp `record` as the next item, check it and apply it to the clone.
-    fn push(&mut self, txn: TxnId, record: Record) -> Result<u64, TxnError> {
+    pub(crate) fn push(&mut self, txn: TxnId, record: Record) -> Result<u64, TxnError> {
         self.push_receipted(txn, record, None)
     }
 
-    fn push_receipted(
+    pub(crate) fn push_receipted(
         &mut self,
         txn: TxnId,
         record: Record,
@@ -86,7 +86,7 @@ impl Frame {
     }
 
     /// Linearize every pending capture of `doc`, oldest first.
-    fn linearize_pending(
+    pub(crate) fn linearize_pending(
         &mut self,
         blobs: &mut StagedBlobs<'_>,
         doc: DocId,
@@ -123,7 +123,7 @@ impl Frame {
 
     /// The envelope to write: one item alone, relabelled with its own
     /// schema; more as one `admission` whose `txn` is the last item's.
-    fn into_envelope(mut self) -> Result<(Envelope, Projection), TxnError> {
+    pub(crate) fn into_envelope(mut self) -> Result<(Envelope, Projection), TxnError> {
         if self.items.len() == 1 {
             let mut env = self.items.remove(0);
             env.schema_version = match &env.receipt {
@@ -248,7 +248,7 @@ pub(crate) fn staged(
 /// Push the buffer's capture as a human observation of `head`, caused by
 /// the initiator's write, with its texts staged and its map checked
 /// against the head's text.
-fn stage_baseline(
+pub(crate) fn stage_baseline(
     f: &mut Frame,
     blobs: &mut StagedBlobs<'_>,
     doc: DocId,

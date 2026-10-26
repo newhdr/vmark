@@ -8,7 +8,8 @@
 //!     transaction is aborted (`aborted`, or `abortQueued` behind a failed
 //!     append); an ended one, or one whose ending is queued, is reported;
 //!     an unhealthy writer is `unavailable`; a revert's recorded decision
-//!     is `decided`, ending nothing. An answer read from the
+//!     is `decided` and a comment create's or reply's `answered`, ending
+//!     nothing. An answer read from the
 //!     receipt restarts its document's drain when degraded (`reconcile`);
 //!   - an in-flight entry under another digest is a conflict; otherwise
 //!     the entry is taken and the id fenced, so the running attempt
@@ -29,7 +30,7 @@ use crate::agent_journal::admission::bound::AbandonReply;
 use crate::agent_journal::admission::page_table::PageTable;
 use crate::agent_journal::admission::payload::{admit_identity, Frame};
 use crate::agent_journal::admission::prepare::Request;
-use crate::agent_journal::admission::receipt::RequestId;
+use crate::agent_journal::admission::receipt::{Outcome, RequestId};
 use crate::agent_journal::admission::reconcile::{classify, Classified};
 use crate::agent_journal::controller::{invalid, Controller};
 use crate::agent_journal::errors::TxnError;
@@ -105,10 +106,12 @@ fn abandon_in(
             return refused(RequestState::Conflict);
         }
         let Some(txn) = receipt.txn() else {
-            return (
-                Ok(AbandonReply::Decided),
-                Then::Restart(receipt.outcome.doc()),
-            );
+            let reply = match receipt.outcome {
+                Outcome::CommentCreated(_) => AbandonReply::Answered("commentCreated"),
+                Outcome::CommentReplied(_) => AbandonReply::Answered("commentReplied"),
+                Outcome::Prepared(_) | Outcome::Decision(_) => AbandonReply::Decided,
+            };
+            return (Ok(reply), Then::Restart(receipt.outcome.doc()));
         };
         let Some(doc) = g.proj.txns.get(&txn).map(|t| t.doc) else {
             log::error!("agent journal: receipt names unknown transaction {}", txn.0);
@@ -135,7 +138,7 @@ fn abandon_in(
                 | RequestState::Abandoned),
             ) => (Ok(AbandonReply::Ended(s)), Then::Restart(doc)),
             Classified::Refused(s) => (Err(request.refused(s)), Then::Restart(doc)),
-            Classified::Decided(_) => (Ok(AbandonReply::Decided), Then::Restart(doc)),
+            Classified::Final(_) => (Ok(AbandonReply::Decided), Then::Restart(doc)),
         };
     }
     if let Some(digest) = g.requests.inflight_digest(id) {
