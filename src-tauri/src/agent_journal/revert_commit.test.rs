@@ -1,4 +1,4 @@
-// WI-AL2.2d — R34 commit dispatch for a hunkRevert: a revert prepared through `prepare_revert` commits through `commit_controlled` with the writer deriving its effects from the revert plan (no worker effects), survives a restart, and its revert-of-revert lands exactly; a postimage that is not the planned revert, or a certificate sent with one, is refused and ends the transaction with nothing committed
+// WI-AL2.2 (WI-AL2.2d) — R34 commit dispatch for a hunkRevert: a revert prepared through `prepare_revert` commits through `commit_controlled` with the writer deriving its effects from the revert plan (no worker effects), survives a restart, and its revert-of-revert lands exactly; a postimage that is not the planned revert, or a certificate sent with one, is refused and ends the transaction with nothing committed
 //! R34, Rust side.
 
 use serde_json::json;

@@ -1,4 +1,4 @@
-// WI-AL2.1a — The canonical diff pipeline (diff-match-patch with semantic cleanup, or the O(n) trimmed fallback → scalar-boundary repair → merge of touching changes → line-start placement of pure insertions and deletions → canonical assertion): maximal changed runs, never splitting a surrogate pair, never two changes that touch, never a same-line merge of independent changes; lone surrogates are refused INVALID_TEXT.
+// WI-AL2.1 (WI-AL2.1a) — The canonical diff pipeline (diff-match-patch with semantic cleanup, or the O(n) trimmed fallback → scalar-boundary repair → merge of touching changes → line-start placement of pure insertions and deletions → canonical assertion): maximal changed runs, never splitting a surrogate pair, never two changes that touch, never a same-line merge of independent changes; lone surrogates are refused INVALID_TEXT.
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { exactCanonicalDiff, trimmedCanonicalDiff } from "../canonicalDiff";
