@@ -473,6 +473,7 @@ jobs:
               - 'src/test/fixtures/commandErrorWire.json'
               - 'src/export/PdfExportDialog.tsx'
               - 'src/test/fixtures/mcpRequestEnvelope.json'
+              - 'src/test/fixtures/agentJournal/commentAnchorGoldens.json'
               - 'src/test/fixtures/agentJournal/legacyCheckpoints.jsonl'
               - 'src/test/fixtures/agentJournal/provenance.json'
               - 'src/test/fixtures/agentJournal/unicode.json'
