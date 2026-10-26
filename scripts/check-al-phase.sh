@@ -150,6 +150,20 @@ phase_2() {
   al_tests_cover WI-AL2.5 'bom'                           "WI-AL2.5: BOM-only save shows no hunks"
   al_tests_cover WI-AL2.5 'whitespace'                    "WI-AL2.5: a real whitespace edit shows"
   al_tests_cover "$all" 'cpuClock|measureGrowth|growthExponent' "phase 2: budgets measured with src/test/cpuClock.ts"
+  al_tests_cover WI-AL2.1b 'aZb|aZ.{0,20}Za'              "WI-AL2.1b: the aZ/Za declared-script fixture"
+  al_tests_cover WI-AL2.1b 'rotation'                     "WI-AL2.1b: rotation breaks"
+  al_test_has WI-AL2.1c '.' "WI-AL2.1c: a revert without a certificate is refused AMBIGUOUS_REVERT" \
+    'without.a.certificate' 'AMBIGUOUS_REVERT'
+  al_test_has WI-AL2.3 '.' "WI-AL2.3: the R24 ledger oracle, zero wrong" \
+    'ledgerOracle|checkLedgerCase' 'wrong.{0,30}toBe\(0\)'
+  al_tests_cover WI-AL2.3 'snapshot.?twin'                "WI-AL2.3: the snapshot twin"
+  al_test_has WI-AL2.2a '.' "WI-AL2.2a: a request id makes an admission retry-safe" 'requestId' 'admission'
+  al_tests_cover WI-AL2.2b 'STALE_REVIEW'                 "WI-AL2.2b: a stale reviewGen is refused STALE_REVIEW"
+  al_test_has WI-AL2.2b '.' "WI-AL2.2b: a refused re-apply of a reverted hunk records nothing" \
+    'cannot.be.re.?applied' 'REVERT_REFUSED'
+  al_tests_cover "WI-AL2.2c WI-AL2.2e" 'release\('      "WI-AL2.2c: a reservation release is exercised"
+  al_test_has WI-AL2.2c '.' "WI-AL2.2c: strict expectedHead, genesis included" 'expected.?head' 'genesis'
+  al_test_has WI-AL2.4 '\.webkit\.test\.tsx?$' "WI-AL2.4: 600 review rows in real WebKit" '\b600\b' 'paint|scroll'
   al_witnesses 2
   assert_exec "phase 2: lint:i18n" pnpm lint:i18n
 }
@@ -162,6 +176,12 @@ phase_3() {
   al_tests_cover WI-AL3.1a 'orphan'                       "WI-AL3.1a: deleted passage → orphaned"
   al_tests_cover WI-AL3.1a 'heading'                      "WI-AL3.1a: heading rename still resolves by context"
   al_test_has WI-AL3.1a '.' "WI-AL3.1a: CJK, emoji and RTL offsets exact" 'cjk' 'emoji' 'rtl'
+  al_tests_cover WI-AL3.1a '[a-z]\\n(=+|-{2,})\\n'          "WI-AL3.1a: setext headings"
+  al_test_has WI-AL3.1a '.' "WI-AL3.1a: widening at 4096 bytes accepted, 4097 refused" '4096' '4097'
+  al_tests_cover WI-AL3.1a 'across headings|selection.{0,20}heading' "WI-AL3.1a: a selection across headings"
+  al_tests_cover WI-AL3.1b 'commentGen|STALE_COMMENT'     "WI-AL3.1b: commentGen and STALE_COMMENT"
+  al_tests_cover WI-AL3.2 'matrix'                        "WI-AL3.2: the full state matrix"
+  al_tests_cover WI-AL3.3 'tombstone.{0,40}addresses'     "WI-AL3.3: a tombstone keeps addresses"
   al_tests_cover WI-AL3.1b 'bound|limit|too (long|many)'  "WI-AL3.1b: bound violations refused"
   al_tests_cover WI-AL3.2 'reopen'                        "WI-AL3.2: user resolve and reopen"
   al_tests_cover "$all" '<script|text only|textContent'   "phase 3: comment HTML renders as text only"
@@ -175,6 +195,11 @@ phase_3() {
     for loc in website/guide website/{de,es,fr,it,ja,ko,pt-BR,zh-CN,zh-TW}/guide; do
       assert_grep "$op" "$loc/mcp-tools.md" "WI-AL3.3: $op in $loc/mcp-tools.md"
     done
+  done
+  for op in document.write document.transform workflow.apply_patch selection.set; do
+    # Inside that operation's own object, so one schema carrying it cannot stand in for another.
+    assert_ts_code_grep "['\"]vmark\\.${op//./\\.}['\"]\\s*:\\s*z\\.object\\(\\{[^}]*\\baddresses\\b" \
+      server/mcp/src/bridge/operationSchemas.ts "WI-AL3.3: addresses on the $op schema" --keep-strings
   done
   al_witnesses 3
   assert_exec "phase 3: lint:mcp-contracts" pnpm lint:mcp-contracts

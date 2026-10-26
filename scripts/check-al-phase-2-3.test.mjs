@@ -99,3 +99,28 @@ describe("check-al-phase.sh 3 — each comment operation has a schema in code", 
     expect(line(out, "WI-AL3.3: comments.list schema"), out).toMatch(/^\s*✗/);
   });
 });
+
+describe("check-al-phase.sh 3 — addresses on each write-tool schema", () => {
+  const SCHEMAS = "server/mcp/src/bridge/operationSchemas.ts";
+  const WRITES = ["document.write", "document.transform", "workflow.apply_patch", "selection.set"];
+  const tree = (body) => {
+    const root = fixture("WI-AL3.3", []);
+    mkdirSync(path.join(root, path.dirname(SCHEMAS)), { recursive: true });
+    writeFileSync(path.join(root, SCHEMAS), body);
+    return root;
+  };
+  const schemas = (without) =>
+    `const addresses = z.array(z.string()).optional();\nexport const S = {\n${WRITES.map(
+      (op) => `  'vmark.${op}': z.object({\n    content: z.string(),\n${op === without ? "" : "    addresses,\n"}  }),\n`,
+    ).join("")}  'vmark.workflow.validate': z.object({ addresses }),\n};\n`;
+
+  it.each(WRITES)("%s with addresses in its object passes", (op) => {
+    const out = run(3, tree(schemas(null)));
+    expect(line(out, `WI-AL3.3: addresses on the ${op} schema`), out).toMatch(/^\s*✓/);
+  });
+
+  it.each(WRITES)("%s without addresses fails, though other schemas carry it", (op) => {
+    const out = run(3, tree(schemas(op)));
+    expect(line(out, `WI-AL3.3: addresses on the ${op} schema`), out).toMatch(/^\s*✗/);
+  });
+});
