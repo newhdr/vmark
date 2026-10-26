@@ -1,8 +1,8 @@
 # MCP 工具参考
 
-VMark 向 AI 助手暴露 **九个复合 MCP 工具**：`session`、`workspace`、`document`、`workflow`、`selection`、`browser`、`browser_read`、`coherence` 和 `coherence_resolve`。它们合计涵盖编辑器读写主轴、文件与窗口生命周期、CST 安全的工作流编辑、针对选区的精准编辑、受限的浏览器导航，以及对工作区一致性层的视图。
+VMark 向 AI 助手暴露 **十个复合 MCP 工具**：`session`、`workspace`、`document`、`workflow`、`selection`、`comments`、`browser`、`browser_read`、`coherence` 和 `coherence_resolve`。它们合计涵盖编辑器读写主轴、文件与窗口生命周期、CST 安全的工作流编辑、针对选区的精准编辑、受限的浏览器导航，以及对工作区一致性层的视图。
 
-九个工具中有三个——`session`、`browser_read` 和 `coherence`——声明了 `readOnlyHint: true`，因此 MCP 客户端可以自动批准它们。这也正是 `browser`/`browser_read` 与 `coherence`/`coherence_resolve` 之所以要拆成独立工具的原因：注解是**按工具**而非按操作生效的，所以一个把 ARIA 快照和 `execute_js` 捆在一起的工具，不得不对外声明 `execute_js` 的危险性。按“这个操作会不会修改任何东西？”来拆分，能让两半各自如实陈述，也让接口中真正具有破坏性的操作在工具列表里保持醒目。
+十个工具中有三个——`session`、`browser_read` 和 `coherence`——声明了 `readOnlyHint: true`，因此 MCP 客户端可以自动批准它们。这也正是 `browser`/`browser_read` 与 `coherence`/`coherence_resolve` 之所以要拆成独立工具的原因：注解是**按工具**而非按操作生效的，所以一个把 ARIA 快照和 `execute_js` 捆在一起的工具，不得不对外声明 `execute_js` 的危险性。按“这个操作会不会修改任何东西？”来拆分，能让两半各自如实陈述，也让接口中真正具有破坏性的操作在工具列表里保持醒目。
 
 之前的 12 工具 / 76 操作接口已被精简，因为文档内的格式化工具（粗体、标题、表格等）与 AI 智能体通过 Markdown 往返已经能轻松完成的工作重复。之所以保留 `selection`（依据精简方案的 ADR-7），是因为整篇文档往返在大文件上并不划算——每次编辑都要在输入 token 上付出整篇文档的代价、在输出 token 上再付出整篇文档的代价（约为输入价格的 5 倍），还要承受更长的写入窗口，从而扩大过期版本的重试循环。完整的设计取舍参见 [MCP 精简方案](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md)。
 
@@ -216,6 +216,7 @@ VMark 向 AI 助手暴露 **九个复合 MCP 工具**：`session`、`workspace`�
 | `tabId` | string | 否 | 目标标签页（默认聚焦的） |
 | `content` | string | 是 | 新的完整内容 |
 | `expected_revision` | string | 否 | 来自最近一次读取的 revision 令牌 |
+| `addresses` | string[] | 否 | 本次编辑所回应的 `comments.list` 评论 id（最多 64 个） |
 | `save` | boolean | 否 | 同时保存到磁盘（默认 `true`）；`false` 只修改标签页 |
 
 默认情况下，写入会被保存：响应中带有 `saved: true`，或者带有 `saved: false` 以及 `save_skipped`（`"untitled"`——标签页尚无文件，请使用 `save_as`；`"opt_out"`——你传入了 `save: false`）或 `save_error`（磁盘写入失败）。当目标是 Markdown 文档的活动所见即所得标签页时，文本会被加载进实时编辑器（作为一个可撤销的步骤），保存的是编辑器对它的序列化结果——同样的 Markdown，可能经过规范化，不一定与发送的字符完全一致。其他标签页按发送的文本原样保存，仅规范化换行符。
@@ -249,6 +250,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 | `tabId` | string | 否 | 目标标签页 |
 | `kind` | string | 是 | `"cjk-format"`、`"cjk-spacing"` 或 `"cjk-punctuation"` |
 | `expected_revision` | string | 否 | 并发令牌 |
+| `addresses` | string[] | 否 | 本次编辑所回应的 `comments.list` 评论 id（最多 64 个） |
 
 `cjk-format` 会按用户的 CJK 排版设置整篇执行一遍。`cjk-spacing` 在 CJK 字符与相邻拉丁字母 / 数字之间插入单个空格。`cjk-punctuation` 把贴在 CJK 字符旁边的 ASCII 标点转换为对应的全角形式。
 
@@ -279,6 +281,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 | `tabId` | string | 否 |
 | `patches` | IRPatch[] | 是 |
 | `expected_revision` | string | 否 |
+| `addresses` | string[] | 否 |
 
 `IRPatch` 是一个判别联合（以 `kind` 字段区分）。支持的 kind：
 
@@ -339,6 +342,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 | `tabId` | string | 否 |
 | `content` | string | 是 |
 | `expected_revision` | string | 否（推荐） |
+| `addresses` | string[] | 否 |
 
 替换编辑器报告的当前选区中的任何内容。**在所见即所得模式下**，纯行内文本会作为字面文本节点插入，因此前导 / 尾随空白能精确往返；带有 markdown 标记的内容（`**bold**`、`*italic*`、`` `code` ``、围栏代码、引用块、列表等）会被解析为 markdown 并作为对应的节点插入。**在源码模式下**，`content` 始终作为原始文本拼接进去——源码界面本身就是 markdown 字节。`content` 为空则删除选区。当选区折叠时，`content` 会插入到光标处。
 
@@ -347,6 +351,45 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 `STALE` 返回 `{error: "STALE", message, current_revision}`，与 `document.write` 完全一致。文档级 revision 会捕捉 `get` 与 `set` 之间发生的按键。纯粹的光标移动（不含按键）不由服务器仲裁——如果用户在 `get` 与 `set` 之间移动了光标，编辑就会落在新位置上。
 
 当用户在获得焦点的编辑器中用输入法组字时，无论是所见即所得模式还是源码模式，`set` 都会返回 `BUSY`，不做任何改动；请稍后重试。`get` 从不会因此被拒绝。
+
+---
+
+## `comments`
+
+读取并回复用户对文档的审阅评论。解决、重新打开和删除评论由用户决定：本工具没有这些操作，请求这些操作的调用会在到达 VMark 之前被拒绝。
+
+### `list`
+
+| 参数 | 类型 | 必填 |
+|------|------|------|
+| `tabId` | string | 否 |
+
+返回 `{doc, generation, threads}`。每个线程带有它的 `id`、`state`（`open`、`addressed`、`resolved` 或 `reopened`）、`commentGen`、所锚定的引用文本，以及它的回复。
+
+### `reply`
+
+| 参数 | 类型 | 必填 |
+|------|------|------|
+| `tabId` | string | 否 |
+| `commentId` | string | 是 |
+| `body` | string | 是 |
+| `expectedCommentGen` | string | 是 |
+
+向线程添加一条回复。回复 id 由 VMark 自行生成，因此重试的调用会得到第一次的结果，绝不会添加第二条回复。
+
+### `mark_addressed`
+
+| 参数 | 类型 | 必填 |
+|------|------|------|
+| `tabId` | string | 否 |
+| `commentId` | string | 是 |
+| `expectedCommentGen` | string | 是 |
+
+把线程标记为已处理。是否解决仍由用户决定。
+
+`comments.reply` 和 `comments.mark_addressed` 都要给出 `list` 返回的线程 `commentGen`。以下情况会被拒绝且不做任何改动：线程此后已变化时返回 `STALE_COMMENT`（重新 list），评论 id 格式错误或不指向本文档的评论时返回 `INVALID_COMMENT`，线程已解决或已删除时返回 `COMMENT_NOT_ALLOWED`，回复过多或正文过长时返回 `COMMENT_LIMIT`，以及日志拒绝 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE` 和 `INVALID_TEXT`。
+
+要表明一次编辑回应了某些评论，把它们的 id 作为 `addresses` 传给 `document.write`、`document.transform`、`workflow.apply_patch` 或 `selection.set`。这一关联随修订一起记录，并显示在文档历史中（之后被删除的评论显示为已删除的评论）；它不改变任何线程的状态。超过 64 个 id、重复的 id，或者未知、已删除、已解决或属于其他文档的 id，会以 `INVALID_ADDRESSES` 被拒绝，不做任何改动。
 
 ---
 

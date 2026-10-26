@@ -158,6 +158,7 @@ const CALL_BOUND = new Set([
   "comment_user_delete",
   "comment_user_list",
   "comment_agent_mark_addressed",
+  "comment_agent_list",
 ]);
 
 type Answerer = (command: string, args: Args) => Promise<unknown>;

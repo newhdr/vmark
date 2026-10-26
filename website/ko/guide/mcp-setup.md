@@ -244,7 +244,7 @@ AI 어시스턴트 <--stdio--> MCP 서버 <--WebSocket--> VMark 에디터
 
 ## 사용 가능한 기능
 
-연결되면 AI 어시스턴트는 아홉 가지 도구를 사용할 수 있습니다:
+연결되면 AI 어시스턴트는 열 가지 도구를 사용할 수 있습니다:
 
 | 도구 | 다루는 범위 |
 |------|-------------|
@@ -252,6 +252,7 @@ AI 어시스턴트 <--stdio--> MCP 서버 <--WebSocket--> VMark 에디터
 | `workspace` | 새로 만들기, 열기, 저장, 다른 이름으로 저장, 닫기, 탭 전환, 창 포커스, 워크스페이스 열기 |
 | `document` | 문서 전체를 Markdown으로 읽고 쓰기, CJK 서식 변환 |
 | `selection` | 선택한 텍스트 읽기 및 바꾸기 |
+| `comments` | 문서의 검토 댓글 나열, 답글 달기, 처리됨으로 표시 (어시스턴트는 해결할 수 없음) |
 | `workflow` | GitHub Actions YAML용 CST 안전 패치와 유효성 검사 |
 | `browser` / `browser_read` | macOS의 내장 브라우저 자동화 — 변경 작업과 읽기 전용 작업의 두 부분 |
 | `coherence` / `coherence_resolve` | 정합성 계층 읽기, 사용자가 부여한 위임 범위에서 오래된 연결 해결 |

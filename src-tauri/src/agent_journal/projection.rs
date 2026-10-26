@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::receipt::{Receipt, RequestId};
 use crate::agent_journal::comment::book::CommentBook;
+use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::ids::{BlobHash, DocId, HunkId, RevisionId, TxnId};
 use crate::agent_journal::provenance::ProvenancePayload;
 use crate::agent_journal::record::{LegacyAnchor, ObservedRef};
@@ -179,6 +180,9 @@ pub struct RevisionMeta {
     /// Unix milliseconds of the record that made the revision (a tombstone
     /// keeps its victim's).
     pub at: u64,
+    /// The comments a controlled write said it addresses (a tombstone
+    /// keeps its victim's).
+    pub addresses: Vec<CommentId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

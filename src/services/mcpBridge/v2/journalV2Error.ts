@@ -5,7 +5,9 @@
  * Key decisions:
  *   - Refusals the agent can act on keep their journal token
  *     (JOURNAL_BUSY, STALE_PARENT, JOURNAL_DEGRADED, INVALID_TEXT,
- *     REVIEW_BACKLOG_FULL). A journal that cannot record anything —
+ *     REVIEW_BACKLOG_FULL); a refused `addresses` set is INVALID_ADDRESSES,
+ *     told apart from other INVALID_REQUESTs by the field it names. A
+ *     journal that cannot record anything —
  *     not running, an I/O failure, a damaged or newer-format file, or no
  *     answer in time (nothing was applied either way) — is
  *     JOURNAL_UNAVAILABLE. Anything else is a defect: INTERNAL.
@@ -55,6 +57,11 @@ export function invalidTextError(): V2Error {
   return INVALID_TEXT;
 }
 
+/** The answer for a write whose `addresses` the journal (or the window) refused: nothing changed. */
+export function invalidAddressesError(why: string): V2Error {
+  return { error: "INVALID_ADDRESSES", message: `${why}; list the comments again and send only unresolved ones of this document` };
+}
+
 const UNAVAILABLE = new Set<JournalRefusal["journalCode"]>([
   "JOURNAL_UNAVAILABLE",
   "JOURNAL_IO",
@@ -65,6 +72,7 @@ const UNAVAILABLE = new Set<JournalRefusal["journalCode"]>([
 
 /** The answer for a write the journal refused before anything changed. */
 export function journalRefusalError(refusal: JournalRefusal): V2Error {
+  if (refusal.journalCode === "INVALID_REQUEST" && refusal.field === "addresses") return invalidAddressesError(refusal.message);
   const known = REFUSED[refusal.journalCode];
   if (known) return known;
   if (UNAVAILABLE.has(refusal.journalCode)) {

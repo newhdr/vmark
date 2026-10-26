@@ -153,6 +153,7 @@ pub(crate) fn restore_prep(req: RestorePrepareRequest) -> Result<Prep, TxnError>
         baseline_touched: req.baseline_touched,
         certificate: None,
         capture: req.capture,
+        addresses: Vec::new(),
     })
 }
 

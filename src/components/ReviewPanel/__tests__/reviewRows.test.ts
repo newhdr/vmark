@@ -25,6 +25,7 @@ const row = (revision: string, actor: JournalActor = claude()): HistoryRow => ({
   tool: null,
   restore: false,
   collected: false,
+  addresses: [],
 });
 const hunk = (hunkId: string, target: string, state: LiveHunk["state"] = "pending"): LiveHunk => ({
   hunkId,

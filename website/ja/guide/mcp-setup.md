@@ -233,7 +233,7 @@ AI Assistant <--stdio--> MCP Server <--WebSocket--> VMark Editor
 
 ## 利用可能な機能
 
-接続すると、AI アシスタントは 9 つのツールを使えます：
+接続すると、AI アシスタントは 10 個のツールを使えます：
 
 | ツール | 対象範囲 |
 |------|----------------|
@@ -241,6 +241,7 @@ AI Assistant <--stdio--> MCP Server <--WebSocket--> VMark Editor
 | `workspace` | 新規作成、開く、保存、名前を付けて保存、閉じる、タブの切り替え、ウィンドウへのフォーカス、ワークスペースを開く |
 | `document` | ドキュメント全体を Markdown として読み書き。CJK フォーマット変換 |
 | `selection` | 選択テキストの読み取りと置換 |
+| `comments` | ドキュメントのレビューコメントの一覧、返信、対応済みへの変更（アシスタントは解決できません） |
 | `workflow` | GitHub Actions YAML に対する CST セーフなパッチと検証 |
 | `browser` / `browser_read` | macOS での埋め込みブラウザの自動化——変更を行う側と読み取り専用の側 |
 | `coherence` / `coherence_resolve` | 整合性レイヤーの読み取り。あなたが付与した委任のもとで古くなったエッジを解決 |

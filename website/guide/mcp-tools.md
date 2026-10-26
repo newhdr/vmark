@@ -4,9 +4,9 @@ vmark:
 ---
 # MCP Tools Reference
 
-VMark exposes **nine composite MCP tools** to AI assistants: `session`, `workspace`, `document`, `workflow`, `selection`, `browser`, `browser_read`, `coherence`, and `coherence_resolve`. Together they cover the editor spine, file/window lifecycle, CST-safe workflow edits, targeted selection edits, bounded browser navigation, and a view of the workspace coherence layer.
+VMark exposes **ten composite MCP tools** to AI assistants: `session`, `workspace`, `document`, `workflow`, `selection`, `comments`, `browser`, `browser_read`, `coherence`, and `coherence_resolve`. Together they cover the editor spine, file/window lifecycle, CST-safe workflow edits, targeted selection edits, bounded browser navigation, and a view of the workspace coherence layer.
 
-Three of the nine — `session`, `browser_read`, and `coherence` — declare `readOnlyHint: true`, so an MCP client can auto-approve them. That is why `browser`/`browser_read` and `coherence`/`coherence_resolve` are separate tools at all: annotations are **per tool**, not per action, so a tool that bundles an ARIA snapshot with `execute_js` has to advertise the danger of `execute_js`. Splitting along "does this modify anything?" lets each half state the truth, and keeps the surface's genuinely destructive actions conspicuous in the tool list.
+Three of the ten — `session`, `browser_read`, and `coherence` — declare `readOnlyHint: true`, so an MCP client can auto-approve them. That is why `browser`/`browser_read` and `coherence`/`coherence_resolve` are separate tools at all: annotations are **per tool**, not per action, so a tool that bundles an ARIA snapshot with `execute_js` has to advertise the danger of `execute_js`. Splitting along "does this modify anything?" lets each half state the truth, and keeps the surface's genuinely destructive actions conspicuous in the tool list.
 
 The previous 12-tool / 76-action surface was pruned because in-document formatting tools (bold, headings, tables, etc.) duplicate work that AI agents already do trivially via Markdown round-trip. `selection` was kept (per ADR-7 of the pruning plan) because the full-doc round-trip is uneconomical on large files — every edit pays the whole document in input tokens, the whole document in output tokens (~5× input price), and a longer write window that widens the stale-revision retry loop. See [the MCP pruning plan](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md) for the full rationale.
 
@@ -244,6 +244,7 @@ Replace full document content.
 | `tabId` | string | No | Target tab (defaults to focused) |
 | `content` | string | Yes | New full content |
 | `expected_revision` | string | No | Revision token from the most recent read |
+| `addresses` | string[] | No | Comment ids from `comments.list` this edit answers (at most 64) |
 | `save` | boolean | No | Also save to disk (default `true`); `false` changes the tab only |
 
 By default the write is saved: the response carries `saved: true`, or `saved: false` with `save_skipped` (`"untitled"` — the tab has no file yet, use `save_as`; `"opt_out"` — you passed `save: false`) or `save_error` (the disk write failed). When the target is the active WYSIWYG tab of a Markdown document, the text is loaded into the live editor (as one undoable step), and what is saved is the editor's serialization of it — the same Markdown, possibly normalized, not necessarily the exact characters sent. Other tabs save the text as sent, line endings normalized.
@@ -277,6 +278,7 @@ Apply a deterministic rewrite. Currently supports CJK-specific transforms (full-
 | `tabId` | string | No | Target tab |
 | `kind` | string | Yes | `"cjk-format"`, `"cjk-spacing"`, or `"cjk-punctuation"` |
 | `expected_revision` | string | No | Concurrency token |
+| `addresses` | string[] | No | Comment ids from `comments.list` this edit answers (at most 64) |
 
 `cjk-format` applies the user's CJK formatting settings end-to-end. `cjk-spacing` inserts single spaces between CJK characters and adjacent Latin/digits. `cjk-punctuation` converts ASCII punctuation that sits beside CJK characters to its full-width form.
 
@@ -307,6 +309,7 @@ Apply an array of `IRPatch` objects. Patches are dispatched through VMark's CST-
 | `tabId` | string | No |
 | `patches` | IRPatch[] | Yes |
 | `expected_revision` | string | No |
+| `addresses` | string[] | No |
 
 `IRPatch` is a discriminated union (`kind` field). Supported kinds:
 
@@ -367,6 +370,7 @@ Returns:
 | `tabId` | string | No |
 | `content` | string | Yes |
 | `expected_revision` | string | No (recommended) |
+| `addresses` | string[] | No |
 
 Replaces whatever the editor reports as the current selection. **In WYSIWYG mode**, plain inline text inserts as a literal text node so leading/trailing whitespace round-trips exactly; content carrying markdown markers (`**bold**`, `*italic*`, `` `code` ``, fenced code, blockquotes, lists, etc.) is parsed as markdown and inserted as the corresponding nodes. **In source mode**, `content` is always spliced as raw text — the source surface is already markdown bytes. Empty `content` deletes the selection. When the selection is collapsed, `content` is inserted at the cursor.
 
@@ -375,6 +379,45 @@ Returns `{revision, replaced_chars, applied, durable}` on success. `replaced_cha
 `STALE` returns `{error: "STALE", message, current_revision}` exactly like `document.write`. The doc-level revision catches keystrokes between `get` and `set`. Pure cursor movement (without a keystroke) is not arbitrated by the server — if the user moved the cursor between `get` and `set`, the edit lands at the new position.
 
 `set` returns `BUSY`, changing nothing, while the user is composing text with an input method in the focused editor, in WYSIWYG or Source mode; retry shortly. `get` is never refused for this.
+
+---
+
+## `comments`
+
+Read and answer the user's review comments on a document. Resolving, reopening and deleting a comment are the user's decisions: the tool has no such action, and a call that asks for one is refused before it reaches VMark.
+
+### `list`
+
+| Parameter | Type | Required |
+|-----------|------|----------|
+| `tabId` | string | No |
+
+Returns `{doc, generation, threads}`. Each thread carries its `id`, its `state` (`open`, `addressed`, `resolved` or `reopened`), its `commentGen`, the quoted text it is anchored to, and its replies.
+
+### `reply`
+
+| Parameter | Type | Required |
+|-----------|------|----------|
+| `tabId` | string | No |
+| `commentId` | string | Yes |
+| `body` | string | Yes |
+| `expectedCommentGen` | string | Yes |
+
+Adds a reply to the thread. VMark mints the reply id itself, so a retried call is answered with the first result and never adds a second reply.
+
+### `mark_addressed`
+
+| Parameter | Type | Required |
+|-----------|------|----------|
+| `tabId` | string | No |
+| `commentId` | string | Yes |
+| `expectedCommentGen` | string | Yes |
+
+Marks the thread addressed. Whether to resolve it stays with the user.
+
+`comments.reply` and `comments.mark_addressed` both name the thread's `commentGen` as `list` returned it. They are refused, changing nothing, with `STALE_COMMENT` when the thread changed since (list again), `INVALID_COMMENT` when the comment id is malformed or names no comment of this document, `COMMENT_NOT_ALLOWED` when the thread is resolved or deleted, `COMMENT_LIMIT` when the thread has too many replies or the body is too long, and the journal refusals `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` and `INVALID_TEXT`.
+
+To say an edit answers comments, pass their ids as `addresses` to `document.write`, `document.transform`, `workflow.apply_patch` or `selection.set`. The link is recorded with the revision and shown in the document's history (a comment deleted later shows as a deleted comment); it moves no thread. More than 64 ids, a repeated id, or an id that is unknown, deleted, resolved or of another document is refused with `INVALID_ADDRESSES`, and nothing changes.
 
 ---
 

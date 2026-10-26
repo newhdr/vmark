@@ -245,7 +245,7 @@ Assistente IA <--stdio--> Server MCP <--WebSocket--> Editor VMark
 
 ## Capacità Disponibili
 
-Quando connesso, il tuo assistente IA dispone di nove strumenti:
+Quando connesso, il tuo assistente IA dispone di dieci strumenti:
 
 | Strumento | Cosa copre |
 |------|----------------|
@@ -253,6 +253,7 @@ Quando connesso, il tuo assistente IA dispone di nove strumenti:
 | `workspace` | Nuovo, apri, salva, salva con nome, chiudi, cambia scheda, porta il focus su una finestra, apri un workspace |
 | `document` | Leggere e scrivere l'intero documento come Markdown; trasformazioni di formattazione CJK |
 | `selection` | Leggere e sostituire il testo selezionato |
+| `comments` | Elencare i commenti di revisione del documento, rispondere e segnarli come gestiti (un assistente non può risolverli) |
 | `workflow` | Patch sicure per il CST e validazione per lo YAML di GitHub Actions |
 | `browser` / `browser_read` | Automazione del browser integrato su macOS — la metà che modifica e quella in sola lettura |
 | `coherence` / `coherence_resolve` | Leggere il livello di coerenza; risolvere i collegamenti obsoleti in base a una delega che hai concesso |

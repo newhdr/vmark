@@ -1,7 +1,8 @@
 /**
  * Purpose: Route the pruned MCP surface — `vmark.session.*`,
  *   `vmark.workspace.*`, `vmark.document.*`, `vmark.workflow.*`,
- *   `vmark.selection.*` and the `vmark.browser.*` tools — to their handlers. Returns `true` iff the
+ *   `vmark.selection.*`, `vmark.comments.*` and the `vmark.browser.*` tools
+ *   — to their handlers. Returns `true` iff the
  *   request type matched. Also exports SUPPORTED_TOOL_PREFIXES as the
  *   single source of truth for the routed surface — anything that
  *   enumerates supported tools (diagnostic errors, capability docs)
@@ -78,6 +79,7 @@ export const SUPPORTED_TOOL_PREFIXES = [
   "vmark.document.*",
   "vmark.workflow.*",
   "vmark.selection.*",
+  "vmark.comments.*",
   "vmark.browser.*",
 ] as const;
 
@@ -106,6 +108,12 @@ const EAGER_ROUTES = {
 
   "vmark.selection.get": handleSelectionGet,
   "vmark.selection.set": handleSelectionSet,
+
+  // Loaded on first use, like the browser cluster below: the agent comment
+  // client and its reply decoders stay out of the eagerly preloaded App chunk.
+  "vmark.comments.list": async (id, args) => (await import("./comments")).handleCommentsList(id, args),
+  "vmark.comments.reply": async (id, args) => (await import("./comments")).handleCommentsReply(id, args),
+  "vmark.comments.mark_addressed": async (id, args) => (await import("./comments")).handleCommentsMarkAddressed(id, args),
 } as const satisfies Record<string, Handler>;
 
 /**

@@ -233,7 +233,7 @@ AI Assistant <--stdio--> MCP Server <--WebSocket--> VMark Editor
 
 ## 可用功能
 
-連接後，你的 AI 助理擁有九個工具：
+連接後，你的 AI 助理擁有十個工具：
 
 | 工具 | 涵蓋範圍 |
 |------|------|
@@ -241,6 +241,7 @@ AI Assistant <--stdio--> MCP Server <--WebSocket--> VMark Editor
 | `workspace` | 新增、開啟、儲存、另存新檔、關閉、切換分頁、聚焦視窗、開啟工作區 |
 | `document` | 以 Markdown 讀寫整份文件；CJK 格式轉換 |
 | `selection` | 讀取並取代選取的文字 |
+| `comments` | 列出文件的審閱留言、回覆留言並將其標記為已處理（助理無法解決留言） |
 | `workflow` | 針對 GitHub Actions YAML 的 CST 安全修補與驗證 |
 | `browser` / `browser_read` | macOS 上的內嵌瀏覽器自動化——分別是會變更狀態與唯讀的兩半 |
 | `coherence` / `coherence_resolve` | 讀取一致性層；在你授予的委派範圍內解決過時的關聯 |

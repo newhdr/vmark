@@ -1,8 +1,8 @@
 # Referencia de herramientas MCP
 
-VMark expone **nueve herramientas MCP compuestas** a los asistentes de IA: `session`, `workspace`, `document`, `workflow`, `selection`, `browser`, `browser_read`, `coherence` y `coherence_resolve`. En conjunto cubren la columna vertebral del editor, el ciclo de vida de archivos y ventanas, las ediciones seguras a nivel de CST para flujos de trabajo, las ediciones dirigidas sobre la selección, la navegación acotada del navegador y una vista de la capa de coherencia del espacio de trabajo.
+VMark expone **diez herramientas MCP compuestas** a los asistentes de IA: `session`, `workspace`, `document`, `workflow`, `selection`, `comments`, `browser`, `browser_read`, `coherence` y `coherence_resolve`. En conjunto cubren la columna vertebral del editor, el ciclo de vida de archivos y ventanas, las ediciones seguras a nivel de CST para flujos de trabajo, las ediciones dirigidas sobre la selección, la navegación acotada del navegador y una vista de la capa de coherencia del espacio de trabajo.
 
-Tres de las nueve — `session`, `browser_read` y `coherence` — declaran `readOnlyHint: true`, de modo que un cliente MCP puede aprobarlas automáticamente. Esa es la razón por la que `browser`/`browser_read` y `coherence`/`coherence_resolve` son herramientas separadas: las anotaciones son **por herramienta**, no por acción, así que una herramienta que combina una instantánea ARIA con `execute_js` tiene que advertir del peligro de `execute_js`. Dividir según la pregunta «¿esto modifica algo?» permite que cada mitad diga la verdad y mantiene visibles en la lista de herramientas las acciones genuinamente destructivas de la superficie.
+Tres de las diez — `session`, `browser_read` y `coherence` — declaran `readOnlyHint: true`, de modo que un cliente MCP puede aprobarlas automáticamente. Esa es la razón por la que `browser`/`browser_read` y `coherence`/`coherence_resolve` son herramientas separadas: las anotaciones son **por herramienta**, no por acción, así que una herramienta que combina una instantánea ARIA con `execute_js` tiene que advertir del peligro de `execute_js`. Dividir según la pregunta «¿esto modifica algo?» permite que cada mitad diga la verdad y mantiene visibles en la lista de herramientas las acciones genuinamente destructivas de la superficie.
 
 La superficie anterior de 12 herramientas / 76 acciones se podó porque las herramientas de formato dentro del documento (negrita, encabezados, tablas, etc.) duplican un trabajo que los agentes de IA ya hacen trivialmente mediante el viaje de ida y vuelta de Markdown. Se conservó `selection` (según el ADR-7 del plan de poda) porque el viaje de ida y vuelta del documento completo resulta poco económico en archivos grandes — cada edición paga el documento entero en tokens de entrada, el documento entero en tokens de salida (~5× el precio de entrada) y una ventana de escritura más larga que amplía el bucle de reintentos por revisión obsoleta. Consulta [el plan de poda de MCP](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md) para la justificación completa.
 
@@ -239,6 +239,7 @@ Reemplaza por completo el contenido del documento.
 | `tabId` | string | No | Pestaña de destino (por defecto, la enfocada) |
 | `content` | string | Sí | Nuevo contenido completo |
 | `expected_revision` | string | No | Token de revisión de la última lectura |
+| `addresses` | string[] | No | Ids de comentarios de `comments.list` que esta edición responde (64 como máximo) |
 | `save` | boolean | No | Guardar también en el disco (predeterminado `true`); `false` solo cambia la pestaña |
 
 De forma predeterminada la escritura se guarda: la respuesta lleva `saved: true`, o `saved: false` con `save_skipped` (`"untitled"` — la pestaña aún no tiene archivo, usa `save_as`; `"opt_out"` — pasaste `save: false`) o `save_error` (la escritura en disco falló). Cuando el destino es la pestaña WYSIWYG activa de un documento Markdown, el texto se carga en el editor en vivo (como un único paso que se puede deshacer), y lo que se guarda es la serialización del editor — el mismo Markdown, posiblemente normalizado, no necesariamente los caracteres exactos enviados. Las demás pestañas guardan el texto tal como se envió, con los finales de línea normalizados.
@@ -272,6 +273,7 @@ Aplica una reescritura determinista. Actualmente admite transformaciones especí
 | `tabId` | string | No | Pestaña de destino |
 | `kind` | string | Sí | `"cjk-format"`, `"cjk-spacing"` o `"cjk-punctuation"` |
 | `expected_revision` | string | No | Token de concurrencia |
+| `addresses` | string[] | No | Ids de comentarios de `comments.list` que esta edición responde (64 como máximo) |
 
 `cjk-format` aplica de extremo a extremo la configuración de formato CJK del usuario. `cjk-spacing` inserta un espacio único entre los caracteres CJK y los caracteres latinos o dígitos adyacentes. `cjk-punctuation` convierte la puntuación ASCII contigua a caracteres CJK a su forma de ancho completo.
 
@@ -302,6 +304,7 @@ Aplica un array de objetos `IRPatch`. Los parches se despachan a través de los 
 | `tabId` | string | No |
 | `patches` | IRPatch[] | Sí |
 | `expected_revision` | string | No |
+| `addresses` | string[] | No |
 
 `IRPatch` es una unión discriminada (campo `kind`). Tipos admitidos:
 
@@ -362,6 +365,7 @@ Devuelve:
 | `tabId` | string | No |
 | `content` | string | Sí |
 | `expected_revision` | string | No (recomendado) |
+| `addresses` | string[] | No |
 
 Reemplaza lo que el editor informe como la selección actual. **En modo WYSIWYG**, el texto en línea plano se inserta como un nodo de texto literal, de modo que los espacios en blanco iniciales/finales se conservan exactamente; el contenido que lleva marcadores de markdown (`**bold**`, `*italic*`, `` `code` ``, código en bloque, citas, listas, etc.) se interpreta como markdown y se inserta como los nodos correspondientes. **En modo fuente**, `content` siempre se inserta como texto en bruto — la superficie de fuente ya son bytes de markdown. Un `content` vacío elimina la selección. Cuando la selección está colapsada, `content` se inserta en la posición del cursor.
 
@@ -370,6 +374,45 @@ Devuelve `{revision, replaced_chars, applied, durable}` en caso de éxito. `repl
 `STALE` devuelve `{error: "STALE", message, current_revision}` exactamente como `document.write`. La revisión a nivel de documento detecta las pulsaciones de tecla entre `get` y `set`. El puro movimiento del cursor (sin una pulsación) no lo arbitra el servidor — si el usuario movió el cursor entre `get` y `set`, la edición se aplica en la nueva posición.
 
 `set` devuelve `BUSY`, sin cambiar nada, mientras el usuario compone texto con un método de entrada en el editor enfocado, ya sea en modo WYSIWYG o en modo Fuente; reintenta en breve. `get` nunca se rechaza por esto.
+
+---
+
+## `comments`
+
+Lee y responde los comentarios de revisión del usuario sobre un documento. Resolver, reabrir y eliminar un comentario son decisiones del usuario: la herramienta no tiene esas acciones, y una llamada que pida una se rechaza antes de llegar a VMark.
+
+### `list`
+
+| Parámetro | Tipo | Requerido |
+|-----------|------|-----------|
+| `tabId` | string | No |
+
+Devuelve `{doc, generation, threads}`. Cada hilo lleva su `id`, su `state` (`open`, `addressed`, `resolved` o `reopened`), su `commentGen`, el texto citado al que está anclado y sus respuestas.
+
+### `reply`
+
+| Parámetro | Tipo | Requerido |
+|-----------|------|-----------|
+| `tabId` | string | No |
+| `commentId` | string | Sí |
+| `body` | string | Sí |
+| `expectedCommentGen` | string | Sí |
+
+Añade una respuesta al hilo. VMark genera el id de la respuesta, así que una llamada reintentada recibe el primer resultado y nunca añade una segunda respuesta.
+
+### `mark_addressed`
+
+| Parámetro | Tipo | Requerido |
+|-----------|------|-----------|
+| `tabId` | string | No |
+| `commentId` | string | Sí |
+| `expectedCommentGen` | string | Sí |
+
+Marca el hilo como atendido. Resolverlo sigue siendo decisión del usuario.
+
+`comments.reply` y `comments.mark_addressed` indican ambos el `commentGen` del hilo tal como lo devolvió `list`. Se rechazan sin cambiar nada con `STALE_COMMENT` cuando el hilo cambió desde entonces (vuelve a listar), `INVALID_COMMENT` cuando el id del comentario está mal formado o no corresponde a ningún comentario de este documento, `COMMENT_NOT_ALLOWED` cuando el hilo está resuelto o eliminado, `COMMENT_LIMIT` cuando el hilo tiene demasiadas respuestas o el texto es demasiado largo, y con los rechazos del diario `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` e `INVALID_TEXT`.
+
+Para indicar que una edición responde a comentarios, pasa sus ids como `addresses` a `document.write`, `document.transform`, `workflow.apply_patch` o `selection.set`. El vínculo se guarda con la revisión y se muestra en el historial del documento (un comentario eliminado después aparece como comentario eliminado); no mueve ningún hilo. Más de 64 ids, un id repetido o un id desconocido, eliminado, resuelto o de otro documento se rechaza con `INVALID_ADDRESSES`, y nada cambia.
 
 ---
 

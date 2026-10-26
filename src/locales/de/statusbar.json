@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "Stand vor dieser Änderung wiederherstellen",
   "mcpHistoryRestoredVersion": "Die gewählte Version wurde wiederhergestellt",
   "mcpHistoryTextCollected": "Text nicht mehr aufbewahrt",
+  "mcpHistoryAddressed": "Behandelte Kommentare",
+  "mcpHistoryAddressedDeleted": "gelöschter Kommentar",
   "mcpHistoryRestoreTag": "Wiederherstellung",
   "mcpHistoryKindControlled": "Aufgezeichneter Schreibvorgang",
   "mcpHistoryKindObserved": "Beim Speichern gefundene Bearbeitung",

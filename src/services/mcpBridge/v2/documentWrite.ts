@@ -49,7 +49,8 @@ import { useDocumentStore } from "@/stores/documentStore";
 import { wrapHandler } from "./wrapHandler";
 import { saveTabForBridge } from "./bridgeSave";
 import { liveCompositionRefusal, recoverLiveWysiwyg } from "./liveEditor";
-import { readOperationArgs } from "./readOperationArgs";
+import { readOperationArgsChecked } from "./readOperationArgs";
+import { requireAddresses } from "./writeAddresses";
 import { requireCurrentRevision, requireTab, resolveKind, structuredError } from "./tabGuard";
 import { writeContent } from "./writeContent";
 import { invalidTextError } from "./journalV2Error";
@@ -94,7 +95,8 @@ async function saveAfterWrite(
 /**
  * Handle `vmark.document.write`.
  *
- * Args: `{tabId?, content: string, expected_revision?: string, save?: boolean}`.
+ * Args: `{tabId?, content: string, expected_revision?: string, save?: boolean,
+ * addresses?: string[]}`.
  *
  * `save` defaults to `true`: after the buffer is updated it is saved
  * through the app's save pipeline, which clears the dirty flag. Untitled
@@ -113,7 +115,10 @@ export async function handleDocumentWrite(
   context: McpWriteContext,
 ): Promise<void> {
   return wrapHandler(id, async () => {
-    const wire = readOperationArgs("vmark.document.write", args);
+    const checked = readOperationArgsChecked("vmark.document.write", args);
+    const { wire } = checked;
+    const addressed = await requireAddresses(id, checked);
+    if (!addressed) return;
     if (wire.content === undefined) {
       await structuredError(id, { error: "INTERNAL", message: "content must be a string" });
       return;
@@ -143,6 +148,7 @@ export async function handleDocumentWrite(
       requireFocus: !wire.tabId,
       tool: "document.write",
       target: content,
+      ...addressed,
       context,
       apply: () => {
         const result = writeContent(tab.tabId, content, writeKind);

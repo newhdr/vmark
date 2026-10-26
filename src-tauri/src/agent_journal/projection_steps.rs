@@ -192,6 +192,7 @@ impl Projection {
             kind: l.kind,
             collected: false,
             at: recorded_at,
+            addresses: Vec::new(),
         };
         self.add_revision(meta, &ReviewOp::None, l.effects)?;
         if let Some(d) = self.docs.get_mut(&obs.doc) {

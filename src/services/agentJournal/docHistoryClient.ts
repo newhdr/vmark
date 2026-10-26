@@ -19,6 +19,9 @@
  *     and a blocked hunk has no span: the panel must not place it.
  *   - A blocked hunk's `lastCertified` stays `null` when the journal has
  *     none; the panel must not invent a location for it.
+ *   - A row's `addresses` are the comments its write said it addressed;
+ *     `deleted` is the journal's answer (no longer held, or deleted), read
+ *     under the same lock as the rows: the panel never looks the id up.
  *
  * @coordinates-with src-tauri/src/agent_journal/controller_doc_history.rs — the reply
  * @module services/agentJournal/docHistoryClient
@@ -76,6 +79,14 @@ export interface HistoryRow {
   restore: boolean;
   /** Its text was collected by retention; it cannot be restored. */
   collected: boolean;
+  /** The comments its write said it addressed, in the order sent. */
+  addresses: AddressedComment[];
+}
+
+/** A comment a write said it addressed; `deleted` once the journal no longer holds it. */
+interface AddressedComment {
+  comment: string;
+  deleted: boolean;
 }
 
 export interface BlockedHunk {
@@ -105,6 +116,11 @@ const COMMAND = "agent_journal_history";
 
 const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => typeof v === "string" && (list as readonly string[]).includes(v);
 
+function addressOf(a: unknown): AddressedComment {
+  if (!isObject(a) || !isString(a.comment) || typeof a.deleted !== "boolean") throw malformed(COMMAND);
+  return { comment: a.comment, deleted: a.deleted };
+}
+
 function rowOf(r: unknown): HistoryRow {
   if (!isObject(r)) throw malformed(COMMAND);
   const actor = parseJournalActor(r.actor);
@@ -119,7 +135,8 @@ function rowOf(r: unknown): HistoryRow {
     initiator === undefined ||
     !isNullableString(r.tool) ||
     typeof r.restore !== "boolean" ||
-    typeof r.collected !== "boolean"
+    typeof r.collected !== "boolean" ||
+    !Array.isArray(r.addresses)
   ) {
     throw malformed(COMMAND);
   }
@@ -134,6 +151,7 @@ function rowOf(r: unknown): HistoryRow {
     tool: r.tool,
     restore: r.restore,
     collected: r.collected,
+    addresses: r.addresses.map(addressOf),
   };
 }
 

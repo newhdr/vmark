@@ -1,4 +1,4 @@
-// WI-AL3.2 — the comment_user_* and comment_agent_* command families through real IPC dispatch: every cell of R36's matrix through the command a webview would call (an allowed cell moves the thread, a refused one is COMMENT_NOT_ALLOWED, and an agent resolve, reopen or delete has no command at all; every refusal appends nothing); the caller recorded is the family's, never a request field (a forged caller or actor is INVALID_REQUEST); the split: the agent family is exactly create, reply and markAddressed, and its module never names the user handle; and the user list, resolve, reopen and delete replies travel in their callId envelopes
+// WI-AL3.2 — the comment_user_* and comment_agent_* command families through real IPC dispatch: every cell of R36's matrix through the command a webview would call (an allowed cell moves the thread, a refused one is COMMENT_NOT_ALLOWED, and an agent resolve, reopen or delete has no command at all; every refusal appends nothing); the caller recorded is the family's, never a request field (a forged caller or actor is INVALID_REQUEST); the split: the agent family is exactly create, reply, markAddressed and the read-only list (WI-AL3.3), and its module never names the user handle; and the user list, resolve, reopen and delete replies travel in their callId envelopes
 //! Gated off Windows, where `tauri::test` does not exist.
 
 use serde_json::{json, Value};
@@ -34,6 +34,7 @@ fn app() -> App {
             commands_agent::comment_agent_create,
             commands_agent::comment_agent_reply,
             commands_agent::comment_agent_mark_addressed,
+            commands_agent::comment_agent_list,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build mock app");
@@ -238,7 +239,7 @@ fn the_caller_is_the_family_and_a_forged_caller_or_actor_is_refused() {
 }
 
 #[test]
-fn the_agent_family_is_exactly_create_reply_and_mark_addressed() {
+fn the_agent_family_is_exactly_create_reply_mark_addressed_and_list() {
     let registry = include_str!("../command_registry.rs");
     let registered = |prefix: &str| -> Vec<&str> {
         let mut names: Vec<&str> = registry
@@ -254,6 +255,7 @@ fn the_agent_family_is_exactly_create_reply_and_mark_addressed() {
         registered("comment_agent_"),
         [
             "comment_agent_create",
+            "comment_agent_list",
             "comment_agent_mark_addressed",
             "comment_agent_reply"
         ]
@@ -286,8 +288,15 @@ fn the_agent_family_is_exactly_create_reply_and_mark_addressed() {
         !code(user_src).contains("comments_agent"),
         "the user family reaches the agent handle"
     );
-    assert_eq!(code(agent_src).matches("#[tauri::command]").count(), 3);
-    assert_eq!(code(agent_src).matches("comments_agent()").count(), 3);
+    assert_eq!(code(agent_src).matches("#[tauri::command]").count(), 4);
+    assert_eq!(code(agent_src).matches("comments_agent()").count(), 4);
+    for verb in ["resolve", "reopen", "delete"] {
+        let name = format!("comment_agent_{verb}");
+        assert!(
+            !code(agent_src).contains(&name),
+            "the agent family has {name}"
+        );
+    }
     assert_eq!(code(user_src).matches("comments_user()").count(), 7);
 }
 
@@ -318,4 +327,20 @@ fn a_journal_that_is_not_ready_refuses_every_comment_command() {
     )
     .expect_err("not ready");
     assert_eq!(err["detail"]["journalCode"], "JOURNAL_UNAVAILABLE", "{err}");
+}
+
+#[test]
+fn the_agent_list_replies_as_the_user_list_does() {
+    let a = app();
+    let page = a.page("doc-a", 1);
+    create(&a, &page, CommentCaller::Agent).expect("agent create");
+    let payload = json!({ "docKey": KEY, "text": TEXT }).to_string();
+    let out = invoke_from(
+        &page.win,
+        "comment_agent_list",
+        json!({ "payload": payload, "callId": CALL }),
+    )
+    .expect("agent list");
+    assert_eq!(out["bind"], json!({ "callId": CALL }));
+    assert_eq!(out["reply"], list(&page.win, TEXT));
 }

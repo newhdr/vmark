@@ -21,6 +21,7 @@ export const JOURNAL_REFUSAL_CODES = [
   'JOURNAL_UNAVAILABLE',
   'INVALID_TEXT',
   'REVIEW_BACKLOG_FULL',
+  'INVALID_ADDRESSES',
   'ABORTED',
 ] as const;
 
@@ -29,5 +30,6 @@ export const JOURNAL_REFUSALS =
   'Refusals that change nothing: JOURNAL_BUSY (another write to the document is being recorded — retry shortly), ' +
   'STALE_PARENT (another window wrote the document — re-read and retry), JOURNAL_DEGRADED, JOURNAL_UNAVAILABLE, ' +
   'INVALID_TEXT (lone UTF-16 surrogate), REVIEW_BACKLOG_FULL (too many unreviewed AI changes on the document — ask the user to review them; retrying will not help), ' +
+  'INVALID_ADDRESSES (an `addresses` id is malformed, repeated, unknown, deleted, resolved or of another document, or there are more than 64 — list the comments again), ' +
   'and ABORTED with `reason` edited/closed/composing/selection/applyRefused (the first four: the user acted on the document while the write was being recorded — re-read and retry; applyRefused: the editor did not accept the content). ' +
   'An INTERNAL error with `applied: true` is not a refusal: the edit changed the document before the editor failed, and that text was recorded (`durable`, `current_revision`) — re-read before writing again.';

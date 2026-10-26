@@ -26,6 +26,7 @@
  *
  * @coordinates-with tabGuard.ts — tab resolution, the flush, INVALID_TAB and STALE
  * @coordinates-with journaledEdit.ts — the journal protocol `apply_patch` runs (a whole-document barrier)
+ * @coordinates-with writeAddresses.ts — the `addresses` shape check; the journal checks the set
  * @coordinates-with lib/ghaWorkflow/save/cstParser.ts — parseAsCst / stringifyCst
  * @coordinates-with lib/ghaWorkflow/save/mutators.ts — applyPatch + IRPatch types
  * @coordinates-with lib/ghaWorkflow/lint/actionlint.ts — lintWithActionlint
@@ -44,7 +45,8 @@ import { lintWithActionlint } from "@/lib/ghaWorkflow/lint/actionlint";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { respond } from "@/services/mcpBridge/utils";
 import { wrapHandler } from "./wrapHandler";
-import { readOperationArgs } from "./readOperationArgs";
+import { readOperationArgs, readOperationArgsChecked } from "./readOperationArgs";
+import { requireAddresses } from "./writeAddresses";
 import {
   requireCurrentRevision,
   requireTab,
@@ -122,7 +124,7 @@ async function requireWorkflowTab(
 /**
  * Handle `vmark.workflow.apply_patch`.
  *
- * Args: `{tabId?, patches: IRPatch[], expected_revision?}`.
+ * Args: `{tabId?, patches: IRPatch[], expected_revision?, addresses?}`.
  *
  * Runs through the edit journal's controlled-mutation protocol
  * (`journaledEdit.ts`) and answers `applied` + `durable`; `context` is the
@@ -134,7 +136,10 @@ export async function handleWorkflowApplyPatch(
   context: McpWriteContext,
 ): Promise<void> {
   return wrapHandler(id, async () => {
-    const wire = readOperationArgs("vmark.workflow.apply_patch", args);
+    const checked = readOperationArgsChecked("vmark.workflow.apply_patch", args);
+    const { wire } = checked;
+    const addressed = await requireAddresses(id, checked);
+    if (!addressed) return;
 
     const patchesOrError = validatePatches(wire.patches);
     if (!Array.isArray(patchesOrError)) {
@@ -183,6 +188,7 @@ export async function handleWorkflowApplyPatch(
       requireFocus: !wire.tabId,
       tool: "workflow.apply_patch",
       target: nextContent,
+      ...addressed,
       context,
       apply: () => {
         useDocumentStore.getState().setEditorContent(tab.tabId, nextContent);

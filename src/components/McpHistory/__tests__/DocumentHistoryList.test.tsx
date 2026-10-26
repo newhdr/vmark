@@ -1,5 +1,6 @@
 // WI-AL1.7 — the document's revision list: each row shows who made it (provider, connection and session label; the four principal states distinct), its kind and tool; "Restore this version" restores the row's revision and "Restore to before this change" its parent, neither offered when that text was collected, there is no parent, or the parent row is not listed; a save another actor asked for names that initiator; blocked hunks read "Blocked: reason (origin)" under their last certified revision, which is highlighted, or say the location is unavailable when the journal has none; an unreadable history says so; a truncated list says older revisions are not shown; one restore at a time
 // WI-AL2.1b — every live hunk is listed as the writer persisted it: one row per hunk under the revision that made it, with its kind, its state in words and its target range as a neutral position, touching hunks never merged; hunks of revisions the list does not show are listed apart; the writer's own doc-history reply for ab12cd → aX12Yd and a human insert (the golden fixture the Rust controller test checks) renders its two runs as two rows
+// WI-AL3.3 — a revision whose write addressed comments lists them under it, an addressed comment the journal no longer holds as "deleted comment"; a row that addressed none lists nothing
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -28,6 +29,7 @@ const row = (revision: string, over: Partial<HistoryRow> = {}): HistoryRow => ({
   tool: "document.write",
   restore: false,
   collected: false,
+  addresses: [],
   ...over,
 });
 
@@ -284,6 +286,18 @@ describe("DocumentHistoryList", () => {
     render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ hunks, truncated: true })} failed={false} />);
     const older = screen.getByRole("list", { name: /changes in revisions not shown/i });
     expect(within(older).getByText("Too complex to split (pending), position 3–3")).toBeInTheDocument();
+  });
+
+  it("lists the comments a revision addressed, a deleted one as deleted comment", () => {
+    const addresses = [
+      { comment: "c7", deleted: false },
+      { comment: "c3", deleted: true },
+    ];
+    const rows = [row("r2", { parent: "r1", addresses }), row("r1")];
+    render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history({ rows })} failed={false} />);
+    const list = within(rowOf("r2")).getByRole("list", { name: "Addressed comments" });
+    expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["c7", "deleted comment"]);
+    expect(within(rowOf("r1")).queryByRole("list", { name: "Addressed comments" })).toBeNull();
   });
 
   it("says when older revisions are not shown", () => {

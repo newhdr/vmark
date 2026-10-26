@@ -50,6 +50,7 @@
  *
  * @coordinates-with documentWrite.ts — the write handler
  * @coordinates-with journaledEdit.ts — the journal protocol both mutators run
+ * @coordinates-with writeAddresses.ts — the `addresses` shape check; the journal checks the set
  * @coordinates-with writeContent.ts — the whole-document replace both mutators use
  * @coordinates-with tabGuard.ts — tab resolution, the flush, INVALID_TAB and STALE
  * @coordinates-with liveEditor.ts — the mounted WYSIWYG editor ↔ store seam
@@ -69,7 +70,8 @@ import { wrapHandler } from "./wrapHandler";
 import { writeContent } from "./writeContent";
 import { runJournaledEdit } from "./journaledEdit";
 import { liveCompositionRefusal, recoverLiveWysiwyg } from "./liveEditor";
-import { readOperationArgs } from "./readOperationArgs";
+import { readOperationArgs, readOperationArgsChecked } from "./readOperationArgs";
+import { requireAddresses } from "./writeAddresses";
 import { requireCurrentRevision, requireTab, resolveTab, structuredError } from "./tabGuard";
 import {
   applyTransform,
@@ -132,7 +134,7 @@ export async function handleDocumentRead(
  * Handle `vmark.document.transform`.
  *
  * Args: `{tabId?, kind: "cjk-format" | "cjk-spacing" | "cjk-punctuation",
- * expected_revision?}`.
+ * expected_revision?, addresses?}`.
  *
  * Runs through the edit journal's controlled-mutation protocol
  * (`journaledEdit.ts`) and answers `applied` + `durable`; `context` is the
@@ -144,7 +146,10 @@ export async function handleDocumentTransform(
   context: McpWriteContext,
 ): Promise<void> {
   return wrapHandler(id, async () => {
-    const wire = readOperationArgs("vmark.document.transform", args);
+    const checked = readOperationArgsChecked("vmark.document.transform", args);
+    const { wire } = checked;
+    const addressed = await requireAddresses(id, checked);
+    if (!addressed) return;
     const { kind } = wire;
     if (!isTransformKind(kind)) {
       await structuredError(id, {
@@ -175,6 +180,7 @@ export async function handleDocumentTransform(
       requireFocus: !wire.tabId,
       tool: "document.transform",
       target: transformed,
+      ...addressed,
       context,
       apply: () => {
         const result = writeContent(tab.tabId, transformed, tab.kind);

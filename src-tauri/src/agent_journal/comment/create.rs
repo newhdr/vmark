@@ -92,6 +92,7 @@ pub(crate) fn create_prep(
             baseline_touched: req.baseline_touched,
             certificate: None,
             capture: None,
+            addresses: Vec::new(),
         },
         selection: req.selection,
         body: req.body,

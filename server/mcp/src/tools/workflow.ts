@@ -16,8 +16,10 @@ import { VMarkMcpServer } from '../server.js';
 import { JOURNAL_REFUSALS } from './journalRefusals.js';
 import { bridgeErrorResult } from './staleError.js';
 import {
+  addressesSchema,
   optionalIdSchema,
   optionalRevisionSchema,
+  readOptionalAddresses,
   readOptionalId,
   readOptionalRevision,
 } from './toolArgs.js';
@@ -69,6 +71,7 @@ export function registerWorkflowTool(server: VMarkMcpServer): void {
         expected_revision: optionalRevisionSchema(
           'Optimistic-concurrency token from the most recent read (apply_patch only).',
         ),
+        addresses: addressesSchema(),
       },
     },
     async (args) => {
@@ -87,12 +90,15 @@ export function registerWorkflowTool(server: VMarkMcpServer): void {
         const revision = readOptionalRevision(args.expected_revision);
         if (!revision.ok) return VMarkMcpServer.errorResult(revision.error);
         const expected_revision = revision.value;
+        const addressed = readOptionalAddresses(args.addresses);
+        if (!addressed.ok) return VMarkMcpServer.errorResult(addressed.error);
         try {
           const data = await server.sendBridgeRequest({
             type: 'vmark.workflow.apply_patch',
             tabId,
             patches: args.patches,
             expected_revision,
+            ...(addressed.value ? { addresses: addressed.value } : {}),
           });
           return VMarkMcpServer.successJsonResult(data);
         } catch (error) {

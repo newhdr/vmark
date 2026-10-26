@@ -30,6 +30,7 @@ const V2_ROOT = resolve(import.meta.dirname, "..");
 
 /** Handlers that act on a DOCUMENT: each resolves it through the tab guard. */
 const DOCUMENT_HANDLERS = [
+  "comments.ts",
   "document.ts",
   "documentWrite.ts",
   "selection.ts",
@@ -85,7 +86,7 @@ describe.each(ALL_HANDLERS)("%s stays on the shared contract", (file) => {
   });
 
   it("reads its payload with readOperationArgs, never straight off args", () => {
-    expect(source).toContain("readOperationArgs(");
+    expect(source).toMatch(/readOperationArgs(Checked)?\(/);
     // `args` may only be handed on whole; `args.field`, `args?.field` and
     // `args[field]` are hand-written reads.
     expect(source).not.toMatch(/\bargs\s*(\?\.|\.|\[)/);

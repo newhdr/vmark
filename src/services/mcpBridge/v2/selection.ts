@@ -52,6 +52,7 @@
  * @coordinates-with tabGuard.ts — focused-tab resolution, INVALID_TAB and STALE
  * @coordinates-with liveEditor.ts — the flush that keeps the returned revision current
  * @coordinates-with journaledEdit.ts — the journal protocol `set` runs
+ * @coordinates-with writeAddresses.ts — the `addresses` shape check; the journal checks the set
  * @coordinates-with services/agentJournal/collectors/wysiwyg/wysiwygCertificate.ts — the WYSIWYG commit certificate
  * @coordinates-with stores/documentStore/revision.ts — optimistic concurrency
  * @module services/mcpBridge/v2/selection
@@ -62,7 +63,8 @@ import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
 import { respond } from "@/services/mcpBridge/utils";
 import { wrapHandler } from "./wrapHandler";
 import { flushLiveEditors } from "./liveEditor";
-import { readOperationArgs } from "./readOperationArgs";
+import { readOperationArgs, readOperationArgsChecked } from "./readOperationArgs";
+import { requireAddresses } from "./writeAddresses";
 import { resolveSelectionSurface, type SelectionSurface } from "./selectionSurface";
 import { requireCurrentRevision, requireTab, structuredError, type GuardedTab } from "./tabGuard";
 import { runJournaledEdit } from "./journaledEdit";
@@ -152,15 +154,20 @@ interface PreparedSelectionSet {
   tab: GuardedTab;
   surface: SelectionSurface;
   content: string;
+  /** The comments the write addresses, to spread into its journaled edit. */
+  addressed: { addresses?: string[] };
 }
 
 /**
- * Admit a `set` request, in order: payload, focused tab, editor surface,
- * expected revision, composition, well-formed text. Answers the first
+ * Admit a `set` request, in order: payload and its addresses, focused tab,
+ * editor surface, expected revision, composition, well-formed text. Answers the first
  * refusal itself and returns null; nothing has changed either way.
  */
 async function prepareSelectionSet(id: string, args: Record<string, unknown>): Promise<PreparedSelectionSet | null> {
-  const wire = readOperationArgs("vmark.selection.set", args);
+  const checked = readOperationArgsChecked("vmark.selection.set", args);
+  const { wire } = checked;
+  const addressed = await requireAddresses(id, checked);
+  if (!addressed) return null;
   if (wire.content === undefined) {
     await structuredError(id, { error: "INTERNAL", message: "content must be a string" });
     return null;
@@ -180,13 +187,13 @@ async function prepareSelectionSet(id: string, args: Record<string, unknown>): P
     await structuredError(id, refusal);
     return null;
   }
-  return { tab, surface, content: wire.content };
+  return { tab, surface, content: wire.content, addressed };
 }
 
 /**
  * Handle `vmark.selection.set`.
  *
- * Args: `{tabId?, content: string, expected_revision?: string}`.
+ * Args: `{tabId?, content: string, expected_revision?: string, addresses?: string[]}`.
  *
  * Runs through the edit journal's controlled-mutation protocol
  * (`journaledEdit.ts`) and answers `applied` + `durable`; `context` is the
@@ -201,7 +208,7 @@ export async function handleSelectionSet(
   return wrapHandler(id, async () => {
     const prepared = await prepareSelectionSet(id, args);
     if (!prepared) return;
-    const { tab, surface, content } = prepared;
+    const { tab, surface, content, addressed } = prepared;
     const selectedText = surface.selectedText();
     if (!surface.wouldChange(content)) {
       // A provable no-op (an empty selection deleted, or the selection
@@ -230,6 +237,7 @@ export async function handleSelectionSet(
       // or not the request named it.
       requireFocus: true,
       tool: "selection.set",
+      ...addressed,
       ...(change ? { change } : {}),
       ...(certify ? { certify } : {}),
       context,

@@ -254,6 +254,7 @@ pub(crate) fn end_owned_in(w: &Writer, g: &mut Inner, txn: TxnId) -> OwnedEnd {
             | TxnError::Request(_)
             | TxnError::InvalidRequest(_)
             | TxnError::InvalidProvenance(_)
+            | TxnError::InvalidAddresses(_)
             | TxnError::InvalidText(_)
             | TxnError::CommentAnchorTooLong { .. }
             | TxnError::StaleComment { .. }

@@ -25,6 +25,7 @@ use crate::agent_journal::admission::requests::Requests;
 use crate::agent_journal::blob_store::BlobStore;
 use crate::agent_journal::capture_seq::CaptureSeqs;
 use crate::agent_journal::codec;
+use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::faults::Faults;
 use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
@@ -86,6 +87,8 @@ pub(crate) struct Inner {
     pub(crate) uncertified_fallbacks: u64,
     /// Request ids in flight or fenced, and transaction owners (`requests`).
     pub(crate) requests: Requests,
+    /// The addresses of each open prepare, until its terminal record.
+    pub(crate) addresses: HashMap<TxnId, Vec<CommentId>>,
 }
 
 impl Inner {
@@ -191,6 +194,7 @@ impl Writer {
                 capture_seqs: CaptureSeqs::default(),
                 uncertified_fallbacks: 0,
                 requests: Requests::default(),
+                addresses: HashMap::new(),
             }),
             subscribers: Mutex::new(Vec::new()),
             faults: cfg.faults,

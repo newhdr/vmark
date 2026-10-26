@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "還原到此變更之前",
   "mcpHistoryRestoredVersion": "已還原所選版本",
   "mcpHistoryTextCollected": "文字已不再保留",
+  "mcpHistoryAddressed": "已處理的評論",
+  "mcpHistoryAddressedDeleted": "已刪除的評論",
   "mcpHistoryRestoreTag": "還原",
   "mcpHistoryKindControlled": "已記錄的寫入",
   "mcpHistoryKindObserved": "儲存時發現的編輯",

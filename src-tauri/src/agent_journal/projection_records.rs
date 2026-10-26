@@ -7,6 +7,7 @@
 //! dispatches by kind); any other record is an invariant error, not a
 //! panic.
 
+use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, TxnId};
 use crate::agent_journal::projection::*;
@@ -81,8 +82,12 @@ impl Projection {
                 postimage,
                 resolves,
                 effects,
+                addresses,
                 ..
-            } => self.apply_committed(env, (seq, txn), postimage, *resolves, effects)?,
+            } => {
+                let ends = (postimage, *resolves);
+                self.apply_committed(env, (seq, txn), ends, effects, addresses)?
+            }
             _ => return Err(misrouted("transaction")),
         }
         Ok(())
@@ -96,9 +101,9 @@ impl Projection {
         &mut self,
         env: &Envelope,
         (seq, txn): (u64, TxnId),
-        postimage: &BlobHash,
-        resolves: Option<TxnId>,
+        (postimage, resolves): (&BlobHash, Option<TxnId>),
         effects: &ReviewEffects,
+        addresses: &[CommentId],
     ) -> Result<(), TxnError> {
         let t = self
             .txns
@@ -132,6 +137,7 @@ impl Projection {
             kind: RevisionKind::Controlled,
             collected: false,
             at: env.at,
+            addresses: addresses.to_vec(),
         };
         self.add_revision(meta, &t.review_op, effects)?;
         if let Some(r) = resolves {
@@ -160,6 +166,7 @@ impl Projection {
             hunks,
             transitions,
             attached_to,
+            addresses,
         } = &env.record
         else {
             return Err(misrouted("tombstone"));
@@ -187,6 +194,7 @@ impl Projection {
             kind: RevisionKind::Tombstone,
             collected: true,
             at: env.at,
+            addresses: addresses.clone(),
         };
         let effects = ReviewEffects {
             new_hunks: hunks.clone(),

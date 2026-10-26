@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "この変更の前の状態に復元",
   "mcpHistoryRestoredVersion": "選択した版を復元しました",
   "mcpHistoryTextCollected": "テキストは保持されていません",
+  "mcpHistoryAddressed": "対応したコメント",
+  "mcpHistoryAddressedDeleted": "削除されたコメント",
   "mcpHistoryRestoreTag": "復元",
   "mcpHistoryKindControlled": "記録された書き込み",
   "mcpHistoryKindObserved": "保存時に見つかった編集",

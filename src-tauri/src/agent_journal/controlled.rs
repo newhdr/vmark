@@ -29,6 +29,7 @@ use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
 use crate::agent_journal::admission::receipt::{Outcome, PayloadDigest, PreparedResponse};
 use crate::agent_journal::capture_seq::CaptureId;
+use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance::{Certificate, ProvenancePayload};
@@ -90,6 +91,7 @@ pub(crate) fn controlled_prep(req: ControlledPrepareRequest) -> Result<Prep, Txn
         baseline_touched: req.baseline_touched,
         certificate: req.certificate,
         capture: req.capture,
+        addresses: req.addresses,
     })
 }
 
@@ -113,6 +115,8 @@ pub(crate) struct Prep {
     pub(crate) certificate: Option<Certificate>,
     /// The provenance capture the window froze for this prepare.
     pub(crate) capture: Option<CaptureId>,
+    /// The comments the write says it addresses (`comment::addresses`).
+    pub(crate) addresses: Vec<CommentId>,
 }
 
 /// Linearize the oldest pending observation of `doc` with the effects the

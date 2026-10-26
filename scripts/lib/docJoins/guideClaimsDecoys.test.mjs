@@ -81,7 +81,7 @@ describe("a decoy declaration does not stand in for the drifted real one", () =>
       const registry = span(s, "export const TOOL_REGISTRY = [", "\n] as const;");
       return `/*\n${registry}\n*/\n${once(s, "    name: SESSION_TOOL,\n", "")}`;
     });
-    expect(findingsFor(texts, "MCP tool count").join("\n")).toMatch(/the guide says 9, the code says 8/);
+    expect(findingsFor(texts, "MCP tool count").join("\n")).toMatch(/the guide says 10, the code says 9/);
   });
 
   it("menu readiness budget — the quoted log line only in a comment", () => {

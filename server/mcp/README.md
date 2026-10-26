@@ -126,9 +126,9 @@ reports missing tools:
 {
   "status": "ok",
   "version": "0.9.17",
-  "toolCount": 9,
+  "toolCount": 10,
   "resourceCount": 0,
-  "tools": ["session", "workspace", "document", "workflow", "selection", "browser", "browser_read", "coherence", "coherence_resolve"]
+  "tools": ["session", "workspace", "document", "workflow", "selection", "comments", "browser", "browser_read", "coherence", "coherence_resolve"]
 }
 ```
 
@@ -181,7 +181,7 @@ every stderr line with `[MCP Server Error]`.
 
 ## Available tools
 
-**9 tools**, **41 actions**. Each tool takes an `action` discriminator that
+**10 tools**, **44 actions**. Each tool takes an `action` discriminator that
 routes to its sub-operation. Tabs are addressed by `tabId` and windows by
 `windowLabel`, both learned from `session.get_state`; an explicitly supplied
 identifier may never be blank (omit it to target the focused tab/window).
@@ -299,6 +299,26 @@ round-trip `document.read`/`document.write` costs — input tokens for the whole
 doc, output tokens for the whole doc, a long write window that widens the
 stale-revision retry loop, and a faithfulness risk on the bytes the AI never
 meant to touch.
+
+### `comments` — answer review comments (3 actions)
+
+| Action | Purpose |
+|---|---|
+| `list` | A tab's review threads: `{doc, generation, threads}`. Each thread carries its `id`, `state`, `commentGen`, quoted anchor and replies. |
+| `reply` | Reply to a thread. Args `{tabId?, commentId, body, expectedCommentGen}`. |
+| `mark_addressed` | Mark a thread addressed. Args `{tabId?, commentId, expectedCommentGen}`. |
+
+Resolve, reopen and delete are the user's: the tool has no such action. The
+bridge operations are `comments.list`, `comments.reply` and
+`comments.mark_addressed`. A change names the `commentGen` it read; a thread that moved since is refused
+`STALE_COMMENT`. Other refusals: `INVALID_COMMENT` (a malformed or unknown
+comment id), `COMMENT_NOT_ALLOWED` (resolved or deleted), `COMMENT_LIMIT`.
+
+`document.write`, `document.transform`, `selection.set` and
+`workflow.apply_patch` take an optional `addresses: [commentId]`: the comments
+the write answers. It is recorded on the revision and moves no thread; a set
+with a malformed, repeated, unknown, deleted, resolved or other-document id, or
+more than 64, is refused `INVALID_ADDRESSES` and nothing changes.
 
 ### `browser` — act on the embedded browser (12 actions)
 

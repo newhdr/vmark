@@ -2,7 +2,8 @@
 //! `invalid-input`, …) is what generic frontend code branches on; the exact
 //! journal token rides in `detail.journalCode`, with the current head for
 //! `STALE_PARENT` and `field: "provenance"` for a map that does not certify
-//! its texts (the window resends without it), and `indeterminate: true`
+//! its texts (the window resends without it), `field: "addresses"` for a
+//! write's `addresses` that is not a set of unresolved threads, and `indeterminate: true`
 //! with `uncertain: true` for a prepare whose frame may or may not be
 //! durable (the client treats it as any uncertain answer); a request answer
 //! adds `uncertain` and `request` (`admission::answer`); a registration
@@ -59,6 +60,7 @@ fn class(e: &TxnError) -> ErrorCode {
         },
         TxnError::InvalidRequest(_)
         | TxnError::InvalidProvenance(_)
+        | TxnError::InvalidAddresses(_)
         | TxnError::InvalidText(_)
         | TxnError::CommentAnchorTooLong { .. } => ErrorCode::InvalidInput,
         TxnError::Io(_) | TxnError::Indeterminate(_) => ErrorCode::Io,
@@ -79,6 +81,7 @@ fn detail(e: &TxnError) -> Value {
             json!({ "journalCode": e.code(), "hunk": hunk, "reason": reason })
         }
         TxnError::InvalidProvenance(_) => json!({ "journalCode": e.code(), "field": "provenance" }),
+        TxnError::InvalidAddresses(_) => json!({ "journalCode": e.code(), "field": "addresses" }),
         TxnError::CommentAnchorTooLong { bytes, limit } => {
             json!({ "journalCode": e.code(), "bytes": bytes, "limit": limit })
         }

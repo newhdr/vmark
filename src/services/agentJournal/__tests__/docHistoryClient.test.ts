@@ -1,6 +1,7 @@
 // @vitest-environment node
 // WI-AL1.7 — the history panel's revision list client (`agent_journal_history`): rows newest first with the full actor (the four principal states, the connection id and the untrusted session label kept apart; human, system and legacy authors), the save's initiator, kind, tool, time and parent; blocked live hunks with reason, origin and lastCertified; the document's degraded flag; a malformed reply, an unknown reason, kind or principal state is refused as JOURNAL_UNAVAILABLE, never shown as something else
 // WI-AL2.1b — every live hunk as the writer persisted it (id, kind, state, target revision, base and target ranges), passed through in the journal's order and never regrouped; a malformed hunk row is refused
+// WI-AL3.3 — each row's addresses (the comments its write said it addressed), in the order sent, each marked deleted when the comment book no longer holds it open; a missing list, an empty id or a non-boolean deleted flag is refused
 // WI-AL2.3 — what a review decision is checked against: each hunk's reviewGen (a decimal string), its mapped span (which may be inverted after a delete and retype, and is null once the hunk is blocked) and its edited-since flag, and the document head (null for a key the journal never saw); a numeric or malformed reviewGen, a missing span, a non-boolean editedSince or a missing head is refused
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -29,6 +30,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   tool: "document.write",
   restore: false,
   collected: false,
+  addresses: [],
   ...over,
 });
 const blocked = {
@@ -85,9 +87,19 @@ describe("listDocumentHistory", () => {
       tool: "document.write",
       restore: false,
       collected: false,
+      addresses: [],
     });
     expect(h.rows[1]).toMatchObject({ kind: "observed", parent: null, actor: { type: "human" }, tool: null });
     expect(h.blocked).toEqual([blocked]);
+  });
+
+  it("keeps each row's addresses in order, a deleted comment marked", async () => {
+    const addresses = [
+      { comment: "c2", deleted: false },
+      { comment: "c1", deleted: true },
+    ];
+    invokeMock.mockResolvedValueOnce(reply({ rows: [row({ addresses })] }));
+    expect((await listDocumentHistory("path:/a.md")).rows[0].addresses).toEqual(addresses);
   });
 
   it("keeps a blocked hunk with no lastCertified location as null, never invented", async () => {
@@ -154,6 +166,10 @@ describe("listDocumentHistory", () => {
     ["a non-numeric time", reply({ rows: [row({ at: "now" })] })],
     ["a negative time", reply({ rows: [row({ at: -1 })] })],
     ["a fractional time", reply({ rows: [row({ at: 1.5 })] })],
+    ["a row with no addresses", reply({ rows: [row({ addresses: undefined })] })],
+    ["an address with an empty id", reply({ rows: [row({ addresses: [{ comment: "", deleted: false }] })] })],
+    ["an address with no deleted flag", reply({ rows: [row({ addresses: [{ comment: "c1" }] })] })],
+    ["a bare id as an address", reply({ rows: [row({ addresses: ["c1"] })] })],
     ["a time past the Date range", reply({ rows: [row({ at: 1e300 })] })],
   ])("refuses %s as JOURNAL_UNAVAILABLE", async (_label, bad) => {
     invokeMock.mockResolvedValueOnce(bad);

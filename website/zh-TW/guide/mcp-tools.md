@@ -1,8 +1,8 @@
 # MCP 工具參考
 
-VMark 對 AI 助理開放**九個複合 MCP 工具**：`session`、`workspace`、`document`、`workflow`、`selection`、`browser`、`browser_read`、`coherence` 與 `coherence_resolve`。這些工具合計涵蓋編輯器讀寫主軸、檔案與視窗生命週期、CST 安全的工作流程編輯、針對選取範圍的精準編輯、受限的瀏覽器導覽，以及工作區一致性層的視圖。
+VMark 對 AI 助理開放**十個複合 MCP 工具**：`session`、`workspace`、`document`、`workflow`、`selection`、`comments`、`browser`、`browser_read`、`coherence` 與 `coherence_resolve`。這些工具合計涵蓋編輯器讀寫主軸、檔案與視窗生命週期、CST 安全的工作流程編輯、針對選取範圍的精準編輯、受限的瀏覽器導覽，以及工作區一致性層的視圖。
 
-這九個之中有三個——`session`、`browser_read` 與 `coherence`——宣告了 `readOnlyHint: true`，因此 MCP 用戶端可以自動核准它們。這正是 `browser`/`browser_read` 與 `coherence`/`coherence_resolve` 之所以要拆成不同工具的原因：標註是**以工具為單位**，而非以操作為單位，因此一個把 ARIA 快照與 `execute_js` 綁在一起的工具，就必須把 `execute_js` 的危險性一併宣告出來。沿著「這會不會改動任何東西？」來拆分，讓每一半都能說出實情，也讓這個介面中真正具破壞性的操作在工具清單裡保持醒目。
+這十個之中有三個——`session`、`browser_read` 與 `coherence`——宣告了 `readOnlyHint: true`，因此 MCP 用戶端可以自動核准它們。這正是 `browser`/`browser_read` 與 `coherence`/`coherence_resolve` 之所以要拆成不同工具的原因：標註是**以工具為單位**，而非以操作為單位，因此一個把 ARIA 快照與 `execute_js` 綁在一起的工具，就必須把 `execute_js` 的危險性一併宣告出來。沿著「這會不會改動任何東西？」來拆分，讓每一半都能說出實情，也讓這個介面中真正具破壞性的操作在工具清單裡保持醒目。
 
 先前的 12 工具 / 76 操作介面之所以被精簡，是因為文件內的格式化工具（粗體、標題、表格等）與 AI 代理透過 Markdown 來回轉換就能輕鬆完成的工作高度重複。`selection` 之所以保留（依精簡計畫的 ADR-7），是因為在大型檔案上整份文件來回轉換並不划算——每次編輯都要以輸入權杖付出整份文件的代價、以輸出權杖付出整份文件的代價（約為輸入價格的 5 倍），還要承受更長的寫入視窗，而這會擴大過期版本的重試迴圈。完整的取捨理由請參閱 [MCP 精簡計畫](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md)。
 
@@ -216,6 +216,7 @@ VMark 對 AI 助理開放**九個複合 MCP 工具**：`session`、`workspace`�
 | `tabId` | string | 否 | 目標分頁（預設為聚焦中的分頁） |
 | `content` | string | 是 | 全新的完整內容 |
 | `expected_revision` | string | 否 | 上一次讀取拿到的 revision 標記 |
+| `addresses` | string[] | 否 | 這次編輯所回應的 `comments.list` 評論 id（最多 64 個） |
 | `save` | boolean | 否 | 同時儲存至磁碟（預設 `true`）；`false` 只變更分頁 |
 
 預設情況下，寫入會被儲存：回應會帶有 `saved: true`，或是 `saved: false` 並附上 `save_skipped`（`"untitled"`——分頁還沒有檔案，請使用 `save_as`；`"opt_out"`——你傳入了 `save: false`）或 `save_error`（磁碟寫入失敗）。當目標是 Markdown 文件中使用中的 WYSIWYG 分頁時，文字會被載入即時編輯器（作為一個可復原的步驟），而儲存的是編輯器對它的序列化結果——同樣的 Markdown，可能經過正規化，不一定是送出的確切字元。其他分頁則照送出的文字儲存，並正規化行尾字元。
@@ -249,6 +250,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 | `tabId` | string | 否 | 目標分頁 |
 | `kind` | string | 是 | `"cjk-format"`、`"cjk-spacing"` 或 `"cjk-punctuation"` |
 | `expected_revision` | string | 否 | 並行控制標記 |
+| `addresses` | string[] | 否 | 這次編輯所回應的 `comments.list` 評論 id（最多 64 個） |
 
 `cjk-format` 會套用使用者目前的 CJK 排版設定，從頭執行一遍。`cjk-spacing` 會在 CJK 字元與相鄰的拉丁字母或數字之間補上單一空格。`cjk-punctuation` 會把緊鄰 CJK 字元的 ASCII 標點轉換成對應的全形形式。
 
@@ -279,6 +281,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 | `tabId` | string | 否 |
 | `patches` | IRPatch[] | 是 |
 | `expected_revision` | string | 否 |
+| `addresses` | string[] | 否 |
 
 `IRPatch` 是以 `kind` 欄位區分的判別聯合型別。支援的種類如下：
 
@@ -339,6 +342,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 | `tabId` | string | 否 |
 | `content` | string | 是 |
 | `expected_revision` | string | 否（建議提供） |
+| `addresses` | string[] | 否 |
 
 替換編輯器回報為目前選取範圍的任何內容。**在 WYSIWYG 模式下**，純內嵌文字會以字面文字節點插入，因此前後的空白能精確地來回保留；帶有 markdown 標記的內容（`**bold**`、`*italic*`、`` `code` ``、圍欄程式碼、引用區塊、清單等）會被解析為 markdown 並插入為對應的節點。**在原始碼模式下**，`content` 一律以原始文字接合——原始碼介面本身就已經是 markdown 位元組。空的 `content` 會刪除選取範圍。當選取範圍折疊時，`content` 會插入在游標處。
 
@@ -347,6 +351,45 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 `STALE` 會回傳 `{error: "STALE", message, current_revision}`，與 `document.write` 完全相同。文件層級的 revision 能攔截 `get` 與 `set` 之間的按鍵輸入。純粹的游標移動（沒有按鍵輸入）不由伺服器仲裁——如果使用者在 `get` 與 `set` 之間移動了游標，這次編輯就會落在新的位置。
 
 當使用者在取得焦點的編輯器中以輸入法組字時，不論是 WYSIWYG 模式還是原始碼模式，`set` 都會回傳 `BUSY`，不做任何變更；請稍後再試。`get` 絕不會因此被拒絕。
+
+---
+
+## `comments`
+
+讀取並回覆使用者對文件的審閱評論。解決、重新開啟與刪除評論由使用者決定：本工具沒有這些操作，要求這些操作的呼叫會在抵達 VMark 之前被拒絕。
+
+### `list`
+
+| 參數 | 型別 | 必填 |
+|------|------|------|
+| `tabId` | string | 否 |
+
+回傳 `{doc, generation, threads}`。每個討論串帶有它的 `id`、`state`（`open`、`addressed`、`resolved` 或 `reopened`）、`commentGen`、所錨定的引用文字，以及它的回覆。
+
+### `reply`
+
+| 參數 | 型別 | 必填 |
+|------|------|------|
+| `tabId` | string | 否 |
+| `commentId` | string | 是 |
+| `body` | string | 是 |
+| `expectedCommentGen` | string | 是 |
+
+在討論串中新增一則回覆。回覆 id 由 VMark 自行產生，因此重試的呼叫會拿到第一次的結果，絕不會新增第二則回覆。
+
+### `mark_addressed`
+
+| 參數 | 型別 | 必填 |
+|------|------|------|
+| `tabId` | string | 否 |
+| `commentId` | string | 是 |
+| `expectedCommentGen` | string | 是 |
+
+將討論串標記為已處理。是否解決仍由使用者決定。
+
+`comments.reply` 與 `comments.mark_addressed` 都要提供 `list` 回傳的討論串 `commentGen`。以下情況會被拒絕且不做任何變更：討論串此後已變動時回傳 `STALE_COMMENT`（重新 list），評論 id 格式錯誤或不指向本文件的評論時回傳 `INVALID_COMMENT`，討論串已解決或已刪除時回傳 `COMMENT_NOT_ALLOWED`，回覆過多或內文過長時回傳 `COMMENT_LIMIT`，以及日誌拒絕 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE` 與 `INVALID_TEXT`。
+
+要表明一次編輯回應了某些評論，請把它們的 id 作為 `addresses` 傳給 `document.write`、`document.transform`、`workflow.apply_patch` 或 `selection.set`。這個關聯會隨修訂一起記錄，並顯示在文件歷史中（之後被刪除的評論會顯示為已刪除的評論）；它不會改變任何討論串的狀態。超過 64 個 id、重複的 id，或未知、已刪除、已解決或屬於其他文件的 id，會以 `INVALID_ADDRESSES` 被拒絕，不做任何變更。
 
 ---
 

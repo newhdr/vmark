@@ -53,7 +53,7 @@ describe("each claim fails when one side drifts", () => {
     ["sort lines are Source-only", "textActions", (s) => s.replace(/(sortLinesAsc: \{[^}]*?supports: \{ wysiwyg: )false/, "$1true"), /F4 row says Source mode only; sortLinesAsc supports WYSIWYG: true/],
     ["OS file associations", "tauriConf", (s) => s.replace('"ext": ["toml"]', '"ext": ["toml", "ini"]'), /tauri.conf.json has `.toml, .ini = TOML Document`/],
     ["external-editor names", "programNames", (s) => s.replace(/^ *"zed",\n/m, ""), /`zed` is named as a known editor but is not in KNOWN_EDITORS/],
-    ["MCP tool count", "mcpToolsGuide", (s) => s.replace("exposes **nine composite MCP tools**", "exposes **eight composite MCP tools**"), /the guide says 8, the code says 9/],
+    ["MCP tool count", "mcpToolsGuide", (s) => s.replace("exposes **ten composite MCP tools**", "exposes **nine composite MCP tools**"), /the guide says 9, the code says 10/],
     ["MCP session label", "sessionLabel", (s) => s.replace("MAX_SESSION_LABEL_BYTES = 128", "MAX_SESSION_LABEL_BYTES = 64"), /label bytes: the guide says 128, the code says 64/],
     ["Git export branch", "gitExportNames", (s) => s.replace('format!("vmark-journal/{doc}")', 'format!("vmark-history/{doc}")'), /branch prefix: the guide says vmark-journal\/, the code says vmark-history\//],
     ["Git export trailers", "gitExportPlan", (s) => s.replace('("VMark-Tool", tool)', '("VMark-Agent", tool)'), /trailer table has `VMark-Tool`, plan.rs does not/],

@@ -104,7 +104,8 @@ const isTier = (v: unknown): v is AnchorTier => typeof v === "string" && TIERS.i
 /** `<prefix><canonical u64>`, as Rust's `seq_id!` writes it. */
 const seqId = (prefix: string) => (v: unknown): v is string =>
   typeof v === "string" && v.startsWith(prefix) && isDecimal(v.slice(prefix.length));
-const isCommentId = seqId("c");
+/** A comment id as the journal writes it: `c<canonical u64>`. */
+export const isCommentId = seqId("c");
 const isReplyId = seqId("r");
 
 /** `r` as an object with exactly `keys`; throws `malformed` otherwise. */

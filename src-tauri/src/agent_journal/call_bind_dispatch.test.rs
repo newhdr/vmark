@@ -1,4 +1,4 @@
-// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound) | AL2.2d: the revert prepare is request-bound like the restore prepare | AL2.3: the malformed-callId sweep covers every call-bound command, the review decide and the epoch close included | AL2.4: the concurrent pair read is call-bound and swept | AL3.2: the comment state changes, deletion and list are call-bound and swept; the comment creates and replies are request-bound
+// WI-AL2.2i — reply binding for the journal commands with no request key, through real IPC dispatch: each echoes the caller's fresh callId as `{bind: {callId}, reply}`, the body unchanged; a missing or malformed callId is refused before the command runs and changes nothing; and every agent_journal entry of all_commands! carries an R98 bind or a callId echo (every_journal_command_reply_is_bound) | AL2.2d: the revert prepare is request-bound like the restore prepare | AL2.3: the malformed-callId sweep covers every call-bound command, the review decide and the epoch close included | AL2.4: the concurrent pair read is call-bound and swept | AL3.2: the comment state changes, deletion and list are call-bound and swept; the comment creates and replies are request-bound | AL3.3: the agent comment list is call-bound and swept
 //! Each command is invoked the way a webview invokes it: through the mock
 //! runtime's IPC layer and the generated handler. Gated off Windows, where
 //! `tauri::test` does not exist.
@@ -20,7 +20,7 @@ use crate::agent_journal::{commands, commands_history, git_export};
 use crate::ipc_caller::{invoke_from, window};
 
 /// The commands bound by a call id, in the order they were converted.
-const CALL_BOUND: [&str; 22] = [
+const CALL_BOUND: [&str; 23] = [
     "agent_journal_capture",
     "agent_journal_arm_epoch",
     "agent_journal_close_epoch",
@@ -43,6 +43,7 @@ const CALL_BOUND: [&str; 22] = [
     "comment_user_delete",
     "comment_user_list",
     "comment_agent_mark_addressed",
+    "comment_agent_list",
 ];
 
 const CALL: &str = "0123456789abcdef0123456789abcdef";
@@ -80,6 +81,7 @@ fn ready() -> Ready {
             commands_user::comment_user_delete,
             commands_user::comment_user_list,
             commands_agent::comment_agent_mark_addressed,
+            commands_agent::comment_agent_list,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build mock app");
@@ -148,6 +150,10 @@ fn answerable(key: &str) -> Vec<(&'static str, Value)> {
         ),
         (
             "comment_user_list",
+            payload(json!({ "docKey": key, "text": "" })),
+        ),
+        (
+            "comment_agent_list",
             payload(json!({ "docKey": key, "text": "" })),
         ),
     ]

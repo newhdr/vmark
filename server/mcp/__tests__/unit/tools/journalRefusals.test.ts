@@ -87,12 +87,13 @@ function appAbortReasons(source: string = readFileSync(APP_JOURNAL_CLIENT, 'utf8
 interface V2Answer { error: string; message: string }
 interface JournalV2ErrorModule {
   invalidTextError(): V2Answer;
+  invalidAddressesError(why: string): V2Answer;
   journalRefusalError(refusal: { journalCode: string; message: string }): V2Answer;
   abortedError(reason: string): V2Answer;
   appliedWithErrorError(error: unknown, durable: boolean, revision: string): V2Answer;
   recoveryRequiredError(error: unknown): V2Answer;
 }
-const ERROR_BUILDERS = ['abortedError', 'appliedWithErrorError', 'invalidTextError', 'journalRefusalError', 'recoveryRequiredError'];
+const ERROR_BUILDERS = ['abortedError', 'appliedWithErrorError', 'invalidAddressesError', 'invalidTextError', 'journalRefusalError', 'recoveryRequiredError'];
 
 /**
  * The app's journal error mapping, RUN: `source` is written to its own file
@@ -123,6 +124,7 @@ async function appRefusalCodes(texts: Partial<AppTexts> = {}): Promise<string[]>
   const m = await loadMapping(texts.errors ?? readFileSync(APP_JOURNAL_ERRORS, 'utf8'));
   const answers = [
     m.invalidTextError(),
+    m.invalidAddressesError('m'),
     ...appJournalCodes(texts.refusals ?? readFileSync(APP_JOURNAL_CODES, 'utf8')).map((journalCode) => m.journalRefusalError({ journalCode, message: 'm' })),
     ...appAbortReasons().map((reason) => m.abortedError(reason)),
     m.appliedWithErrorError(new Error('e'), true, 'r'),

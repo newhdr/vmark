@@ -103,6 +103,8 @@ export interface JournaledEdit<T> {
    * editor, synchronously. Omitted when the store is the document's truth.
    */
   recover?: () => void;
+  /** The comments the write says it addresses (`writeAddresses.ts`); omitted when none. */
+  addresses?: readonly string[];
 }
 
 /** The buffer the store holds for `tabId`; throws once the tab is gone. */
@@ -177,6 +179,7 @@ export async function runJournaledEdit<T>(
         ...(baseline.observedParent && { observedParent: baseline.observedParent }),
         ...(certificate ? { certificate } : {}),
         ...(baseline.capture && { capture: baseline.capture }),
+        ...(edit.addresses && { addresses: edit.addresses }),
       });
     },
     verify: () => reverifyWriteTarget(target),

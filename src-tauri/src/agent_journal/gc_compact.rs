@@ -185,6 +185,7 @@ fn tombstone(m: &RevisionMeta, env: &Envelope, effects: &ReviewEffects) -> Envel
         hunks: effects.new_hunks.clone(),
         transitions: effects.transitions.clone(),
         attached_to,
+        addresses: m.addresses.clone(),
     };
     Envelope {
         schema_version: schema_table::label(&record),

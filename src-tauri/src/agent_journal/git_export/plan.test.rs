@@ -45,6 +45,7 @@ fn chain_projection(doc: DocId, steps: &[(&str, Actor, bool)]) -> (Projection, V
                 },
                 collected: *collected,
                 at: 1_700_000_000_000 + i as u64 * 1000,
+                addresses: Vec::new(),
             },
         );
         parent = Some(id);

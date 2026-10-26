@@ -1,8 +1,8 @@
 # MCP ツールリファレンス
 
-VMark は AI アシスタントに **9 つの複合 MCP ツール** を公開します：`session`、`workspace`、`document`、`workflow`、`selection`、`browser`、`browser_read`、`coherence`、`coherence_resolve`。これらは合わせて、エディタの読み書きのバックボーン、ファイル／ウィンドウのライフサイクル、CST セーフなワークフロー編集、選択範囲を対象とするピンポイント編集、制限付きのブラウザナビゲーション、そしてワークスペース整合性レイヤーのビューをカバーします。
+VMark は AI アシスタントに **10 個の複合 MCP ツール** を公開します：`session`、`workspace`、`document`、`workflow`、`selection`、`comments`、`browser`、`browser_read`、`coherence`、`coherence_resolve`。これらは合わせて、エディタの読み書きのバックボーン、ファイル／ウィンドウのライフサイクル、CST セーフなワークフロー編集、選択範囲を対象とするピンポイント編集、制限付きのブラウザナビゲーション、そしてワークスペース整合性レイヤーのビューをカバーします。
 
-9 つのうち 3 つ——`session`、`browser_read`、`coherence`——は `readOnlyHint: true` を宣言しているため、MCP クライアントはこれらを自動承認できます。`browser`／`browser_read` と `coherence`／`coherence_resolve` がそもそも別々のツールに分かれているのはこのためです：アノテーションはアクションごとではなく **ツールごと** に付くので、ARIA スナップショットと `execute_js` を 1 つにまとめたツールは、`execute_js` の危険性を表明せざるを得なくなります。「これは何かを変更するか？」という基準で分割することで、それぞれの半分が真実を表明でき、サーフェスの本当に破壊的なアクションをツールリスト内で目立たせられます。
+10 個のうち 3 つ——`session`、`browser_read`、`coherence`——は `readOnlyHint: true` を宣言しているため、MCP クライアントはこれらを自動承認できます。`browser`／`browser_read` と `coherence`／`coherence_resolve` がそもそも別々のツールに分かれているのはこのためです：アノテーションはアクションごとではなく **ツールごと** に付くので、ARIA スナップショットと `execute_js` を 1 つにまとめたツールは、`execute_js` の危険性を表明せざるを得なくなります。「これは何かを変更するか？」という基準で分割することで、それぞれの半分が真実を表明でき、サーフェスの本当に破壊的なアクションをツールリスト内で目立たせられます。
 
 以前の 12 ツール／76 アクションのサーフェスは整理されました——ドキュメント内のフォーマットツール（太字、見出し、テーブルなど）は、AI エージェントがすでに Markdown のラウンドトリップで簡単にこなせる作業を重複していたためです。`selection` は（プルーニングプランの ADR-7 に従い）残されました。ドキュメント全体のラウンドトリップは大きなファイルでは非効率だからです——編集のたびにドキュメント全体を入力トークンとして、ドキュメント全体を出力トークンとして（入力の約 5 倍の料金）支払い、さらに書き込みウィンドウが長くなって古いリビジョンによるリトライループが広がります。完全な根拠は [MCP プルーニングプラン](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md) を参照してください。
 
@@ -221,6 +221,7 @@ MCP 経由で AI を使用して Mermaid を生成する場合は、[mermaid-val
 | `tabId` | string | いいえ | 対象タブ（デフォルトはフォーカス中） |
 | `content` | string | はい | 新しい全コンテンツ |
 | `expected_revision` | string | いいえ | 直近の読み取りからのリビジョントークン |
+| `addresses` | string[] | いいえ | この編集が対応する `comments.list` のコメント ID（最大 64 個） |
 | `save` | boolean | いいえ | ディスクにも保存する（デフォルト `true`）；`false` はタブだけを変更する |
 
 デフォルトでは書き込みは保存されます：レスポンスは `saved: true` を持つか、`saved: false` とともに `save_skipped`（`"untitled"`——タブにまだファイルがないので `save_as` を使う；`"opt_out"`——`save: false` を渡した）または `save_error`（ディスクへの書き込みが失敗した）を持ちます。対象が Markdown ドキュメントのアクティブな WYSIWYG タブの場合、テキストはライブのエディタに読み込まれ（1 回で取り消せるステップとして）、保存されるのはエディタによるそのシリアライズです——同じ Markdown ですが、正規化されることがあり、送信した文字そのままとは限りません。他のタブは、送信したテキストを改行コードだけ正規化して保存します。
@@ -254,6 +255,7 @@ AI クライアントによる保存は——`write`、`workspace.save`、`works
 | `tabId` | string | いいえ | 対象タブ |
 | `kind` | string | はい | `"cjk-format"`、`"cjk-spacing"`、または `"cjk-punctuation"` |
 | `expected_revision` | string | いいえ | 並行制御トークン |
+| `addresses` | string[] | いいえ | この編集が対応する `comments.list` のコメント ID（最大 64 個） |
 
 `cjk-format` はユーザーの CJK フォーマット設定をエンドツーエンドで適用します。`cjk-spacing` は CJK 文字と隣接するラテン／数字の間に単一スペースを挿入します。`cjk-punctuation` は CJK 文字に隣接する ASCII 句読点を全角形式に変換します。
 
@@ -284,6 +286,7 @@ GitHub Actions ワークフロー YAML 用の `actionlint` 検証と **CST セ�
 | `tabId` | string | いいえ |
 | `patches` | IRPatch[] | はい |
 | `expected_revision` | string | いいえ |
+| `addresses` | string[] | いいえ |
 
 `IRPatch` は判別共用体（`kind` フィールド）です。サポートされる種類：
 
@@ -344,6 +347,7 @@ GitHub Actions ワークフロー YAML 用の `actionlint` 検証と **CST セ�
 | `tabId` | string | いいえ |
 | `content` | string | はい |
 | `expected_revision` | string | いいえ（推奨） |
+| `addresses` | string[] | いいえ |
 
 エディタが現在の選択範囲として報告するものを何であれ置き換えます。**WYSIWYG モードでは**、プレーンなインラインテキストはリテラルなテキストノードとして挿入されるため、先頭／末尾の空白が正確に往復します；markdown マーカーを含むコンテンツ（`**bold**`、`*italic*`、`` `code` ``、フェンス付きコード、ブロック引用、リストなど）は markdown として解析され、対応するノードとして挿入されます。**ソースモードでは**、`content` は常に生テキストとしてはめ込まれます——ソースサーフェスはすでに markdown バイト列だからです。空の `content` は選択範囲を削除します。選択範囲が折りたたまれている場合、`content` はカーソル位置に挿入されます。
 
@@ -352,6 +356,45 @@ GitHub Actions ワークフロー YAML 用の `actionlint` 検証と **CST セ�
 `STALE` は `document.write` とまったく同じように `{error: "STALE", message, current_revision}` を返します。ドキュメントレベルのリビジョンが `get` と `set` の間のキーストロークを捕捉します。純粋なカーソル移動（キーストロークなし）はサーバーによる調停の対象外です——ユーザーが `get` と `set` の間でカーソルを移動した場合、編集は新しい位置に着地します。
 
 フォーカスされているエディタでユーザーが入力メソッドで変換している間、`set` は WYSIWYG モードでもソースモードでも何も変更せずに `BUSY` を返します；少し待ってからリトライしてください。`get` がこの理由で拒否されることはありません。
+
+---
+
+## `comments`
+
+ドキュメントに対するユーザーのレビューコメントを読み、返信します。コメントの解決・再オープン・削除はユーザーが決めることです。このツールにはそれらのアクションはなく、それを求める呼び出しは VMark に届く前に拒否されます。
+
+### `list`
+
+| パラメーター | タイプ | 必須 |
+|-----------|------|------|
+| `tabId` | string | いいえ |
+
+`{doc, generation, threads}` を返します。各スレッドは `id`、`state`（`open`、`addressed`、`resolved`、`reopened` のいずれか）、`commentGen`、アンカーとなる引用テキスト、そして返信を持ちます。
+
+### `reply`
+
+| パラメーター | タイプ | 必須 |
+|-----------|------|------|
+| `tabId` | string | いいえ |
+| `commentId` | string | はい |
+| `body` | string | はい |
+| `expectedCommentGen` | string | はい |
+
+スレッドに返信を追加します。返信 ID は VMark 自身が発行するため、再試行された呼び出しには最初の結果が返り、2 つ目の返信が追加されることはありません。
+
+### `mark_addressed`
+
+| パラメーター | タイプ | 必須 |
+|-----------|------|------|
+| `tabId` | string | いいえ |
+| `commentId` | string | はい |
+| `expectedCommentGen` | string | はい |
+
+スレッドを対応済みにします。解決するかどうかはユーザーが決めます。
+
+`comments.reply` と `comments.mark_addressed` はどちらも、`list` が返したスレッドの `commentGen` を指定します。次の場合は何も変更せずに拒否されます：その後スレッドが変わった場合は `STALE_COMMENT`（もう一度 list してください）、コメント ID が不正またはこのドキュメントのコメントを指していない場合は `INVALID_COMMENT`、スレッドが解決済みまたは削除済みの場合は `COMMENT_NOT_ALLOWED`、返信が多すぎるか本文が長すぎる場合は `COMMENT_LIMIT`、そしてジャーナルの拒否 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`。
+
+編集がコメントへの対応であることを示すには、それらの ID を `addresses` として `document.write`、`document.transform`、`workflow.apply_patch`、`selection.set` に渡します。このリンクはリビジョンとともに記録され、ドキュメントの履歴に表示されます（後で削除されたコメントは削除済みコメントとして表示されます）。スレッドの状態は変わりません。64 個を超える ID、重複した ID、未知・削除済み・解決済み・別ドキュメントの ID は `INVALID_ADDRESSES` で拒否され、何も変更されません。
 
 ---
 

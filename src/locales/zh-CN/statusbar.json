@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "恢复到此更改之前",
   "mcpHistoryRestoredVersion": "已恢复所选版本",
   "mcpHistoryTextCollected": "文本已不再保留",
+  "mcpHistoryAddressed": "已处理的评论",
+  "mcpHistoryAddressedDeleted": "已删除的评论",
   "mcpHistoryRestoreTag": "恢复",
   "mcpHistoryKindControlled": "已记录的写入",
   "mcpHistoryKindObserved": "保存时发现的编辑",

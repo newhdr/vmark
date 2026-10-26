@@ -136,6 +136,18 @@ export type V2ErrorCode =
   | "JOURNAL_UNAVAILABLE"
   | "INVALID_TEXT"
   | "REVIEW_BACKLOG_FULL"
+  // A write's `addresses` named a comment it may not: malformed, repeated,
+  // unknown, deleted, resolved or of another document, or more than 64.
+  | "INVALID_ADDRESSES"
+  // The comment tools (vmark.comments.*). INVALID_COMMENT: a malformed or
+  // unknown comment id, or a malformed request. STALE_COMMENT: the thread
+  // changed since its commentGen was read — list again. COMMENT_NOT_ALLOWED:
+  // the thread is resolved or deleted. COMMENT_LIMIT: too many replies or
+  // too long a body.
+  | "INVALID_COMMENT"
+  | "STALE_COMMENT"
+  | "COMMENT_NOT_ALLOWED"
+  | "COMMENT_LIMIT"
   // The journal accepted the write, but the document changed under it before
   // it applied (`reason` says how); nothing was written. Re-read and retry.
   | "ABORTED"

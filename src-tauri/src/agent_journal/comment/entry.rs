@@ -2,7 +2,7 @@
 //! the handle, never a request field: the user handle records `user` and
 //! may take every action the state machine gives a user; the agent handle
 //! records `agent`, names an MCP actor on create, and offers only create,
-//! reply and `markAddressed`. The Tauri `comment_user_*` and
+//! reply, `markAddressed` and the read-only list. The Tauri `comment_user_*` and
 //! `comment_agent_*` families (`commands_user`,
 //! `commands_agent`) each reach exactly one handle.
 //!
@@ -125,7 +125,7 @@ impl Comments<'_> {
     }
 }
 
-/// The shared create, reply and `markAddressed` of a handle.
+/// The shared create, reply, `markAddressed` and list of a handle.
 macro_rules! common_entry_points {
     ($handle:ident) => {
         impl $handle<'_> {
@@ -162,6 +162,15 @@ macro_rules! common_entry_points {
             pub fn mark_addressed(self, req: &StateRequest) -> Result<Transitioned, CommandError> {
                 self.0.act(req, Action::MarkAddressed)
             }
+
+            /// The document's threads against the window's text
+            /// (`comment::list`), read-only and the same for either caller.
+            ///
+            /// # Errors
+            /// An invalid payload or document key.
+            pub fn list(self, payload: &str) -> Result<CommentList, CommandError> {
+                self.0.c.comment_list(payload)
+            }
         }
     };
 }
@@ -184,14 +193,6 @@ impl UserComments<'_> {
     /// The journal refusal.
     pub fn reopen(self, req: &StateRequest) -> Result<Transitioned, CommandError> {
         self.0.act(req, Action::Reopen)
-    }
-
-    /// The document's threads against the window's text (`comment::list`).
-    ///
-    /// # Errors
-    /// An invalid payload or document key.
-    pub fn list(self, payload: &str) -> Result<CommentList, CommandError> {
-        self.0.c.comment_list(payload)
     }
 
     /// Delete a resolved thread. Always allowed at any `commentGen`.

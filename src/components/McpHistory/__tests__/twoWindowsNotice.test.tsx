@@ -22,6 +22,7 @@ const row = (revision: string, parent: string | null, over: Partial<HistoryRow> 
   tool: null,
   restore: false,
   collected: false,
+  addresses: [],
   ...over,
 });
 

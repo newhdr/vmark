@@ -54,6 +54,7 @@ export const agentRow = (revision: string, seq: number, connectionId = "c-1"): W
   tool: "document.write",
   restore: false,
   collected: false,
+  addresses: [],
 });
 
 /** A CommandError-shaped refusal, as the Rust command rejects. */

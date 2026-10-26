@@ -21,8 +21,10 @@ import {
 import { JOURNAL_REFUSALS } from './journalRefusals.js';
 import { bridgeErrorResult } from './staleError.js';
 import {
+  addressesSchema,
   optionalIdSchema,
   optionalRevisionSchema,
+  readOptionalAddresses,
   readOptionalBoolean,
   readOptionalId,
   readOptionalRevision,
@@ -77,6 +79,7 @@ export function registerDocumentTool(server: VMarkMcpServer): void {
         expected_revision: optionalRevisionSchema(
           'Optimistic-concurrency token from the most recent read (write/transform only).',
         ),
+        addresses: addressesSchema(),
         save: z
           .boolean()
           .default(true)
@@ -161,6 +164,9 @@ export function registerDocumentTool(server: VMarkMcpServer): void {
       const revision = readOptionalRevision(args.expected_revision);
       if (!revision.ok) return VMarkMcpServer.errorResult(revision.error);
       const expected_revision = revision.value;
+      const addressed = readOptionalAddresses(args.addresses);
+      if (!addressed.ok) return VMarkMcpServer.errorResult(addressed.error);
+      const addresses = addressed.value ? { addresses: addressed.value } : {};
 
       try {
         if (action === 'read') {
@@ -187,6 +193,7 @@ export function registerDocumentTool(server: VMarkMcpServer): void {
             content: args.content,
             expected_revision,
             ...(save !== undefined ? { save } : {}),
+            ...addresses,
           });
           return structuredJsonResult(data);
         }
@@ -199,6 +206,7 @@ export function registerDocumentTool(server: VMarkMcpServer): void {
             tabId,
             kind: args.kind,
             expected_revision,
+            ...addresses,
           });
           return structuredJsonResult(data);
         }

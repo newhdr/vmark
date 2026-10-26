@@ -245,7 +245,7 @@ Assistant IA <--stdio--> Serveur MCP <--WebSocket--> Éditeur VMark
 
 ## Capacités disponibles
 
-Une fois connecté, votre assistant IA dispose de neuf outils :
+Une fois connecté, votre assistant IA dispose de dix outils :
 
 | Outil | Ce qu'il couvre |
 |-------|-----------------|
@@ -253,6 +253,7 @@ Une fois connecté, votre assistant IA dispose de neuf outils :
 | `workspace` | Nouveau, ouvrir, enregistrer, enregistrer sous, fermer, changer d'onglet, mettre une fenêtre au premier plan, ouvrir un espace de travail |
 | `document` | Lire et écrire l'ensemble du document en Markdown ; transformations de formatage CJK |
 | `selection` | Lire et remplacer le texte sélectionné |
+| `comments` | Lister les commentaires de relecture du document, y répondre et les marquer comme traités (un assistant ne peut pas les résoudre) |
 | `workflow` | Correctifs sûrs pour le CST et validation du YAML GitHub Actions |
 | `browser` / `browser_read` | Automatisation du navigateur intégré sur macOS — les moitiés modifiante et en lecture seule |
 | `coherence` / `coherence_resolve` | Lire la couche de cohérence ; résoudre les liens obsolètes dans le cadre d'une délégation que vous avez accordée |

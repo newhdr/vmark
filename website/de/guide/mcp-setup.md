@@ -246,7 +246,7 @@ KI-Assistent <--stdio--> MCP-Server <--WebSocket--> VMark-Editor
 
 ## Verfügbare Fähigkeiten
 
-Wenn verbunden, verfügt Ihr KI-Assistent über neun Tools:
+Wenn verbunden, verfügt Ihr KI-Assistent über zehn Tools:
 
 | Tool | Was es abdeckt |
 |------|----------------|
@@ -254,6 +254,7 @@ Wenn verbunden, verfügt Ihr KI-Assistent über neun Tools:
 | `workspace` | Neu, Öffnen, Speichern, Speichern unter, Schließen, Tabs wechseln, ein Fenster fokussieren, einen Arbeitsbereich öffnen |
 | `document` | Das ganze Dokument als Markdown lesen und schreiben; CJK-Formatierungstransformationen |
 | `selection` | Den ausgewählten Text lesen und ersetzen |
+| `comments` | Review-Kommentare zum Dokument auflisten, beantworten und als erledigt markieren (ein Assistent kann sie nicht auflösen) |
 | `workflow` | CST-sichere Patches und Validierung für GitHub-Actions-YAML |
 | `browser` / `browser_read` | Automatisierung des eingebetteten Browsers unter macOS — die ändernde und die nur lesende Hälfte |
 | `coherence` / `coherence_resolve` | Die Kohärenzschicht lesen; veraltete Kanten im Rahmen einer von Ihnen erteilten Delegation auflösen |

@@ -16,7 +16,8 @@
       },
       "tool": null,
       "restore": false,
-      "collected": false
+      "collected": false,
+      "addresses": []
     },
     {
       "revision": "rev-2",
@@ -42,7 +43,8 @@
       },
       "tool": "document.write",
       "restore": false,
-      "collected": false
+      "collected": false,
+      "addresses": []
     },
     {
       "revision": "rev-1",
@@ -58,7 +60,8 @@
       },
       "tool": null,
       "restore": false,
-      "collected": false
+      "collected": false,
+      "addresses": []
     }
   ],
   "truncated": false,

@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "Ripristina lo stato precedente a questa modifica",
   "mcpHistoryRestoredVersion": "Versione selezionata ripristinata",
   "mcpHistoryTextCollected": "Testo non più conservato",
+  "mcpHistoryAddressed": "Commenti gestiti",
+  "mcpHistoryAddressedDeleted": "commento eliminato",
   "mcpHistoryRestoreTag": "ripristino",
   "mcpHistoryKindControlled": "Scrittura registrata",
   "mcpHistoryKindObserved": "Modifica trovata al salvataggio",

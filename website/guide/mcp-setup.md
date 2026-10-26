@@ -245,7 +245,7 @@ AI Assistant <--stdio--> MCP Server <--WebSocket--> VMark Editor
 
 ## Available Capabilities
 
-When connected, your AI assistant has nine tools:
+When connected, your AI assistant has ten tools:
 
 | Tool | What it covers |
 |------|----------------|
@@ -253,6 +253,7 @@ When connected, your AI assistant has nine tools:
 | `workspace` | New, open, save, save-as, close, switch tabs, focus a window, open a workspace |
 | `document` | Read and write the whole document as Markdown; CJK formatting transforms |
 | `selection` | Read and replace the selected text |
+| `comments` | List review comments on the document, reply to them and mark them addressed (an assistant cannot resolve them) |
 | `workflow` | CST-safe patches and validation for GitHub Actions YAML |
 | `browser` / `browser_read` | Embedded-browser automation on macOS — the mutating and read-only halves |
 | `coherence` / `coherence_resolve` | Read the coherence layer; resolve stale edges under a delegation you granted |

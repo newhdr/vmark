@@ -66,6 +66,7 @@ fn tombstone(doc: DocId, post: &str) -> Record {
         hunks: vec![],
         transitions: vec![],
         attached_to: None,
+        addresses: vec![],
     }
 }
 

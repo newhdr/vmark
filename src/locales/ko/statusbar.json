@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "이 변경 이전 상태로 복원",
   "mcpHistoryRestoredVersion": "선택한 버전을 복원했습니다",
   "mcpHistoryTextCollected": "텍스트가 더 이상 보관되지 않음",
+  "mcpHistoryAddressed": "처리한 댓글",
+  "mcpHistoryAddressedDeleted": "삭제된 댓글",
   "mcpHistoryRestoreTag": "복원",
   "mcpHistoryKindControlled": "기록된 쓰기",
   "mcpHistoryKindObserved": "저장 시 발견된 편집",

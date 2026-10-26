@@ -9,8 +9,10 @@
 //! digest matches; the request's state otherwise, `reconcile`) before any
 //! other check, since the
 //! first attempt's own reservation and baseline would refuse an identical
-//! retry. Then parent CAS, capture seq, restore source, admission
-//! (healthy, not degraded or reserved, a free reservation slot).
+//! retry. Then the addresses (`comment::addresses`), parent CAS, capture
+//! seq, restore source, admission (healthy, not degraded or reserved, a
+//! free reservation slot). The addresses of a published prepare wait on
+//! the writer for its `committed` (`Inner::addresses`).
 //!
 //! Direct versus staged by record count: a prepare that appends exactly
 //! one record (nothing pending, no baseline) is one top-level `prepared`;
@@ -32,6 +34,7 @@ use crate::agent_journal::admission::receipt::{
 use crate::agent_journal::admission::reconcile::lookup;
 use crate::agent_journal::admission::reduce::preflight;
 use crate::agent_journal::admission::stage::{staged, Live};
+use crate::agent_journal::comment::addresses;
 use crate::agent_journal::controlled::Prep;
 use crate::agent_journal::controlled_restore::{source_text, RestorePrepared};
 use crate::agent_journal::controlled_revert::RevertPrepared;
@@ -153,6 +156,8 @@ pub(crate) fn prepare_admitted(
             return Ok(stored);
         }
     }
+    addresses::check(&g.proj.comments, doc, &prep.addresses)?;
+    let addresses = std::mem::take(&mut prep.addresses);
     let head = g.proj.head(doc);
     if prep.parent != head {
         return Err(TxnError::StaleParent { head });
@@ -187,8 +192,11 @@ pub(crate) fn prepare_admitted(
             request.as_ref(),
         )?
     };
-    let (response, fallback) = (staging.response.clone(), staging.fallback);
+    let (response, fallback, txn) = (staging.response.clone(), staging.fallback, staging.txn);
     w.publish(g, staging)?;
+    if !addresses.is_empty() {
+        g.addresses.insert(txn, addresses);
+    }
     if let Some(r) = fallback {
         note_fallback(g, doc, r);
     }

@@ -1,0 +1,89 @@
+/**
+ * Comments tool — the agent's side of a document's review comments: list the
+ * threads, reply to one, mark one addressed.
+ *
+ * Key decisions:
+ *   - Resolve, reopen and delete are the user's decisions, so the tool has no
+ *     such action; the app's agent commands have none either. A caller that
+ *     asks for one is refused here, before any bridge request.
+ *   - A reply carries no reply id: the app mints it once per call, so a
+ *     retried reply is answered from its receipt, never recorded twice.
+ *   - Every change names the `commentGen` the agent read; a thread that moved
+ *     since is refused STALE_COMMENT and the agent lists again.
+ *
+ * @coordinates-with src/services/mcpBridge/v2/comments.ts (repo root) — the handlers
+ * @coordinates-with tools/toolArgs.ts — `addresses` on the journaled writes
+ */
+
+import { z } from 'zod';
+import { VMarkMcpServer } from '../server.js';
+import { bridgeErrorResult } from './staleError.js';
+import { optionalIdSchema, readOptionalId, readRequiredId } from './toolArgs.js';
+
+export const COMMENTS_TOOL = 'comments' as const;
+export const COMMENTS_ACTIONS = ['list', 'reply', 'mark_addressed'] as const;
+
+export function registerCommentsTool(server: VMarkMcpServer): void {
+  server.registerTool(
+    {
+      name: COMMENTS_TOOL,
+      title: 'VMark Review Comments',
+      // `list` reads; `reply` and `mark_addressed` append to the thread. Nothing
+      // is removed, so the set is not destructive.
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      description:
+        "Read and answer the user's review comments on a document. Resolve, reopen and delete are the user's: this tool cannot do them.\n\n" +
+        'Actions:\n' +
+        '- list: Return {doc, generation, threads} for a tab (omit `tabId` for the focused tab). Each thread carries its `id`, `state` (open/addressed/resolved/reopened), `commentGen`, quoted anchor and replies.\n' +
+        '- reply: Add a reply to a thread. Args: {tabId?, commentId, body, expectedCommentGen}.\n' +
+        '- mark_addressed: Mark a thread addressed. Args: {tabId?, commentId, expectedCommentGen}.\n\n' +
+        'To say a write answers comments, pass `addresses: [commentId]` to document.write, document.transform, selection.set or workflow.apply_patch; that records the link on the revision and moves no thread. ' +
+        'Refusals that change nothing: STALE_COMMENT (the thread changed since you read its `commentGen` — list again), INVALID_COMMENT (no such comment on this document), COMMENT_NOT_ALLOWED (the thread is resolved or deleted), COMMENT_LIMIT (too many replies or too long a body), and the journal refusals JOURNAL_BUSY, JOURNAL_DEGRADED, JOURNAL_UNAVAILABLE and INVALID_TEXT.',
+      inputSchema: {
+        action: z.enum(COMMENTS_ACTIONS).describe('The action to perform'),
+        tabId: optionalIdSchema('Target tab id (from session.get_state). Omit to use the focused tab.'),
+        commentId: optionalIdSchema('Thread id from list (reply, mark_addressed).'),
+        body: z.string().optional().describe('Reply text (reply only).'),
+        expectedCommentGen: optionalIdSchema(
+          'The thread\'s `commentGen` from list (reply, mark_addressed).',
+        ),
+      },
+    },
+    async (args) => {
+      const action = args.action;
+      const tab = readOptionalId(args.tabId, 'tabId');
+      if (!tab.ok) return VMarkMcpServer.errorResult(tab.error);
+      const tabId = tab.value;
+      if (action !== 'list' && action !== 'reply' && action !== 'mark_addressed') {
+        return VMarkMcpServer.errorResult(
+          `Invalid action: ${String(action)}. Expected: ${COMMENTS_ACTIONS.join(', ')}`,
+        );
+      }
+      try {
+        if (action === 'list') {
+          const data = await server.sendBridgeRequest({ type: 'vmark.comments.list', tabId });
+          return VMarkMcpServer.successJsonResult(data);
+        }
+        const commentId = readRequiredId(args.commentId, 'commentId');
+        if (!commentId.ok) return VMarkMcpServer.errorResult(commentId.error);
+        const gen = readRequiredId(args.expectedCommentGen, 'expectedCommentGen');
+        if (!gen.ok) return VMarkMcpServer.errorResult(gen.error);
+        const target = { tabId, commentId: commentId.value, expectedCommentGen: gen.value };
+        if (action === 'reply') {
+          if (typeof args.body !== 'string') return VMarkMcpServer.errorResult('body (string) is required');
+          const data = await server.sendBridgeRequest({ type: 'vmark.comments.reply', ...target, body: args.body });
+          return VMarkMcpServer.successJsonResult(data);
+        }
+        const data = await server.sendBridgeRequest({ type: 'vmark.comments.mark_addressed', ...target });
+        return VMarkMcpServer.successJsonResult(data);
+      } catch (error) {
+        return bridgeErrorResult(error, 'comments.list');
+      }
+    },
+  );
+}

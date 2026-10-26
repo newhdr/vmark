@@ -1,8 +1,8 @@
 # MCP 도구 참조
 
-VMark는 AI 어시스턴트에게 **아홉 가지 복합 MCP 도구** 를 노출합니다: `session`, `workspace`, `document`, `workflow`, `selection`, `browser`, `browser_read`, `coherence`, `coherence_resolve`. 이들은 함께 편집기 척추, 파일/창 라이프사이클, CST 안전 워크플로우 편집, 선택 영역 대상 편집, 제한된 브라우저 탐색, 그리고 워크스페이스 정합성 레이어의 뷰를 다룹니다.
+VMark는 AI 어시스턴트에게 **열 가지 복합 MCP 도구** 를 노출합니다: `session`, `workspace`, `document`, `workflow`, `selection`, `comments`, `browser`, `browser_read`, `coherence`, `coherence_resolve`. 이들은 함께 편집기 척추, 파일/창 라이프사이클, CST 안전 워크플로우 편집, 선택 영역 대상 편집, 제한된 브라우저 탐색, 그리고 워크스페이스 정합성 레이어의 뷰를 다룹니다.
 
-아홉 가지 중 셋 — `session`, `browser_read`, `coherence` — 은 `readOnlyHint: true`를 선언하므로 MCP 클라이언트가 자동 승인할 수 있습니다. `browser`/`browser_read`와 `coherence`/`coherence_resolve`가 애초에 별개의 도구인 이유가 바로 이것입니다: 주석(annotation)은 액션별이 아니라 **도구별** 이므로, ARIA 스냅샷과 `execute_js`를 한데 묶은 도구는 `execute_js`의 위험성을 알려야 합니다. "이것이 무언가를 수정하는가?"를 기준으로 분리하면 각 절반이 진실을 말할 수 있고, 표면에서 정말로 파괴적인 액션들이 도구 목록에서 눈에 띄게 유지됩니다.
+열 가지 중 셋 — `session`, `browser_read`, `coherence` — 은 `readOnlyHint: true`를 선언하므로 MCP 클라이언트가 자동 승인할 수 있습니다. `browser`/`browser_read`와 `coherence`/`coherence_resolve`가 애초에 별개의 도구인 이유가 바로 이것입니다: 주석(annotation)은 액션별이 아니라 **도구별** 이므로, ARIA 스냅샷과 `execute_js`를 한데 묶은 도구는 `execute_js`의 위험성을 알려야 합니다. "이것이 무언가를 수정하는가?"를 기준으로 분리하면 각 절반이 진실을 말할 수 있고, 표면에서 정말로 파괴적인 액션들이 도구 목록에서 눈에 띄게 유지됩니다.
 
 이전 12-도구 / 76-액션 표면은 정리되었습니다. 문서 내 서식 도구 (굵게, 제목, 테이블 등)는 AI 에이전트가 마크다운 왕복을 통해 이미 쉽게 수행하는 작업과 중복되기 때문입니다. `selection`은 (정리 계획의 ADR-7에 따라) 유지되었는데, 큰 파일에서는 전체 문서 왕복이 비경제적이기 때문입니다 — 편집할 때마다 전체 문서를 입력 토큰으로, 전체 문서를 출력 토큰으로 (입력의 약 5배 가격) 지불하며, 쓰기 창이 길어져 오래된 리비전 재시도 루프가 넓어집니다. 전체 근거는 [MCP 정리 계획](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md)을 참조하세요.
 
@@ -220,6 +220,7 @@ MCP를 통해 AI로 Mermaid 다이어그램을 생성할 때 [mermaid-validator 
 | `tabId` | string | 아니오 | 대상 탭 (기본값은 포커스된 탭) |
 | `content` | string | 예 | 새 전체 콘텐츠 |
 | `expected_revision` | string | 아니오 | 가장 최근 read의 리비전 토큰 |
+| `addresses` | string[] | 아니오 | 이 편집이 답하는 `comments.list`의 댓글 ID (최대 64개) |
 | `save` | boolean | 아니오 | 디스크에도 저장 (기본값 `true`); `false`는 탭만 변경 |
 
 기본적으로 쓰기는 저장됩니다: 응답에 `saved: true`가 담기거나, `saved: false`와 함께 `save_skipped` (`"untitled"` — 탭에 아직 파일이 없으므로 `save_as`를 사용하세요; `"opt_out"` — `save: false`를 전달함) 또는 `save_error` (디스크 쓰기 실패) 가 담깁니다. 대상이 마크다운 문서의 활성 WYSIWYG 탭이면 텍스트는 실시간 에디터에 (실행 취소 가능한 한 단계로) 로드되며, 저장되는 것은 에디터가 이를 직렬화한 결과입니다 — 같은 마크다운이지만 정규화될 수 있으므로, 보낸 문자와 정확히 같다는 보장은 없습니다. 다른 탭은 보낸 텍스트를 그대로 저장하되 줄 끝만 정규화합니다.
@@ -253,6 +254,7 @@ AI 클라이언트가 하는 모든 저장은 — `write`, `workspace.save`, `wo
 | `tabId` | string | 아니오 | 대상 탭 |
 | `kind` | string | 예 | `"cjk-format"`, `"cjk-spacing"`, 또는 `"cjk-punctuation"` |
 | `expected_revision` | string | 아니오 | 동시성 토큰 |
+| `addresses` | string[] | 아니오 | 이 편집이 답하는 `comments.list`의 댓글 ID (최대 64개) |
 
 `cjk-format`은 사용자의 CJK 서식 설정을 끝에서 끝까지 적용합니다. `cjk-spacing`은 CJK 문자와 인접한 라틴/숫자 사이에 단일 공백을 삽입합니다. `cjk-punctuation`은 CJK 문자 옆에 있는 ASCII 구두점을 전각 형태로 변환합니다.
 
@@ -283,6 +285,7 @@ GitHub Actions 워크플로우 YAML을 위한 `actionlint` 검증과 **CST 안�
 | `tabId` | string | 아니오 |
 | `patches` | IRPatch[] | 예 |
 | `expected_revision` | string | 아니오 |
+| `addresses` | string[] | 아니오 |
 
 `IRPatch`는 판별 유니온입니다 (`kind` 필드). 지원되는 종류:
 
@@ -343,6 +346,7 @@ GitHub Actions 워크플로우 YAML을 위한 `actionlint` 검증과 **CST 안�
 | `tabId` | string | 아니오 |
 | `content` | string | 예 |
 | `expected_revision` | string | 아니오 (권장) |
+| `addresses` | string[] | 아니오 |
 
 편집기가 현재 선택 영역으로 보고하는 것을 무엇이든 교체합니다. **WYSIWYG 모드에서는**, 일반 인라인 텍스트가 리터럴 텍스트 노드로 삽입되므로 선행/후행 공백이 정확히 왕복됩니다; 마크다운 마커 (`**bold**`, `*italic*`, `` `code` ``, 펜스 코드, 인용구, 목록 등) 를 담은 콘텐츠는 마크다운으로 파싱되어 해당 노드로 삽입됩니다. **소스 모드에서는**, `content`가 항상 원시 텍스트로 이어 붙여집니다 — 소스 표면은 이미 마크다운 바이트입니다. 빈 `content`는 선택 영역을 삭제합니다. 선택 영역이 축소된 경우, `content`는 커서 위치에 삽입됩니다.
 
@@ -351,6 +355,45 @@ GitHub Actions 워크플로우 YAML을 위한 `actionlint` 검증과 **CST 안�
 `STALE`은 `document.write`와 똑같이 `{error: "STALE", message, current_revision}`을 반환합니다. 문서 수준 리비전은 `get`과 `set` 사이의 키 입력을 잡아냅니다. 순수한 커서 이동은 (키 입력 없이) 서버가 중재하지 않습니다 — 사용자가 `get`과 `set` 사이에 커서를 옮겼다면, 편집은 새 위치에 적용됩니다.
 
 포커스된 에디터에서 사용자가 입력기로 텍스트를 조합하는 동안 `set`은 WYSIWYG 모드든 소스 모드든 아무것도 바꾸지 않고 `BUSY`를 반환합니다; 잠시 후 다시 시도하세요. `get`은 이 이유로 거부되지 않습니다.
+
+---
+
+## `comments`
+
+문서에 달린 사용자의 리뷰 댓글을 읽고 답합니다. 댓글을 해결하거나 다시 열거나 삭제하는 것은 사용자의 결정입니다: 이 도구에는 그런 액션이 없으며, 그런 액션을 요청하는 호출은 VMark에 닿기 전에 거부됩니다.
+
+### `list`
+
+| 매개변수 | 타입 | 필수 |
+|---------|------|------|
+| `tabId` | string | 아니오 |
+
+`{doc, generation, threads}`를 반환합니다. 각 스레드는 `id`, `state`(`open`, `addressed`, `resolved`, `reopened` 중 하나), `commentGen`, 고정된 인용 텍스트, 그리고 답글을 담습니다.
+
+### `reply`
+
+| 매개변수 | 타입 | 필수 |
+|---------|------|------|
+| `tabId` | string | 아니오 |
+| `commentId` | string | 예 |
+| `body` | string | 예 |
+| `expectedCommentGen` | string | 예 |
+
+스레드에 답글을 추가합니다. 답글 ID는 VMark가 직접 발급하므로, 재시도된 호출은 첫 번째 결과를 받으며 두 번째 답글을 추가하지 않습니다.
+
+### `mark_addressed`
+
+| 매개변수 | 타입 | 필수 |
+|---------|------|------|
+| `tabId` | string | 아니오 |
+| `commentId` | string | 예 |
+| `expectedCommentGen` | string | 예 |
+
+스레드를 처리됨으로 표시합니다. 해결할지는 여전히 사용자가 정합니다.
+
+`comments.reply`와 `comments.mark_addressed` 모두 `list`가 반환한 스레드의 `commentGen`을 지정합니다. 다음 경우 아무것도 바꾸지 않고 거부됩니다: 그 뒤 스레드가 바뀌었으면 `STALE_COMMENT`(다시 list 하세요), 댓글 ID가 잘못되었거나 이 문서의 댓글을 가리키지 않으면 `INVALID_COMMENT`, 스레드가 해결되었거나 삭제되었으면 `COMMENT_NOT_ALLOWED`, 답글이 너무 많거나 본문이 너무 길면 `COMMENT_LIMIT`, 그리고 저널 거부 `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`.
+
+편집이 댓글에 답한다는 것을 나타내려면, 그 ID들을 `addresses`로 `document.write`, `document.transform`, `workflow.apply_patch` 또는 `selection.set`에 전달하세요. 이 연결은 리비전과 함께 기록되어 문서 기록에 표시되며(나중에 삭제된 댓글은 삭제된 댓글로 표시됩니다), 어떤 스레드의 상태도 바꾸지 않습니다. 64개를 넘는 ID, 중복된 ID, 또는 알 수 없거나 삭제되었거나 해결되었거나 다른 문서의 ID는 `INVALID_ADDRESSES`로 거부되며 아무것도 바뀌지 않습니다.
 
 ---
 

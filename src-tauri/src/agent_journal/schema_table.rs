@@ -26,6 +26,11 @@ pub(crate) fn min_schema(record: &Record) -> u32 {
             certificate: Some(_),
             ..
         } => SCHEMA_V3,
+        Record::Committed { addresses, .. } | Record::Tombstone { addresses, .. }
+            if !addresses.is_empty() =>
+        {
+            SCHEMA_V5
+        }
         Record::JournalHeader { .. }
         | Record::Prepared { .. }
         | Record::Aborted { .. }

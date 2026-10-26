@@ -1,8 +1,8 @@
 # MCP-Tools-Referenz
 
-VMark stellt KI-Assistenten **neun zusammengesetzte MCP-Tools** zur Verfügung: `session`, `workspace`, `document`, `workflow`, `selection`, `browser`, `browser_read`, `coherence` und `coherence_resolve`. Zusammen decken sie das Editor-Rückgrat, den Datei- und Fenster-Lebenszyklus, CST-sichere Workflow-Bearbeitungen, gezielte Bearbeitungen der Auswahl, begrenzte Browser-Navigation und eine Sicht auf die Kohärenzschicht des Arbeitsbereichs ab.
+VMark stellt KI-Assistenten **zehn zusammengesetzte MCP-Tools** zur Verfügung: `session`, `workspace`, `document`, `workflow`, `selection`, `comments`, `browser`, `browser_read`, `coherence` und `coherence_resolve`. Zusammen decken sie das Editor-Rückgrat, den Datei- und Fenster-Lebenszyklus, CST-sichere Workflow-Bearbeitungen, gezielte Bearbeitungen der Auswahl, begrenzte Browser-Navigation und eine Sicht auf die Kohärenzschicht des Arbeitsbereichs ab.
 
-Drei der neun — `session`, `browser_read` und `coherence` — deklarieren `readOnlyHint: true`, sodass ein MCP-Client sie automatisch genehmigen kann. Genau deshalb sind `browser`/`browser_read` und `coherence`/`coherence_resolve` überhaupt getrennte Tools: Annotationen gelten **pro Tool**, nicht pro Aktion, sodass ein Tool, das einen ARIA-Snapshot mit `execute_js` bündelt, die Gefahr von `execute_js` ausweisen müsste. Die Aufteilung entlang der Frage „Verändert dies etwas?“ lässt jede Hälfte die Wahrheit sagen und hält die wirklich destruktiven Aktionen der Oberfläche in der Tool-Liste auffällig.
+Drei der zehn — `session`, `browser_read` und `coherence` — deklarieren `readOnlyHint: true`, sodass ein MCP-Client sie automatisch genehmigen kann. Genau deshalb sind `browser`/`browser_read` und `coherence`/`coherence_resolve` überhaupt getrennte Tools: Annotationen gelten **pro Tool**, nicht pro Aktion, sodass ein Tool, das einen ARIA-Snapshot mit `execute_js` bündelt, die Gefahr von `execute_js` ausweisen müsste. Die Aufteilung entlang der Frage „Verändert dies etwas?“ lässt jede Hälfte die Wahrheit sagen und hält die wirklich destruktiven Aktionen der Oberfläche in der Tool-Liste auffällig.
 
 Die frühere Oberfläche mit 12 Tools und 76 Aktionen wurde reduziert, weil dokumentinterne Formatierungs-Tools (Fettdruck, Überschriften, Tabellen usw.) Arbeit duplizieren, die KI-Agenten ohnehin trivial über einen Markdown-Roundtrip erledigen. `selection` wurde beibehalten (gemäß ADR-7 des Pruning-Plans), weil der Roundtrip über das gesamte Dokument bei großen Dateien unwirtschaftlich ist — jede Bearbeitung bezahlt das ganze Dokument an Eingabe-Tokens, das ganze Dokument an Ausgabe-Tokens (~5× Eingabepreis) und ein längeres Schreibfenster, das die Wiederholungsschleife bei veralteten Revisionen vergrößert. Die vollständige Begründung steht im [MCP-Pruning-Plan](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md).
 
@@ -222,6 +222,7 @@ Den vollständigen Dokumentinhalt ersetzen.
 | `tabId` | string | Nein | Ziel-Tab (Standard ist der fokussierte) |
 | `content` | string | Ja | Neuer Gesamtinhalt |
 | `expected_revision` | string | Nein | Revisions-Token aus dem letzten read |
+| `addresses` | string[] | Nein | Kommentar-IDs aus `comments.list`, die diese Bearbeitung beantwortet (höchstens 64) |
 | `save` | boolean | Nein | Auch auf dem Datenträger speichern (Standard `true`); `false` ändert nur den Tab |
 
 Standardmäßig wird der Schreibvorgang gespeichert: Die Antwort trägt `saved: true` oder `saved: false` mit `save_skipped` (`"untitled"` — der Tab hat noch keine Datei, verwenden Sie `save_as`; `"opt_out"` — Sie haben `save: false` übergeben) oder `save_error` (das Schreiben auf den Datenträger ist fehlgeschlagen). Ist das Ziel der aktive WYSIWYG-Tab eines Markdown-Dokuments, wird der Text in den laufenden Editor geladen (als ein rückgängig machbarer Schritt), und gespeichert wird dessen Serialisierung durch den Editor — dasselbe Markdown, möglicherweise normalisiert, nicht unbedingt genau die gesendeten Zeichen. Andere Tabs speichern den Text wie gesendet, mit normalisierten Zeilenenden.
@@ -255,6 +256,7 @@ Eine deterministische Umschreibung anwenden. Aktuell werden CJK-spezifische Tran
 | `tabId` | string | Nein | Ziel-Tab |
 | `kind` | string | Ja | `"cjk-format"`, `"cjk-spacing"` oder `"cjk-punctuation"` |
 | `expected_revision` | string | Nein | Nebenläufigkeits-Token |
+| `addresses` | string[] | Nein | Kommentar-IDs aus `comments.list`, die diese Bearbeitung beantwortet (höchstens 64) |
 
 `cjk-format` wendet die CJK-Formatierungseinstellungen des Benutzers durchgehend an. `cjk-spacing` fügt einzelne Leerzeichen zwischen CJK-Zeichen und benachbarten lateinischen Zeichen oder Ziffern ein. `cjk-punctuation` konvertiert ASCII-Interpunktion, die neben CJK-Zeichen steht, in ihre Vollbreitenform.
 
@@ -285,6 +287,7 @@ Ein Array von `IRPatch`-Objekten anwenden. Patches werden über die CST-bewusste
 | `tabId` | string | Nein |
 | `patches` | IRPatch[] | Ja |
 | `expected_revision` | string | Nein |
+| `addresses` | string[] | Nein |
 
 `IRPatch` ist eine diskriminierte Vereinigung (`kind`-Feld). Unterstützte Arten:
 
@@ -345,6 +348,7 @@ Gibt zurück:
 | `tabId` | string | Nein |
 | `content` | string | Ja |
 | `expected_revision` | string | Nein (empfohlen) |
+| `addresses` | string[] | Nein |
 
 Ersetzt, was auch immer der Editor als aktuelle Auswahl meldet. **Im WYSIWYG-Modus** wird einfacher Inline-Text als literaler Textknoten eingefügt, sodass führende/nachfolgende Leerzeichen exakt erhalten bleiben; Inhalt mit Markdown-Markierungen (`**bold**`, `*italic*`, `` `code` ``, umzäunter Code, Blockzitate, Listen usw.) wird als Markdown geparst und als die entsprechenden Knoten eingefügt. **Im Quelltext-Modus** wird `content` immer als roher Text eingespleißt — die Quelltext-Oberfläche besteht bereits aus Markdown-Bytes. Leerer `content` löscht die Auswahl. Ist die Auswahl kollabiert, wird `content` an der Cursorposition eingefügt.
 
@@ -353,6 +357,45 @@ Gibt bei Erfolg `{revision, replaced_chars, applied, durable}` zurück. `replace
 `STALE` gibt `{error: "STALE", message, current_revision}` zurück, genau wie `document.write`. Die Revision auf Dokumentebene erfasst Tastenanschläge zwischen `get` und `set`. Reine Cursorbewegung (ohne Tastenanschlag) wird vom Server nicht arbitriert — wenn der Benutzer den Cursor zwischen `get` und `set` bewegt hat, landet die Bearbeitung an der neuen Position.
 
 `set` gibt `BUSY` zurück und ändert nichts, während der Benutzer im fokussierten Editor mit einer Eingabemethode Text komponiert, im WYSIWYG- wie im Quellmodus; kurz darauf erneut versuchen. `get` wird deswegen nie abgelehnt.
+
+---
+
+## `comments`
+
+Liest die Review-Kommentare des Nutzers zu einem Dokument und beantwortet sie. Einen Kommentar aufzulösen, wieder zu öffnen oder zu löschen, entscheidet der Nutzer: Das Tool hat keine solche Aktion, und ein Aufruf, der eine verlangt, wird abgewiesen, bevor er VMark erreicht.
+
+### `list`
+
+| Parameter | Typ | Erforderlich |
+|-----------|-----|--------------|
+| `tabId` | string | Nein |
+
+Gibt `{doc, generation, threads}` zurück. Jeder Thread trägt seine `id`, seinen `state` (`open`, `addressed`, `resolved` oder `reopened`), seine `commentGen`, den zitierten Text, an dem er verankert ist, und seine Antworten.
+
+### `reply`
+
+| Parameter | Typ | Erforderlich |
+|-----------|-----|--------------|
+| `tabId` | string | Nein |
+| `commentId` | string | Ja |
+| `body` | string | Ja |
+| `expectedCommentGen` | string | Ja |
+
+Fügt dem Thread eine Antwort hinzu. VMark vergibt die Antwort-ID selbst, daher erhält ein wiederholter Aufruf das erste Ergebnis und fügt nie eine zweite Antwort hinzu.
+
+### `mark_addressed`
+
+| Parameter | Typ | Erforderlich |
+|-----------|-----|--------------|
+| `tabId` | string | Nein |
+| `commentId` | string | Ja |
+| `expectedCommentGen` | string | Ja |
+
+Markiert den Thread als bearbeitet. Ob er aufgelöst wird, bleibt dem Nutzer überlassen.
+
+`comments.reply` und `comments.mark_addressed` nennen beide die `commentGen` des Threads, wie `list` sie geliefert hat. Sie werden abgewiesen, ohne etwas zu ändern: mit `STALE_COMMENT`, wenn sich der Thread seitdem geändert hat (erneut auflisten), mit `INVALID_COMMENT`, wenn die Kommentar-ID fehlerhaft ist oder keinen Kommentar dieses Dokuments bezeichnet, mit `COMMENT_NOT_ALLOWED`, wenn der Thread aufgelöst oder gelöscht ist, mit `COMMENT_LIMIT`, wenn der Thread zu viele Antworten hat oder der Text zu lang ist, sowie mit den Journal-Abweisungen `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` und `INVALID_TEXT`.
+
+Um anzugeben, dass eine Bearbeitung Kommentare beantwortet, übergib ihre IDs als `addresses` an `document.write`, `document.transform`, `workflow.apply_patch` oder `selection.set`. Die Verknüpfung wird mit der Revision gespeichert und im Verlauf des Dokuments angezeigt (ein später gelöschter Kommentar erscheint als gelöschter Kommentar); sie verändert keinen Thread. Mehr als 64 IDs, eine doppelte ID oder eine unbekannte, gelöschte, aufgelöste oder zu einem anderen Dokument gehörende ID wird mit `INVALID_ADDRESSES` abgewiesen, und nichts ändert sich.
 
 ---
 

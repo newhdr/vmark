@@ -28,6 +28,9 @@
  *     restore actions are the way back to either side. While its text is
  *     kept, "Show both changes" opens both diffs (`ConcurrentPairDiffs`);
  *     a collected one says its text is no longer kept instead.
+ *   - A revision whose write said it addressed comments lists them; one the
+ *     journal no longer holds reads "deleted comment" (its tombstone keeps
+ *     the id, the comment book does not).
  *   - Restores go through `restoreFromHistory`, one at a time; a second
  *     click while one is in flight is ignored. A restore the editor failed
  *     after applying warns (restored, check the document); one that could
@@ -178,6 +181,13 @@ function RevisionRow({ row: r, docKey, before, hunks, live, onRestore }: RowProp
       )}
       {r.kind === "concurrent" && <div className="mcp-history-popover__note">{t("review.editedInTwoWindows")}</div>}
       {r.kind === "concurrent" && !r.collected && docKey !== null && <LazyConcurrentPairDiffs docKey={docKey} revision={r.revision} />}
+      {r.addresses.length > 0 && (
+        <ul className="mcp-history-hunks" aria-label={t("mcpHistoryAddressed")}>
+          {r.addresses.map((a) => (
+            <li key={a.comment}>{a.deleted ? t("mcpHistoryAddressedDeleted") : a.comment}</li>
+          ))}
+        </ul>
+      )}
       {live && <HunkList hunks={live} label={t("mcpHistoryHunks")} />}
       {hunks?.map((hunk) => <BlockedLine key={hunk.hunkId} hunk={hunk} />)}
       <div className="mcp-history-popover__actions">

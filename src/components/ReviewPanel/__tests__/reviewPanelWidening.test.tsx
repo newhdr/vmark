@@ -68,6 +68,7 @@ function historyBlocking(block: { reason: BreakReason; origin: string }): Docume
         tool: "document.write",
         restore: false,
         collected: false,
+        addresses: [],
       },
     ],
     truncated: false,

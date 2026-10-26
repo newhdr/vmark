@@ -1,8 +1,8 @@
 # Référence des outils MCP
 
-VMark expose **neuf outils MCP composites** aux assistants IA&nbsp;: `session`, `workspace`, `document`, `workflow`, `selection`, `browser`, `browser_read`, `coherence` et `coherence_resolve`. Ensemble, ils couvrent la colonne vertébrale de l'éditeur, le cycle de vie fichier/fenêtre, les modifications de workflow sûres au CST, les modifications ciblées sur la sélection, la navigation web bornée et une vue de la couche de cohérence de l'espace de travail.
+VMark expose **dix outils MCP composites** aux assistants IA&nbsp;: `session`, `workspace`, `document`, `workflow`, `selection`, `comments`, `browser`, `browser_read`, `coherence` et `coherence_resolve`. Ensemble, ils couvrent la colonne vertébrale de l'éditeur, le cycle de vie fichier/fenêtre, les modifications de workflow sûres au CST, les modifications ciblées sur la sélection, la navigation web bornée et une vue de la couche de cohérence de l'espace de travail.
 
-Trois des neuf — `session`, `browser_read` et `coherence` — déclarent `readOnlyHint: true`, de sorte qu'un client MCP peut les approuver automatiquement. C'est précisément pour cela que `browser`/`browser_read` et `coherence`/`coherence_resolve` sont des outils distincts&nbsp;: les annotations sont **par outil**, pas par action&nbsp;; un outil qui regroupe un instantané ARIA avec `execute_js` doit donc annoncer le danger d'`execute_js`. Répartir selon «&nbsp;est-ce que ceci modifie quelque chose&nbsp;?&nbsp;» permet à chaque moitié de dire la vérité, et garde les actions véritablement destructrices de la surface bien visibles dans la liste des outils.
+Trois des dix — `session`, `browser_read` et `coherence` — déclarent `readOnlyHint: true`, de sorte qu'un client MCP peut les approuver automatiquement. C'est précisément pour cela que `browser`/`browser_read` et `coherence`/`coherence_resolve` sont des outils distincts&nbsp;: les annotations sont **par outil**, pas par action&nbsp;; un outil qui regroupe un instantané ARIA avec `execute_js` doit donc annoncer le danger d'`execute_js`. Répartir selon «&nbsp;est-ce que ceci modifie quelque chose&nbsp;?&nbsp;» permet à chaque moitié de dire la vérité, et garde les actions véritablement destructrices de la surface bien visibles dans la liste des outils.
 
 La précédente surface de 12 outils / 76 actions a été élaguée parce que les outils de mise en forme intra-document (gras, titres, tableaux, etc.) dupliquent un travail que les agents IA effectuent déjà trivialement via un aller-retour Markdown. `selection` a été conservé (conformément à l'ADR-7 du plan d'élagage) parce que l'aller-retour sur le document complet n'est pas économique sur les gros fichiers — chaque modification paie le document entier en jetons d'entrée, le document entier en jetons de sortie (~5× le prix de l'entrée), et une fenêtre d'écriture plus longue qui élargit la boucle de réessai sur révision obsolète. Voir [le plan d'élagage MCP](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md) pour la justification complète.
 
@@ -245,6 +245,7 @@ Remplacer le contenu complet du document.
 | `tabId` | string | Non | Onglet cible (par défaut, focalisé) |
 | `content` | string | Oui | Nouveau contenu complet |
 | `expected_revision` | string | Non | Jeton de révision de la lecture la plus récente |
+| `addresses` | string[] | Non | Identifiants de commentaires issus de `comments.list` auxquels cette modification répond (64 au plus) |
 | `save` | boolean | Non | Enregistrer aussi sur le disque (par défaut `true`)&nbsp;; `false` ne modifie que l'onglet |
 
 Par défaut, l'écriture est enregistrée&nbsp;: la réponse porte `saved: true`, ou `saved: false` avec `save_skipped` (`"untitled"` — l'onglet n'a pas encore de fichier, utilisez `save_as`&nbsp;; `"opt_out"` — vous avez passé `save: false`) ou `save_error` (l'écriture sur le disque a échoué). Lorsque la cible est l'onglet WYSIWYG actif d'un document Markdown, le texte est chargé dans l'éditeur en direct (en une seule étape annulable), et ce qui est enregistré est la sérialisation qu'en fait l'éditeur — le même Markdown, éventuellement normalisé, pas nécessairement les caractères exacts envoyés. Les autres onglets enregistrent le texte tel qu'envoyé, fins de ligne normalisées.
@@ -278,6 +279,7 @@ Appliquer une réécriture déterministe. Prend actuellement en charge les trans
 | `tabId` | string | Non | Onglet cible |
 | `kind` | string | Oui | `"cjk-format"`, `"cjk-spacing"` ou `"cjk-punctuation"` |
 | `expected_revision` | string | Non | Jeton de concurrence |
+| `addresses` | string[] | Non | Identifiants de commentaires issus de `comments.list` auxquels cette modification répond (64 au plus) |
 
 `cjk-format` applique de bout en bout les paramètres de mise en forme CJK de l'utilisateur. `cjk-spacing` insère des espaces simples entre les caractères CJK et les caractères latins/chiffres adjacents. `cjk-punctuation` convertit la ponctuation ASCII qui se trouve à côté des caractères CJK vers sa forme pleine largeur.
 
@@ -308,6 +310,7 @@ Appliquer un tableau d'objets `IRPatch`. Les patches sont distribués via les mu
 | `tabId` | string | Non |
 | `patches` | IRPatch[] | Oui |
 | `expected_revision` | string | Non |
+| `addresses` | string[] | Non |
 
 `IRPatch` est une union discriminée (champ `kind`). Types pris en charge&nbsp;:
 
@@ -368,6 +371,7 @@ Retourne&nbsp;:
 | `tabId` | string | Non |
 | `content` | string | Oui |
 | `expected_revision` | string | Non (recommandé) |
+| `addresses` | string[] | Non |
 
 Remplace ce que l'éditeur signale comme la sélection actuelle. **En mode WYSIWYG**, le texte en ligne simple est inséré comme un nœud de texte littéral, de sorte que les espaces de début/fin sont préservés à l'identique&nbsp;; un contenu portant des marqueurs markdown (`**bold**`, `*italic*`, `` `code` ``, code clôturé, citations, listes, etc.) est analysé comme du markdown et inséré sous forme des nœuds correspondants. **En mode source**, `content` est toujours inséré comme du texte brut — la surface source est déjà des octets markdown. Un `content` vide supprime la sélection. Lorsque la sélection est réduite, `content` est inséré au niveau du curseur.
 
@@ -376,6 +380,45 @@ Retourne `{revision, replaced_chars, applied, durable}` en cas de succès. `repl
 `STALE` retourne `{error: "STALE", message, current_revision}`, exactement comme `document.write`. La révision au niveau du document capte les frappes entre `get` et `set`. Le simple déplacement du curseur (sans frappe) n'est pas arbitré par le serveur — si l'utilisateur a déplacé le curseur entre `get` et `set`, la modification se produit à la nouvelle position.
 
 `set` renvoie `BUSY`, sans rien modifier, pendant que l'utilisateur compose du texte avec une méthode de saisie dans l'éditeur actif, en mode WYSIWYG comme en mode Source&nbsp;; réessayez peu après. `get` n'est jamais refusé pour cette raison.
+
+---
+
+## `comments`
+
+Lit les commentaires de relecture de l'utilisateur sur un document et y répond. Résoudre, rouvrir et supprimer un commentaire sont des décisions de l'utilisateur&nbsp;: l'outil n'a pas ces actions, et un appel qui en demande une est refusé avant d'atteindre VMark.
+
+### `list`
+
+| Paramètre | Type | Requis |
+|-----------|------|--------|
+| `tabId` | string | Non |
+
+Renvoie `{doc, generation, threads}`. Chaque fil porte son `id`, son `state` (`open`, `addressed`, `resolved` ou `reopened`), son `commentGen`, le texte cité auquel il est ancré et ses réponses.
+
+### `reply`
+
+| Paramètre | Type | Requis |
+|-----------|------|--------|
+| `tabId` | string | Non |
+| `commentId` | string | Oui |
+| `body` | string | Oui |
+| `expectedCommentGen` | string | Oui |
+
+Ajoute une réponse au fil. VMark attribue lui-même l'identifiant de la réponse&nbsp;: un appel réessayé reçoit le premier résultat et n'ajoute jamais de seconde réponse.
+
+### `mark_addressed`
+
+| Paramètre | Type | Requis |
+|-----------|------|--------|
+| `tabId` | string | Non |
+| `commentId` | string | Oui |
+| `expectedCommentGen` | string | Oui |
+
+Marque le fil comme traité. Le résoudre reste la décision de l'utilisateur.
+
+`comments.reply` et `comments.mark_addressed` indiquent tous deux le `commentGen` du fil tel que `list` l'a renvoyé. Elles sont refusées, sans rien changer, avec `STALE_COMMENT` quand le fil a changé depuis (relistez), `INVALID_COMMENT` quand l'identifiant est mal formé ou ne désigne aucun commentaire de ce document, `COMMENT_NOT_ALLOWED` quand le fil est résolu ou supprimé, `COMMENT_LIMIT` quand le fil a trop de réponses ou que le texte est trop long, et avec les refus du journal `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` et `INVALID_TEXT`.
+
+Pour indiquer qu'une modification répond à des commentaires, passez leurs identifiants dans `addresses` à `document.write`, `document.transform`, `workflow.apply_patch` ou `selection.set`. Le lien est enregistré avec la révision et affiché dans l'historique du document (un commentaire supprimé plus tard apparaît comme commentaire supprimé)&nbsp;; il ne fait avancer aucun fil. Plus de 64 identifiants, un identifiant répété, ou un identifiant inconnu, supprimé, résolu ou d'un autre document est refusé avec `INVALID_ADDRESSES`, et rien ne change.
 
 ---
 

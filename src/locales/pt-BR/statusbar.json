@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "Restaurar o estado anterior a esta alteração",
   "mcpHistoryRestoredVersion": "A versão selecionada foi restaurada",
   "mcpHistoryTextCollected": "Texto não é mais mantido",
+  "mcpHistoryAddressed": "Comentários atendidos",
+  "mcpHistoryAddressedDeleted": "comentário excluído",
   "mcpHistoryRestoreTag": "restauração",
   "mcpHistoryKindControlled": "Gravação registrada",
   "mcpHistoryKindObserved": "Edição encontrada ao salvar",

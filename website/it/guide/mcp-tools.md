@@ -1,8 +1,8 @@
 # Riferimento Strumenti MCP
 
-VMark espone **nove strumenti MCP compositi** agli assistenti IA: `session`, `workspace`, `document`, `workflow`, `selection`, `browser`, `browser_read`, `coherence` e `coherence_resolve`. Insieme coprono la spina dorsale dell'editor, il ciclo di vita di file/finestre, le modifiche CST-safe ai workflow, le modifiche mirate alla selezione, la navigazione delimitata del browser e una vista del livello di coerenza del workspace.
+VMark espone **dieci strumenti MCP compositi** agli assistenti IA: `session`, `workspace`, `document`, `workflow`, `selection`, `comments`, `browser`, `browser_read`, `coherence` e `coherence_resolve`. Insieme coprono la spina dorsale dell'editor, il ciclo di vita di file/finestre, le modifiche CST-safe ai workflow, le modifiche mirate alla selezione, la navigazione delimitata del browser e una vista del livello di coerenza del workspace.
 
-Tre dei nove — `session`, `browser_read` e `coherence` — dichiarano `readOnlyHint: true`, quindi un client MCP può auto-approvarli. È per questo che `browser`/`browser_read` e `coherence`/`coherence_resolve` sono strumenti separati: le annotazioni sono **per strumento**, non per azione, quindi uno strumento che raggruppa uno snapshot ARIA con `execute_js` deve segnalare la pericolosità di `execute_js`. Dividere secondo il criterio «questo modifica qualcosa?» permette a ciascuna metà di dire la verità, e mantiene ben visibili nell'elenco degli strumenti le azioni realmente distruttive della superficie.
+Tre dei dieci — `session`, `browser_read` e `coherence` — dichiarano `readOnlyHint: true`, quindi un client MCP può auto-approvarli. È per questo che `browser`/`browser_read` e `coherence`/`coherence_resolve` sono strumenti separati: le annotazioni sono **per strumento**, non per azione, quindi uno strumento che raggruppa uno snapshot ARIA con `execute_js` deve segnalare la pericolosità di `execute_js`. Dividere secondo il criterio «questo modifica qualcosa?» permette a ciascuna metà di dire la verità, e mantiene ben visibili nell'elenco degli strumenti le azioni realmente distruttive della superficie.
 
 La precedente superficie di 12 strumenti / 76 azioni è stata ridotta perché gli strumenti di formattazione interni al documento (grassetto, intestazioni, tabelle, ecc.) duplicano un lavoro che gli agenti IA fanno già banalmente tramite il round-trip Markdown. `selection` è stato mantenuto (secondo l'ADR-7 del piano di riduzione) perché il round-trip dell'intero documento è antieconomico sui file grandi — ogni modifica paga l'intero documento in token di input, l'intero documento in token di output (~5× il prezzo dell'input), e una finestra di scrittura più lunga che allarga il ciclo di ripetizione per revisione obsoleta. Vedi [il piano di riduzione MCP](https://github.com/xiaolai/vmark/blob/main/.claude/adr/plans/20260504-mcp-pruning.md) per la motivazione completa.
 
@@ -243,6 +243,7 @@ Sostituisce il contenuto completo del documento.
 | `tabId` | stringa | No | Scheda di destinazione (predefinito su quella in primo piano) |
 | `content` | stringa | Sì | Nuovo contenuto completo |
 | `expected_revision` | stringa | No | Token di revisione dalla lettura più recente |
+| `addresses` | stringa[] | No | Id dei commenti da `comments.list` a cui questa modifica risponde (al massimo 64) |
 | `save` | booleano | No | Salva anche su disco (predefinito `true`); `false` modifica solo la scheda |
 
 Per impostazione predefinita la scrittura viene salvata: la risposta riporta `saved: true`, oppure `saved: false` con `save_skipped` (`"untitled"` — la scheda non ha ancora un file, usa `save_as`; `"opt_out"` — hai passato `save: false`) o `save_error` (la scrittura su disco non è riuscita). Quando la destinazione è la scheda WYSIWYG attiva di un documento Markdown, il testo viene caricato nell'editor attivo (come un unico passo annullabile), e ciò che viene salvato è la serializzazione dell'editor — lo stesso Markdown, eventualmente normalizzato, non necessariamente gli stessi identici caratteri inviati. Le altre schede salvano il testo così come inviato, con i fine riga normalizzati.
@@ -276,6 +277,7 @@ Applica una riscrittura deterministica. Attualmente supporta trasformazioni spec
 | `tabId` | stringa | No | Scheda di destinazione |
 | `kind` | stringa | Sì | `"cjk-format"`, `"cjk-spacing"` o `"cjk-punctuation"` |
 | `expected_revision` | stringa | No | Token di concorrenza |
+| `addresses` | stringa[] | No | Id dei commenti da `comments.list` a cui questa modifica risponde (al massimo 64) |
 
 `cjk-format` applica le impostazioni di formattazione CJK dell'utente end-to-end. `cjk-spacing` inserisce singoli spazi tra caratteri CJK e Latini/cifre adiacenti. `cjk-punctuation` converte la punteggiatura ASCII che si trova accanto ai caratteri CJK nella sua forma a larghezza intera.
 
@@ -306,6 +308,7 @@ Applica un array di oggetti `IRPatch`. Le patch sono inviate attraverso i mutato
 | `tabId` | stringa | No |
 | `patches` | IRPatch[] | Sì |
 | `expected_revision` | stringa | No |
+| `addresses` | stringa[] | No |
 
 `IRPatch` è un'unione discriminata (campo `kind`). Tipi supportati:
 
@@ -366,6 +369,7 @@ Restituisce:
 | `tabId` | stringa | No |
 | `content` | stringa | Sì |
 | `expected_revision` | stringa | No (consigliato) |
+| `addresses` | stringa[] | No |
 
 Sostituisce qualunque cosa l'editor riporti come selezione corrente. **In modalità WYSIWYG**, il testo inline semplice viene inserito come nodo di testo letterale così che gli spazi iniziali/finali facciano round-trip esattamente; il contenuto che porta marcatori markdown (`**bold**`, `*italic*`, `` `code` ``, codice recintato, citazioni, elenchi, ecc.) viene analizzato come markdown e inserito come i nodi corrispondenti. **In modalità sorgente**, `content` viene sempre inserito come testo grezzo — la superficie sorgente è già byte markdown. Un `content` vuoto elimina la selezione. Quando la selezione è collassata, `content` viene inserito in corrispondenza del cursore.
 
@@ -374,6 +378,45 @@ Restituisce `{revision, replaced_chars, applied, durable}` in caso di successo. 
 `STALE` restituisce `{error: "STALE", message, current_revision}` esattamente come `document.write`. La revisione a livello di documento intercetta le battiture tra `get` e `set`. Il puro spostamento del cursore (senza una battitura) non è arbitrato dal server — se l'utente ha spostato il cursore tra `get` e `set`, la modifica finisce nella nuova posizione.
 
 `set` restituisce `BUSY`, senza cambiare nulla, mentre l'utente compone testo con un metodo di input nell'editor attivo, in modalità WYSIWYG o Sorgente; riprova a breve. `get` non viene mai rifiutato per questo motivo.
+
+---
+
+## `comments`
+
+Legge i commenti di revisione dell'utente su un documento e risponde. Risolvere, riaprire ed eliminare un commento sono decisioni dell'utente: lo strumento non ha queste azioni, e una chiamata che ne chiede una viene rifiutata prima di raggiungere VMark.
+
+### `list`
+
+| Parametro | Tipo | Richiesto |
+|-----------|------|-----------|
+| `tabId` | stringa | No |
+
+Restituisce `{doc, generation, threads}`. Ogni thread riporta il suo `id`, il suo `state` (`open`, `addressed`, `resolved` o `reopened`), il suo `commentGen`, il testo citato a cui è ancorato e le sue risposte.
+
+### `reply`
+
+| Parametro | Tipo | Richiesto |
+|-----------|------|-----------|
+| `tabId` | stringa | No |
+| `commentId` | stringa | Sì |
+| `body` | stringa | Sì |
+| `expectedCommentGen` | stringa | Sì |
+
+Aggiunge una risposta al thread. VMark genera da sé l'id della risposta, quindi una chiamata ripetuta riceve il primo risultato e non aggiunge mai una seconda risposta.
+
+### `mark_addressed`
+
+| Parametro | Tipo | Richiesto |
+|-----------|------|-----------|
+| `tabId` | stringa | No |
+| `commentId` | stringa | Sì |
+| `expectedCommentGen` | stringa | Sì |
+
+Segna il thread come gestito. Risolverlo resta una decisione dell'utente.
+
+`comments.reply` e `comments.mark_addressed` indicano entrambi il `commentGen` del thread come restituito da `list`. Vengono rifiutate, senza cambiare nulla, con `STALE_COMMENT` quando il thread è cambiato nel frattempo (elenca di nuovo), `INVALID_COMMENT` quando l'id del commento è malformato o non indica alcun commento di questo documento, `COMMENT_NOT_ALLOWED` quando il thread è risolto o eliminato, `COMMENT_LIMIT` quando il thread ha troppe risposte o il testo è troppo lungo, e con i rifiuti del journal `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` e `INVALID_TEXT`.
+
+Per indicare che una modifica risponde a dei commenti, passa i loro id come `addresses` a `document.write`, `document.transform`, `workflow.apply_patch` o `selection.set`. Il collegamento viene registrato con la revisione e mostrato nella cronologia del documento (un commento eliminato in seguito appare come commento eliminato); non sposta alcun thread. Più di 64 id, un id ripetuto o un id sconosciuto, eliminato, risolto o di un altro documento viene rifiutato con `INVALID_ADDRESSES`, e nulla cambia.
 
 ---
 

@@ -2,6 +2,7 @@
 //! book the projection keeps of every retained thread.
 //!
 //! - `ids`, `records`, `replies`: the persisted and answered shapes.
+//! - `addresses`: the set of comments a controlled write says it addresses.
 //! - `rules`: who may do what from which state; `commentGen` exhaustion.
 //! - `bounds`: the caps and the bytes each record is charged.
 //! - `binding`: invariants of one record, checked on decode and append.
@@ -19,6 +20,7 @@
 //!
 //! @module agent_journal/comment
 
+pub mod addresses;
 pub mod binding;
 pub mod book;
 pub mod bounds;
@@ -48,6 +50,9 @@ mod comment_bounds_tests;
 #[path = "../comment_storage.test.rs"]
 mod comment_storage_tests;
 
+#[cfg(test)]
+#[path = "../comment_addresses.test.rs"]
+mod comment_addresses_tests;
 #[cfg(test)]
 #[path = "../comment_admission.test.rs"]
 mod comment_admission_tests;

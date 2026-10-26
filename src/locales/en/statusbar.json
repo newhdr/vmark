@@ -25,6 +25,8 @@
   "mcpHistoryRestoreBefore": "Restore to before this change",
   "mcpHistoryRestoredVersion": "Restored the selected version",
   "mcpHistoryTextCollected": "Text no longer kept",
+  "mcpHistoryAddressed": "Addressed comments",
+  "mcpHistoryAddressedDeleted": "deleted comment",
   "mcpHistoryRestoreTag": "restore",
   "mcpHistoryKindControlled": "Recorded write",
   "mcpHistoryKindObserved": "Edit found at save",

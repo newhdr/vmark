@@ -113,6 +113,7 @@ impl Writer {
             resolves: req.resolves,
             provenance: Some(payload),
             effects: req.effects,
+            addresses: g.addresses.get(&txn).cloned().unwrap_or_default(),
         };
         let durable = self.terminal(&mut g, t.doc, txn, record, vec![(post, req.postimage)])?;
         let out = CommitOutcome {
@@ -210,6 +211,7 @@ impl Writer {
             g.admit_queued_terminal(&queued)?;
             g.degraded.entry(doc).or_default().push_back(queued);
             g.requests.owners.remove(&txn);
+            g.addresses.remove(&txn);
             return Ok(false);
         }
         let refs: Vec<(&BlobHash, &str)> =
@@ -218,12 +220,14 @@ impl Writer {
             Ok(_) => {
                 g.reservations.remove(&doc);
                 g.requests.owners.remove(&txn);
+                g.addresses.remove(&txn);
                 Ok(true)
             }
             Err(TxnError::Io(_)) => {
                 g.admit_queued_terminal(&queued)?;
                 g.degraded.entry(doc).or_default().push_back(queued);
                 g.requests.owners.remove(&txn);
+                g.addresses.remove(&txn);
                 Ok(false)
             }
             Err(e) => Err(e),

@@ -139,6 +139,7 @@ fn hunks_ranges_transitions_effects_and_items_refuse_unknown_fields() {
         hunks: vec![hunk()],
         transitions: vec![transition()],
         attached_to: None,
+        addresses: vec![],
     });
     for p in [
         "/record/reviewOp",
@@ -300,5 +301,16 @@ fn unit_like_actors_and_principals_keep_their_bare_tag_on_the_wire() {
         let v = json!({"state": state});
         let back: Principal = serde_json::from_value(v.clone()).expect("decodes");
         assert_eq!(serde_json::to_value(back).unwrap(), v);
+    }
+}
+
+impl Record {
+    /// The record's `kind` tag, read from its serialized form so it cannot
+    /// drift from the serde schema.
+    pub fn kind(&self) -> String {
+        serde_json::to_value(self).expect("schema types always serialize")["kind"]
+            .as_str()
+            .expect("every record carries a kind tag")
+            .to_owned()
     }
 }

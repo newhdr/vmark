@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::receipt::RequestId;
 use crate::agent_journal::capture_seq::CaptureId;
+use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance::Certificate;
@@ -60,6 +61,10 @@ pub struct ControlledPrepareRequest {
     /// must extend the session's last recorded one (`capture_seq`).
     #[serde(default)]
     pub capture: Option<CaptureId>,
+    /// The comments this write says it addresses; checked as a set before
+    /// the prepare (`comment::addresses`) and kept on its `committed`.
+    #[serde(default)]
+    pub addresses: Vec<CommentId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

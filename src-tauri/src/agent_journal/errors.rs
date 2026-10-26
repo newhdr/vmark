@@ -60,6 +60,10 @@ pub enum TxnError {
     /// so the window can resend the same request without the map, as a
     /// `snapshotOnly` barrier, instead of losing the record.
     InvalidProvenance(String),
+    /// A write's `addresses` that is not a set of at most 64 unresolved threads
+    /// of its document. Wire token `INVALID_REQUEST` with `field:
+    /// addresses`, so the bridge can tell the agent which argument to fix.
+    InvalidAddresses(String),
     /// A comment anchor's quote, exact or widened to whole blocks, is over
     /// the 4,096-byte UTF-8 bound. Refused, never truncated: a shorter
     /// quote would be a different anchor.
@@ -120,7 +124,9 @@ impl TxnError {
             Self::StalePage(_) => "STALE_PAGE",
             Self::StaleRegistration(_) => "STALE_REQUEST",
             Self::Request(r) => r.state.code(),
-            Self::InvalidRequest(_) | Self::InvalidProvenance(_) => "INVALID_REQUEST",
+            Self::InvalidRequest(_) | Self::InvalidProvenance(_) | Self::InvalidAddresses(_) => {
+                "INVALID_REQUEST"
+            }
             Self::CommentAnchorTooLong { .. } => "COMMENT_ANCHOR_TOO_LONG",
             Self::StaleComment { .. } => "STALE_COMMENT",
             Self::CommentStateExhausted { .. } => "COMMENT_STATE_EXHAUSTED",

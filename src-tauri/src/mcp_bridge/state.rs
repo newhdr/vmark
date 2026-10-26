@@ -236,6 +236,7 @@ pub(crate) fn is_read_only_operation(request_type: &str) -> bool {
             | "vmark.document.read"
             | "vmark.selection.get"
             | "vmark.workflow.validate"
+            | "vmark.comments.list"
             // Embedded-browser read-class ops. Wire
             // types in server/mcp/src/tools/browser.ts. These mutate
             // nothing; the bounded waits especially must not hold the global

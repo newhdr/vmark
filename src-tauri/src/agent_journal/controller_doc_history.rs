@@ -20,6 +20,9 @@
 //!   - A hunk row carries what a review decision is checked against: its
 //!     `reviewGen`, its mapped span (none once blocked) and edited-since
 //!     flag; the reply names the document head the decision's CAS expects.
+//!   - A controlled write's row lists the comments it said it addresses;
+//!     one whose thread is deleted or gone is marked `deleted`, read under
+//!     the same lock as the comment book.
 //!   - Each row names its linear parent, so "restore what came before" is a
 //!     restore of that revision; `degraded` says the document has a record
 //!     queued that has not reached the disk yet.
@@ -31,6 +34,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
+use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::controller::{decode, Controller};
 use crate::agent_journal::ids::DocId;
 use crate::agent_journal::ids::{HunkId, RevisionId};
@@ -65,6 +69,17 @@ pub struct HistoryRow {
     pub restore: bool,
     /// Collected by retention: its text is gone.
     pub collected: bool,
+    /// The comments a controlled write said it addresses.
+    pub addresses: Vec<AddressedRow>,
+}
+
+/// A comment a revision addresses, and whether its thread is gone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressedRow {
+    pub comment: CommentId,
+    /// Deleted, or no longer in the comment book at all.
+    pub deleted: bool,
 }
 
 /// A live hunk whose automatic revert is blocked.
@@ -157,6 +172,14 @@ fn rows_of(p: &Projection, doc: DocId, blocked: &[BlockedRow]) -> (Vec<HistoryRo
                 tool: txn.map(|t| t.tool.clone()),
                 restore: matches!(m.review_op, ReviewOp::Restore { .. }),
                 collected: m.collected,
+                addresses: m
+                    .addresses
+                    .iter()
+                    .map(|&comment| AddressedRow {
+                        comment,
+                        deleted: p.comments.threads.get(&comment).is_none_or(|t| t.deleted),
+                    })
+                    .collect(),
             }
         })
         .collect();

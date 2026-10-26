@@ -41,6 +41,7 @@ function history(): DocumentHistory {
         tool: "document.write",
         restore: false,
         collected: false,
+        addresses: [],
       },
     ],
     truncated: false,

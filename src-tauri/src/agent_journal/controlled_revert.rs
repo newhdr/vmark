@@ -177,5 +177,6 @@ pub(crate) fn revert_prep(req: RevertPrepareRequest) -> Result<Prep, TxnError> {
         baseline_touched: req.baseline_touched,
         certificate: None,
         capture: req.capture,
+        addresses: Vec::new(),
     })
 }

@@ -132,6 +132,7 @@ macro_rules! all_commands {
             agent_journal::comment::commands_agent::comment_agent_create,
             agent_journal::comment::commands_agent::comment_agent_reply,
             agent_journal::comment::commands_agent::comment_agent_mark_addressed,
+            agent_journal::comment::commands_agent::comment_agent_list,
             mcp_bridge::path_guard::mcp_bridge_check_path,
             mcp_config::commands::mcp_config_diagnose,
             mcp_config::commands::mcp_config_preview,

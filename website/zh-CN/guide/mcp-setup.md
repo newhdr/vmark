@@ -233,7 +233,7 @@ AI 助手 <--stdio--> MCP 服务器 <--WebSocket--> VMark 编辑器
 
 ## 可用功能
 
-连接后，你的 AI 助手拥有九个工具：
+连接后，你的 AI 助手拥有十个工具：
 
 | 工具 | 涵盖范围 |
 |------|----------|
@@ -241,6 +241,7 @@ AI 助手 <--stdio--> MCP 服务器 <--WebSocket--> VMark 编辑器
 | `workspace` | 新建、打开、保存、另存为、关闭、切换标签页、聚焦窗口、打开工作区 |
 | `document` | 以 Markdown 读写整个文档；中日韩格式化转换 |
 | `selection` | 读取并替换选中的文本 |
+| `comments` | 列出文档的审阅评论、回复评论并将其标记为已处理（助手不能解决评论） |
 | `workflow` | 针对 GitHub Actions YAML 的 CST 安全补丁与校验 |
 | `browser` / `browser_read` | macOS 上的内置浏览器自动化——分别为会产生修改的一半和只读的一半 |
 | `coherence` / `coherence_resolve` | 读取一致性层；在你授予的委托下处理过时的边 |

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::receipt::Receipt;
+use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::comment::records::{
     CommentCreated, CommentDeleted, CommentReplied, CommentState,
 };
@@ -173,6 +174,9 @@ pub enum Record {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provenance: Option<ProvenancePayload>,
         effects: ReviewEffects,
+        /// The comments the write says it addresses (v5): a claim only.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        addresses: Vec<CommentId>,
     },
     /// Appended at startup for every `prepared` without a terminal record.
     Uncommitted,
@@ -239,6 +243,9 @@ pub enum Record {
         /// The hunk a collected `hunkRevert` revision was attached to.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attached_to: Option<HunkId>,
+        /// The collected `committed`'s addresses (v5).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        addresses: Vec<CommentId>,
     },
     /// An editing epoch is durably armed before its maps are eligible.
     EpochArmed {
@@ -281,18 +288,6 @@ pub enum Record {
         description: String,
         timestamp: u64,
     },
-}
-
-#[cfg(test)]
-impl Record {
-    /// The record's `kind` tag, read from its serialized form so it cannot
-    /// drift from the serde schema.
-    pub fn kind(&self) -> String {
-        serde_json::to_value(self).expect("schema types always serialize")["kind"]
-            .as_str()
-            .expect("every record carries a kind tag")
-            .to_owned()
-    }
 }
 
 #[cfg(test)]

@@ -22,8 +22,10 @@ import {
 import { JOURNAL_REFUSALS } from './journalRefusals.js';
 import { bridgeErrorResult } from './staleError.js';
 import {
+  addressesSchema,
   optionalIdSchema,
   optionalRevisionSchema,
+  readOptionalAddresses,
   readOptionalId,
   readOptionalRevision,
 } from './toolArgs.js';
@@ -63,6 +65,7 @@ export function registerSelectionTool(server: VMarkMcpServer): void {
         expected_revision: optionalRevisionSchema(
           'Optimistic-concurrency token from the most recent read or selection.get (set only).',
         ),
+        addresses: addressesSchema(),
       },
       // Declared on the same terms as `document`'s (see the long note there):
       // ONE schema serves get and set, every field is optional, and `{}`
@@ -130,6 +133,8 @@ export function registerSelectionTool(server: VMarkMcpServer): void {
       const revision = readOptionalRevision(args.expected_revision);
       if (!revision.ok) return VMarkMcpServer.errorResult(revision.error);
       const expected_revision = revision.value;
+      const addressed = readOptionalAddresses(args.addresses);
+      if (!addressed.ok) return VMarkMcpServer.errorResult(addressed.error);
 
       try {
         if (action === 'get') {
@@ -148,6 +153,7 @@ export function registerSelectionTool(server: VMarkMcpServer): void {
             tabId,
             content: args.content,
             expected_revision,
+            ...(addressed.value ? { addresses: addressed.value } : {}),
           });
           return structuredJsonResult(data);
         }

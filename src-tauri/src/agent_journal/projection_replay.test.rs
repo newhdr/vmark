@@ -208,6 +208,7 @@ fn committed(post: &str) -> Record {
         resolves: None,
         provenance: None,
         effects: ReviewEffects::default(),
+        addresses: vec![],
     }
 }
 
@@ -475,6 +476,7 @@ fn tombstone(
         hunks: vec![],
         transitions: vec![],
         attached_to,
+        addresses: vec![],
     }
 }
 
@@ -624,6 +626,7 @@ fn tombstone_with(
         hunks: effects.new_hunks,
         transitions: effects.transitions,
         attached_to: None,
+        addresses: vec![],
     }
 }
 

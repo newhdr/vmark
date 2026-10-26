@@ -122,12 +122,14 @@ fn all_records() -> Vec<Record> {
             resolves: Some(TxnId::new()),
             provenance: Some(payload()),
             effects: effects(),
+            addresses: vec![],
         },
         Record::Committed {
             postimage: h("b"),
             resolves: None,
             provenance: Some(payload()),
             effects: ReviewEffects::default(),
+            addresses: vec![],
         },
         Record::EpochArmed {
             doc,
@@ -162,6 +164,7 @@ fn all_records() -> Vec<Record> {
             hunks: effects().new_hunks,
             transitions: vec![],
             attached_to: Some(HunkId("h-2".into())),
+            addresses: vec![],
         },
         Record::LegacyCheckpoint {
             legacy_id: "ck".into(),
@@ -405,6 +408,7 @@ fn decoder_refuses_missing_zero_or_malformed_versions_and_unknown_kinds() {
                 resolves: None,
                 provenance: Some(payload()),
                 effects: ReviewEffects::default(),
+                addresses: vec![],
             }))
             .unwrap();
             v["record"].as_object_mut().unwrap().remove("provenance");
@@ -688,6 +692,7 @@ fn a_refused_first_record_of_a_document_creates_no_document() {
             to: HunkState::Superseded,
         }],
         attached_to: None,
+        addresses: vec![],
     };
     for record in [unknown, Record::EpochArmed { doc, epoch: 2 }] {
         let mut p = Projection::default();

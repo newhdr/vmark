@@ -51,7 +51,8 @@ export interface PrepareSpec<P> {
     | "agent_journal_restore_prepare"
     | "agent_journal_revert_prepare"
     | "comment_user_create"
-    | "comment_user_reply";
+    | "comment_user_reply"
+    | "comment_agent_reply";
   /**
    * The request's fields, without `requestId` and the page identity. A
    * comment reply records no baseline: it has no `baselineProvenance`, so
@@ -116,6 +117,8 @@ export interface PrepareInput {
   certificate?: SelectionCertificate | null;
   /** The provenance freeze this buffer was taken under; omitted when nothing froze it. */
   capture?: CaptureId;
+  /** The comments the write says it addresses (`c<n>` ids); omitted when none. */
+  addresses?: readonly string[];
 }
 
 import type { PreparedTxn } from "./journalIpc";

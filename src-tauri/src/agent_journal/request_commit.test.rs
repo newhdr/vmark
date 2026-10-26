@@ -51,6 +51,7 @@ fn every_refusal() -> Vec<TxnError> {
         TxnError::StaleRegistration(String::new()),
         TxnError::InvalidRequest(String::new()),
         TxnError::InvalidProvenance(String::new()),
+        TxnError::InvalidAddresses(String::new()),
         TxnError::InvalidText(String::new()),
         TxnError::CommentAnchorTooLong { bytes: 0, limit: 0 },
         TxnError::StaleComment {
@@ -92,6 +93,7 @@ fn every_refusal() -> Vec<TxnError> {
             | TxnError::StaleRegistration(_)
             | TxnError::InvalidRequest(_)
             | TxnError::InvalidProvenance(_)
+            | TxnError::InvalidAddresses(_)
             | TxnError::InvalidText(_)
             | TxnError::CommentAnchorTooLong { .. }
             | TxnError::StaleComment { .. }
