@@ -1,4 +1,4 @@
-// WI-AL2.4 — the review panel on a conflicted hunk: a revert over a human edit that overlaps the agent's change records one conflicted decision, the hunk is shown conflicted with its message and offers Mark handled, which sends the markHandled decision and leaves the hunk resolvedByHumanEdit (the journal record); a second revert of the still-conflicted hunk is refused REVERT_REFUSED and says so; keep and un-keep send their decisions against the head and reviewGen the panel rendered; a decision made after an edit the panel never saw is not sent and the list is re-read; JOURNAL_BUSY is retried a bounded number of times
+// WI-AL2.4 — the review panel on a conflicted hunk: a revert over a human edit that overlaps the agent's change records one conflicted decision, the hunk is shown conflicted with its message and offers Mark handled, which sends the markHandled decision and leaves the hunk resolvedByHumanEdit (the journal record); a second revert of the still-conflicted hunk is refused REVERT_REFUSED and says so; keep and un-keep send their decisions against the head and reviewGen the panel rendered; a decision made after an edit the panel never saw is not sent and the list is re-read; JOURNAL_BUSY is retried a bounded number of times; a revert that applies shows the hunk reverted with its toast, and Undo revert on that row returns it to pending and restores the agent's text
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -114,6 +114,35 @@ describe("ReviewPanel — conflicted hunks", () => {
     await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(en("review.refusedConflicted")));
     expect(writer.state.hunks[0]).toMatchObject({ state: "conflicted", reviewGen: 7 });
     expect(await rowOf()).toHaveAttribute("data-state", "conflicted");
+  });
+});
+
+describe("ReviewPanel — an applied revert", () => {
+  it("reverting a hunk applies it and shows it reverted; Undo revert returns it to pending", async () => {
+    // The agent's `b` (over a `B`) is in the newer revision; the older one
+    // keeps an undecided hunk, so the reverted revision stays shown.
+    seed({ target: "rev-2", base: "B" });
+    writer.state.rows.unshift(agentRow("rev-2", 2));
+    writer.state.head = "rev-2";
+    writer.state.hunks.push({ hunkId: "h-2", state: "pending", reviewGen: 1, span: { from: 0, to: 1 }, wrote: "a", target: "rev-1" });
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(within(await rowOf()).getByRole("button", { name: en("review.revert") }));
+
+    await waitFor(async () => expect(await rowOf()).toHaveAttribute("data-state", "reverted"));
+    expect(toast.success).toHaveBeenCalledWith(en("review.outcomeReverted"));
+    expect(useDocumentStore.getState().documents[TAB]?.content).toBe("aBc");
+    expect(writer.prepares).toEqual([expect.objectContaining({ hunkId: "h-1", expectedReviewGen: "7", preimage: "abc" })]);
+
+    await user.click(within(await rowOf()).getByRole("button", { name: en("review.undoRevert") }));
+
+    await waitFor(async () => expect(await rowOf()).toHaveAttribute("data-state", "pending"));
+    expect(useDocumentStore.getState().documents[TAB]?.content).toBe("abc");
+    expect(writer.prepares[1]).toMatchObject({ hunkId: "h-1", expectedReviewGen: "8", preimage: "aBc" });
+    expect(toast.success).toHaveBeenCalledTimes(2);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 });
 

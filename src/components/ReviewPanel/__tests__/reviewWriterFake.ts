@@ -10,12 +10,19 @@
  *   text the agent wrote there: a human edit over it records one `conflicted`
  *   decision; a second revert of a `conflicted` hunk that still overlaps is
  *   refused `REVERT_REFUSED` with the reason `conflicted`, recording nothing.
+ * - A revert prepare that finds the agent's text in place (or, for a
+ *   `reverted` hunk, its `base`) is prepared through the journal fake with
+ *   the writer's patch; once that transaction commits, the next history read
+ *   shows the hunk `reverted` (or `pending` again after a revert of the
+ *   revert). The revert's own revision is not listed.
  *
  * @module components/ReviewPanel/__tests__/reviewWriterFake
  */
 
 import { createHash } from "node:crypto";
 import { answerPrepare } from "@/test/agentJournalWireFake";
+import { agentJournalFake as journal } from "@/test/agentJournalFake";
+import type { PrepareInput } from "@/services/agentJournal/journalClient";
 import { nextReviewState, type HunkState } from "@/services/agentJournal/review/reviewTransitions";
 import type { BlockedHunk, HistoryRow } from "@/services/agentJournal/docHistoryClient";
 import type { JournalCode } from "@/services/agentJournal/journalRefusal";
@@ -28,6 +35,8 @@ export interface WriterHunk {
   span: { from: number; to: number };
   /** The text the agent wrote there. */
   wrote: string;
+  /** The text the agent replaced; scripts an applied revert. */
+  base?: string;
   target: string;
 }
 
@@ -66,6 +75,17 @@ export function createReviewWriter(init: { head: string; rows: WireRow[]; hunks:
   const prepares: Args[] = [];
   /** Refusals the next decisions answer, in order. */
   const refuseDecisions: JournalCode[] = [];
+  /** Applied reverts' transactions, and what each does to its hunk once committed. */
+  const reverts = new Map<string, () => void>();
+
+  /** Land every revert whose transaction the journal fake committed. */
+  const landReverts = () => {
+    for (const [txn, land] of reverts) {
+      if (!journal.log.some((e) => e.op === "commit" && e.txn === txn)) continue;
+      reverts.delete(txn);
+      land();
+    }
+  };
 
   const wireHunk = (h: WriterHunk) => ({
     hunkId: h.hunkId,
@@ -79,15 +99,39 @@ export function createReviewWriter(init: { head: string; rows: WireRow[]; hunks:
     editedSince: false,
   });
 
-  const history = () => ({
-    generation: String(state.generation),
-    head: state.head,
-    rows: state.rows,
-    truncated: false,
-    hunks: state.hunks.filter((h) => h.state !== "settled").map(wireHunk),
-    blocked: state.blocked,
-    degraded: false,
-  });
+  const history = () => {
+    landReverts();
+    return {
+      generation: String(state.generation),
+      head: state.head,
+      rows: state.rows,
+      truncated: false,
+      hunks: state.hunks.filter((h) => h.state !== "settled").map(wireHunk),
+      blocked: state.blocked,
+      degraded: false,
+    };
+  };
+
+  /** Prepare `h`'s revert (or its revert of a revert) with the writer's patch. */
+  async function applied(h: WriterHunk, fields: Args) {
+    if (h.base === undefined) throw new Error("reviewWriterFake: an applied revert needs the hunk's base");
+    const { hunkId: _h, expectedReviewGen: _g, ...rest } = fields;
+    const p = await journal.prepareControlledWrite({ ...rest, tool: "revert" } as unknown as PrepareInput);
+    const undo = h.state === "reverted";
+    const { from, to } = h.span;
+    const insert = undo ? h.wrote : h.base;
+    const preimage = String(fields.preimage);
+    const postimage = preimage.slice(0, from) + insert + preimage.slice(to);
+    reverts.set(p.txn, () => {
+      state.generation += 1;
+      h.state = nextReviewState(undo ? "revertOfRevertApplied" : "revertApplied", h.state)!;
+      h.reviewGen += 1;
+      h.span = { from, to: from + insert.length };
+    });
+    const postimageHash = `sha256-${createHash("sha256").update(postimage, "utf8").digest("hex")}`;
+    const response = { ...p, hunk: h.hunkId, reviewGen: fields.expectedReviewGen, from, to, insert, postimageHash };
+    return { kind: "prepared", response };
+  }
 
   function decide(args: Args) {
     const d = JSON.parse(String(args.payload)) as Decision;
@@ -111,8 +155,8 @@ export function createReviewWriter(init: { head: string; rows: WireRow[]; hunks:
       prepares.push(fields);
       const h = state.hunks.find((x) => x.hunkId === fields.hunkId);
       if (!h || String(h.reviewGen) !== fields.expectedReviewGen) throw refusal("STALE_REVIEW");
-      const overlapped = String(fields.preimage).slice(h.span.from, h.span.to) !== h.wrote;
-      if (!overlapped) throw new Error("reviewWriterFake: only overlapping reverts are scripted");
+      const inPlace = h.state === "reverted" ? h.base : h.wrote;
+      if (String(fields.preimage).slice(h.span.from, h.span.to) === inPlace) return applied(h, fields);
       if (h.state === "conflicted") throw refusal("REVERT_REFUSED", { hunk: h.hunkId, reason: "conflicted", request: await notAdmitted(args) });
       state.generation += 1;
       h.state = "conflicted";
