@@ -73,18 +73,19 @@ impl Writer {
         staged: Option<Projection>,
         reserve: Option<(DocId, TxnId)>,
     ) -> Result<(), TxnError> {
+        if staged.is_none() && matches!(env.record, Record::Admission { .. }) {
+            // Its items apply one by one, so applied live a failing item
+            // would leave the earlier ones behind (`admission::reduce`).
+            return Err(TxnError::Invariant(
+                "an admission is published only with its staged projection".into(),
+            ));
+        }
         g.persistable()?;
         for (hash, text) in blobs {
             g.blobs.put(hash, text)?;
         }
         self.faults.run_hook(&env);
-        if let Err(e) = g.journal.append(&codec::encode(&env)) {
-            return Err(if g.journal.is_poisoned() {
-                TxnError::Indeterminate(e.to_string())
-            } else {
-                e
-            });
-        }
+        g.journal.append_record(&codec::encode(&env))?;
         match staged {
             Some(proj) => g.proj = proj,
             None => {

@@ -2,9 +2,10 @@
 //! staging: at least two child envelopes; `seq` contiguous from the outer
 //! envelope's; one shared `at`; one schema, v3 to v5, on the frame and
 //! every item; one document; no nesting; only the kinds a
-//! multi-record write produces (an observation, its linearization, a
-//! `prepared`, a review decision, and, last, a `commentCreated` on the
-//! text the frame just linearized); at most one receipt, on the last item;
+//! multi-record write produces: observations and their linearizations,
+//! then exactly one outcome, last — a `prepared`, a review decision, or a
+//! `commentCreated` on the text the frame just linearized; at most one
+//! receipt, on the last item;
 //! and the outer `txn` is that last item's. A linearization names no
 //! document, so its document is checked when the frame is reduced.
 //!
@@ -44,8 +45,12 @@ pub fn check(env: &Envelope) -> Result<(), TxnError> {
         {
             return Err(bad("is not one schema, v3 to v5, throughout"));
         }
-        if matches!(item.record, Record::CommentCreated(_)) && i + 1 != items.len() {
+        let last = i + 1 == items.len();
+        if matches!(item.record, Record::CommentCreated(_)) && !last {
             return Err(bad("carries a commentCreated before its last item"));
+        }
+        if is_outcome(&item.record) != last {
+            return Err(bad("does not end in exactly one outcome"));
         }
         if item.receipt.is_some() && i + 1 != items.len() {
             return Err(bad("carries a receipt before its last item"));
@@ -61,6 +66,15 @@ pub fn check(env: &Envelope) -> Result<(), TxnError> {
         return Err(bad("txn is not its last item's"));
     }
     Ok(())
+}
+
+/// A `prepared`, review decision or `commentCreated`: what the frame
+/// admits, after the observations and linearizations it needed.
+fn is_outcome(record: &Record) -> bool {
+    matches!(
+        record,
+        Record::Prepared { .. } | Record::ReviewDecision { .. } | Record::CommentCreated(_)
+    )
 }
 
 /// The document an item names, `None` for a linearization; a kind an

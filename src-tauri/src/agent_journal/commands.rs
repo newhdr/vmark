@@ -6,8 +6,9 @@
 //! one up is in `document` (`commands_document.rs`).
 //!
 //! Key decisions:
-//!   - `async` + `spawn_blocking`: every write fsyncs under the writer lock,
-//!     which must never run on the main thread nor stall an async worker.
+//!   - `async` + `spawn_blocking` (`run`, `on_state`): every write fsyncs
+//!     under the writer lock, which must never run on the main thread nor
+//!     stall an async worker; a read that may wait for that lock does too.
 //!   - Payloads arrive as JSON strings, not typed arguments, so a lone
 //!     surrogate escaped by `JSON.stringify` reaches the well-formed-text
 //!     check and is refused as `INVALID_TEXT` instead of being replaced.
@@ -53,11 +54,26 @@ pub mod document;
 /// # Errors
 /// None today; the `Result` keeps the crate-wide command contract.
 #[tauri::command]
-pub async fn agent_journal_status(
-    state: tauri::State<'_, AgentJournalState>,
+pub async fn agent_journal_status<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     call_id: String,
 ) -> Result<Bound<CallBind, AgentJournalStatus>, CommandError> {
-    bind_call(&call_id, async { Ok(state.status()) }).await
+    bind_call(&call_id, on_state(app, |s| Ok(s.status()))).await
+}
+
+/// Run `f` on the managed journal state on the blocking pool, since it
+/// may wait for the writer lock.
+pub(super) async fn on_state<R: tauri::Runtime, T: Send + 'static>(
+    app: tauri::AppHandle<R>,
+    f: impl FnOnce(&AgentJournalState) -> Result<T, CommandError> + Send + 'static,
+) -> Result<T, CommandError> {
+    tokio::task::spawn_blocking(move || f(&app.state::<AgentJournalState>()))
+        .await
+        .map_err(task_failed)?
+}
+
+fn task_failed(e: tokio::task::JoinError) -> CommandError {
+    CommandError::internal(format!("journal task failed: {e}"))
 }
 
 pub(super) async fn run<T: Send + 'static>(
@@ -67,7 +83,7 @@ pub(super) async fn run<T: Send + 'static>(
     let c = state.controller().ok_or_else(|| state.off_refusal())?;
     tokio::task::spawn_blocking(move || f(c))
         .await
-        .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
+        .map_err(task_failed)?
 }
 
 /// Prepare a controlled write from a frozen payload (JSON `{docKey,
@@ -278,3 +294,6 @@ mod revert_dispatch;
 #[cfg(all(test, not(target_os = "windows")))]
 #[path = "review_decide_dispatch.test.rs"]
 mod review_decide_dispatch;
+#[cfg(all(test, not(target_os = "windows")))]
+#[path = "status_blocking.test.rs"]
+mod status_blocking;

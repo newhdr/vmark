@@ -254,9 +254,15 @@ impl Provenance {
             } else {
                 from >= to && intersects(t, lo, hi)
             };
+        // An inverted span covers the gaps `[lo, hi]`, which map onto
+        // `[L(lo), R(hi)]`: the growing span's hull, so its thresholds.
         let reaches = |x: &&Bounded| {
-            let (from_max, to_min) = if growing { x.growing } else { x.normal };
-            from <= from_max && to >= to_min
+            let (from_max, to_min) = if growing || from > to {
+                x.growing
+            } else {
+                x.normal
+            };
+            lo <= from_max && hi >= to_min
         };
         let block = self
             .whole

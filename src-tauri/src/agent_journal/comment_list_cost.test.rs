@@ -1,4 +1,4 @@
-// WI-AL3.2 — the comment list's cost and its integrity: the window's text is encoded and its headings read once per list, and each thread's passage is found in one shared pass, so the work is linear in threads plus text, never their product — also in a text of many headings, where each anchor's heading path is looked up in sections built once per list, never by walking the headings again per thread; an undeleted thread whose text the book lost fails the list as JOURNAL_CORRUPT instead of dropping the thread
+// WI-AL3.2 — the comment list's cost and its integrity: the window's text is encoded and its headings read once per list, and each thread's passage is found in one shared pass, so the work is linear in threads plus text, never their product, and the window's text is hashed before the writer lock is taken, so a long document never holds the writer for work linear in its text — also in a text of many headings, where each anchor's heading path is looked up in sections built once per list, never by walking the headings again per thread; an undeleted thread whose text the book lost fails the list as JOURNAL_CORRUPT instead of dropping the thread
 //! Work is counted in text units the anchor resolver reads
 //! (`comment_anchor::work`), not timed, so the growth check is exact.
 
@@ -97,4 +97,34 @@ fn an_undeleted_thread_without_its_text_fails_the_list_as_corrupt() {
             .expect_err("a lost thread text is never hidden");
     assert_eq!(code(&err), "JOURNAL_CORRUPT", "{err:?}");
     assert!(format!("{err:?}").contains(&c.to_string()), "{err:?}");
+}
+
+#[test]
+fn the_window_text_is_hashed_before_the_writer_lock_is_taken() {
+    use crate::agent_journal::ids::BlobHash;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    let (r, page) = rig();
+    create(&r, &page, "note").expect("create");
+    let text = window_text(100_000);
+    let payload = json!({ "docKey": KEY, "text": text }).to_string();
+    let at_lock = Arc::new(AtomicU64::new(0));
+    let seen = Arc::clone(&at_lock);
+    BlobHash::take_hashed();
+    // The hook runs on this thread, just before the list's writer lock.
+    let hook = move || seen.store(BlobHash::take_hashed(), Ordering::SeqCst);
+    r.c.writer.faults.before_nth_lock(1, Some(Box::new(hook)));
+    r.c.comments_user().list(&payload).expect("list");
+    r.c.writer.faults.before_nth_lock(0, None);
+    let hashed = at_lock.load(Ordering::SeqCst);
+    assert!(
+        hashed >= text.len() as u64,
+        "{hashed} bytes hashed before the lock, the text is {}",
+        text.len()
+    );
+    assert!(
+        BlobHash::take_hashed() < text.len() as u64,
+        "the text is not hashed again under the lock"
+    );
 }

@@ -3,16 +3,14 @@
 //! journal is ready), or read its settled head.
 //!
 //! Key decisions:
-//!   - Same contract as `commands`: `spawn_blocking` for the durable bind,
+//!   - Same contract as `commands`: the blocking pool (`on_state`) for the durable bind,
 //!     JSON string payloads, and a reply bound to the caller's `callId`.
 //!
 //! @module agent_journal/commands/document
 
-use tauri::Manager;
-
+use super::on_state;
 use crate::agent_journal::admission::bound::{bind_call, Bound, CallBind};
 use crate::agent_journal::ids::{DocId, RevisionId};
-use crate::agent_journal::service::AgentJournalState;
 use crate::command_error::CommandError;
 
 /// Carry a document to a new key on Save As or in-app rename (`payload`:
@@ -30,14 +28,7 @@ pub async fn agent_journal_bind_document<R: tauri::Runtime>(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, DocId>, CommandError> {
-    bind_call(&call_id, async move {
-        tokio::task::spawn_blocking(move || {
-            app.state::<AgentJournalState>().bind_document(&payload)
-        })
-        .await
-        .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
-    })
-    .await
+    bind_call(&call_id, on_state(app, move |s| s.bind_document(&payload))).await
 }
 
 /// The document a key carries, without minting one (`payload`: JSON
@@ -52,14 +43,7 @@ pub async fn agent_journal_find_document<R: tauri::Runtime>(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, Option<DocId>>, CommandError> {
-    bind_call(&call_id, async move {
-        tokio::task::spawn_blocking(move || {
-            app.state::<AgentJournalState>().find_document(&payload)
-        })
-        .await
-        .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
-    })
-    .await
+    bind_call(&call_id, on_state(app, move |s| s.find_document(&payload))).await
 }
 
 /// The settled head of the document a key carries (`payload`: JSON
@@ -74,10 +58,5 @@ pub async fn agent_journal_head<R: tauri::Runtime>(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, Option<RevisionId>>, CommandError> {
-    bind_call(&call_id, async move {
-        tokio::task::spawn_blocking(move || app.state::<AgentJournalState>().head(&payload))
-            .await
-            .map_err(|e| CommandError::internal(format!("journal task failed: {e}")))?
-    })
-    .await
+    bind_call(&call_id, on_state(app, move |s| s.head(&payload))).await
 }

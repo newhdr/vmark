@@ -12,8 +12,9 @@
 //!     still kept; a collected one reads "creation revision no longer
 //!     retained" in the panel.
 //!   - A key the journal has never seen lists nothing and is not minted.
-//!   - The lock is held only to copy the threads (an `Arc` per text);
-//!     resolving runs after it is released, so a long document never stalls
+//!   - The lock is held only to copy the threads (an `Arc` per text); the
+//!     window's text is hashed before it is taken and resolved after it is
+//!     released, so a long document never stalls
 //!     the writer. All anchors are resolved together (`resolve_all`): the
 //!     text is encoded and its headings read once per list, so the cost is
 //!     linear in threads plus text, not their product.
@@ -105,6 +106,7 @@ impl Controller {
     pub(crate) fn comment_list(&self, payload: &str) -> Result<CommentList, CommandError> {
         let req: ListRequest = decode(payload)?;
         let doc = self.docs.find(&req.doc_key).map_err(|e| refusal(&e))?;
+        let sent = BlobHash::of_text(&req.text);
         let (generation, at, copied) = {
             let g = self.writer.lock();
             let p = &g.proj;
@@ -116,7 +118,6 @@ impl Controller {
                 });
             };
             let head = p.head(doc);
-            let sent = BlobHash::of_text(&req.text);
             let at = head.filter(|h| p.revisions.get(h).is_some_and(|m| m.postimage == sent));
             let book = &p.comments;
             let copied: Vec<Copied> = book

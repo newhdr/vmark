@@ -18,7 +18,12 @@
 //! certified map (checked by `writer_epoch::check_payload`), the revert's
 //! exact single change, a selection edit's checked certificate
 //! (`certificate`), or a writer-built whole-document barrier.
+//!
+//! The lock-taking conveniences `prepare`, `commit` and `abort` are
+//! test-only; production prepares through `admission::prepare` and commits
+//! and aborts through `commit_with` and `abort_with`.
 
+#[cfg(test)]
 use crate::agent_journal::admission::prepared_record::prepared_record;
 use crate::agent_journal::effects_rules::{check_effects, EffectsCtx};
 use crate::agent_journal::errors::TxnError;
@@ -29,19 +34,23 @@ use crate::agent_journal::record::Record;
 use crate::agent_journal::review_rules::check_restore;
 use crate::agent_journal::writer::certificate::Certification;
 use crate::agent_journal::writer::{
-    CommitOutcome, CommitRequest, Durability, Inner, PrepareRequest, Prepared, Reservation, Writer,
+    CommitOutcome, CommitRequest, Durability, Inner, Reservation, Writer,
 };
+#[cfg(test)]
+use crate::agent_journal::writer::{PrepareRequest, Prepared};
 use crate::agent_journal::writer_degraded::Queued;
 use crate::agent_journal::writer_epoch::{basis_of, certified_payload};
 use crate::agent_journal::writer_revert::referenced_blob;
 
 impl Writer {
+    #[cfg(test)]
     pub fn prepare(&self, req: PrepareRequest) -> Result<Prepared, TxnError> {
         self.prepare_in(&mut self.lock(), req)
     }
 
     /// `prepare` inside a caller's critical section (`g` is the held lock),
     /// so the checks before it and the reservation it takes are one step.
+    #[cfg(test)]
     pub(crate) fn prepare_in(
         &self,
         g: &mut Inner,
@@ -63,6 +72,7 @@ impl Writer {
         })
     }
 
+    #[cfg(test)]
     pub fn commit(&self, txn: TxnId, req: CommitRequest) -> Result<CommitOutcome, TxnError> {
         self.commit_with(txn, req, None, None).map(|(out, _)| out)
     }
@@ -124,6 +134,7 @@ impl Writer {
         Ok((out, certification))
     }
 
+    #[cfg(test)]
     pub fn abort(&self, txn: TxnId, reason: &str) -> Result<Durability, TxnError> {
         self.abort_with(txn, reason, None)
     }
@@ -223,7 +234,7 @@ impl Writer {
                 g.addresses.remove(&txn);
                 Ok(true)
             }
-            Err(TxnError::Io(_)) => {
+            Err(TxnError::Io(_) | TxnError::Indeterminate(_)) => {
                 g.admit_queued_terminal(&queued)?;
                 g.degraded.entry(doc).or_default().push_back(queued);
                 g.requests.owners.remove(&txn);

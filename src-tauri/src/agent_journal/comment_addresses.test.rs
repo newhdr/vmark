@@ -248,6 +248,28 @@ fn addresses_are_a_schema_5_field_and_corrupt_under_an_older_label() {
 }
 
 #[test]
+fn a_stored_set_with_a_duplicate_or_over_the_bound_is_corrupt() {
+    use crate::agent_journal::comment::addresses::MAX_ADDRESSES;
+    use crate::agent_journal::comment::binding;
+    let ids = |n: u64| (1..=n).map(CommentId::at).collect::<Vec<_>>();
+    let max = MAX_ADDRESSES as u64;
+    for record in [committed(ids(max)), tombstone(ids(max))] {
+        binding::check(&env(SCHEMA_V5, record)).expect("the bound itself is accepted");
+    }
+    let dup = || vec![CommentId::at(2), CommentId::at(2)];
+    let bad = [
+        committed(dup()),
+        tombstone(dup()),
+        committed(ids(max + 1)),
+        tombstone(ids(max + 1)),
+    ];
+    for record in bad {
+        let e = binding::check(&env(SCHEMA_V5, record)).unwrap_err();
+        assert_eq!(e.code(), "JOURNAL_CORRUPT", "{e}");
+    }
+}
+
+#[test]
 fn the_agent_lists_the_same_threads_the_user_does() {
     let (r, page) = rig();
     create(&r, &page, "from the user").expect("create");

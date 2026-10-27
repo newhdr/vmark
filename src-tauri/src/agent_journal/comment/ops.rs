@@ -8,8 +8,10 @@
 //! names text, so neither waits on the document's transactions; both need
 //! a healthy writer.
 //!
-//! Refusal order: the thread exists, is undeleted, is on the document and
-//! is at the expected generation (`STALE_COMMENT` otherwise); the caller
+//! Refusal order: the thread exists (`INVALID_REQUEST` otherwise: an id
+//! never minted, or pruned with its deleted thread at startup), is
+//! undeleted (`STALE_COMMENT`), is on the document (`INVALID_REQUEST`) and
+//! is at the expected generation (`STALE_COMMENT`); the caller
 //! may take the action from the thread's state (`COMMENT_NOT_ALLOWED`);
 //! `commentGen` is not exhausted (`COMMENT_STATE_EXHAUSTED`); the caps
 //! (`comment::book`). A refusal appends nothing.

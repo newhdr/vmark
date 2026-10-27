@@ -73,14 +73,14 @@ fn a_receipt_survives_the_journal_codec_on_its_prepared() {
     for name in ["controlledPrepared", "restorePrepared"] {
         let (_, wire) = case(name);
         let receipt: Receipt = serde_json::from_str(&wire).unwrap();
-        let (doc, revision) = match &receipt.outcome {
-            Outcome::Prepared(PreparedResponse::Controlled(p)) => (p.doc, p.revision),
-            Outcome::Prepared(PreparedResponse::Restore(p)) => (p.doc, p.revision),
+        let (doc, revision, generation) = match &receipt.outcome {
+            Outcome::Prepared(PreparedResponse::Controlled(p)) => (p.doc, p.revision, p.generation),
+            Outcome::Prepared(PreparedResponse::Restore(p)) => (p.doc, p.revision, p.generation),
             other => panic!("{name}: a v3 reply, not {other:?}"),
         };
         let env = Envelope {
             schema_version: 3,
-            seq: 7,
+            seq: generation,
             txn: receipt
                 .txn()
                 .expect("a prepared reply names its transaction"),
@@ -152,7 +152,7 @@ fn revert_receipt(name: &str) -> Receipt {
     serde_json::from_str(&case(name).1).expect("decodes")
 }
 
-/// The `hunkRevert` prepared that `p` answers, at seq 7.
+/// The `hunkRevert` prepared that `p` answers, at its own generation.
 fn revert_carrier(r: Receipt, p: &RevertPrepared) -> Envelope {
     let Record::Prepared {
         doc,
@@ -185,7 +185,7 @@ fn revert_carrier(r: Receipt, p: &RevertPrepared) -> Envelope {
     Envelope {
         schema_version: SCHEMA_V4,
         receipt: Some(r),
-        ..env(7, p.txn, record)
+        ..env(p.generation, p.txn, record)
     }
 }
 

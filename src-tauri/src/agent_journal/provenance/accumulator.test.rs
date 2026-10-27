@@ -109,3 +109,28 @@ fn composing_the_map_stops_once_it_passes_the_limit() {
     );
     assert_eq!(compose_pieces(&identity, &[], -1, 0), None);
 }
+
+// An inverted normal span (`from > to`) covers the original gaps between its
+// ends; a bounded break that meets that hull blocks it, as it would the span
+// written the other way round.
+#[test]
+fn an_inverted_span_meeting_a_gap_break_is_blocked() {
+    let mut p = Provenance::new(5, PROVENANCE_CAP).unwrap();
+    p.break_gaps(0, 1, BreakReason::UncertifiedRange, "gaps")
+        .unwrap();
+    assert!(p.map_span(3, 0, false).unwrap().block.is_some());
+    assert!(p.map_span(0, 3, false).unwrap().block.is_some());
+    assert!(p.map_span(5, 3, false).unwrap().block.is_none());
+}
+
+#[test]
+fn an_inverted_span_meeting_a_range_break_is_blocked() {
+    let mut p = Provenance::new(10, PROVENANCE_CAP).unwrap();
+    p.break_range(2, 4, 1, BreakReason::UncertifiedRange, "range")
+        .unwrap();
+    for (from, to) in [(5, 3), (3, 0), (4, 2)] {
+        let m = p.map_span(from, to, false).unwrap();
+        assert!(m.block.is_some(), "({from}, {to}) crosses the break");
+    }
+    assert!(p.map_span(9, 6, false).unwrap().block.is_none());
+}

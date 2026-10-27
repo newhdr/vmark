@@ -25,6 +25,7 @@ use crate::agent_journal::admission::receipt::{PayloadDigest, RequestId};
 use crate::agent_journal::controller::invalid;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::refusal::refusal;
+use crate::agent_journal::wire::check_json_text;
 use crate::agent_journal::writer::Writer;
 use crate::command_error::CommandError;
 
@@ -39,7 +40,10 @@ pub(crate) struct Frame {
 
 impl Frame {
     /// Split `payload` into its identity fields and the request body.
+    /// Text first: a lone surrogate is `INVALID_TEXT`, never the parse
+    /// error serde_json would give it.
     pub(crate) fn decode(payload: &str) -> Result<Self, CommandError> {
+        check_json_text(payload.as_bytes()).map_err(|e| refusal(&e))?;
         let digest = PayloadDigest::of(payload);
         let Ok(Value::Object(mut rest)) = serde_json::from_str::<Value>(payload) else {
             return Err(invalid("a framed payload is a JSON object"));

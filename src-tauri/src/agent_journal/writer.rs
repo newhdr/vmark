@@ -269,7 +269,7 @@ impl Writer {
             receipt: None,
         };
         self.faults.run_hook(&env);
-        inner.journal.append(&codec::encode(&env))?;
+        inner.journal.append_record(&codec::encode(&env))?;
         if let Err(e) = inner.proj.apply(&env) {
             // Validated before the append, so this is a writer bug: stop.
             inner.journal.poison();

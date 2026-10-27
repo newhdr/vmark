@@ -16,7 +16,11 @@
 //! the record changes anything (`projection_checks`), so an error leaves
 //! the projection as it was. A receipt and an admission frame are checked
 //! whole first (`admission::reduce`); the frame's items then apply in order
-//! through this same `apply`, and a receipt is indexed by request id.
+//! through this same `apply`, and a receipt is indexed by request id. An
+//! item that fails in its own step leaves the items before it applied, so
+//! an admission only ever applies where a failure discards the projection:
+//! replay (the journal stays off) and staging (a clone); the writer refuses
+//! to publish one without its staged projection (`admission::publish`).
 
 use crate::agent_journal::admission::reduce::{check_decided_gen, preflight};
 use crate::agent_journal::errors::TxnError;

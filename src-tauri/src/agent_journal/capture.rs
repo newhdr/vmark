@@ -5,7 +5,8 @@
 //! Order: the request is validated first (initiator, author, observed
 //! parent). A save that claims a revision (`claimsRevision`) the writer
 //! verifies — it is the head, holds exactly the saved text, and nothing is
-//! pending or queued — is `journaled: yes` at the head and appends nothing.
+//! pending or queued — is `journaled: yes` at the head and appends nothing
+//! (its capture seq is still checked and recorded, `capture_claim`).
 //! Otherwise the save is a `pendingObservation` — author the human unless
 //! the window names the agent whose own output it persists, initiator the
 //! person, autosave or agent that asked for the save — on the window's
@@ -50,14 +51,17 @@ use crate::agent_journal::actor::Actor;
 use crate::agent_journal::capture_seq::{observe_bound, CaptureId};
 use crate::agent_journal::controlled::linearize_one;
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
+use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
 use crate::agent_journal::provenance::ProvenancePayload;
 use crate::agent_journal::provenance_field::{decode_field, ProvenanceField};
 use crate::agent_journal::record::ObservedRef;
 use crate::agent_journal::wire::decode_json;
-use crate::agent_journal::writer::{Inner, Journaled, ObserveRequest, Writer};
+use crate::agent_journal::writer::{Journaled, ObserveRequest, Writer};
 use crate::agent_journal::writer_observe::resolve_base;
-use crate::agent_journal::writer_pins::set_window_base;
+
+#[path = "capture_claim.rs"]
+mod claim;
+use claim::elide_claimed;
 
 /// Longest accepted window root name, in UTF-8 bytes.
 pub const WINDOW_MAX_BYTES: usize = 512;
@@ -140,7 +144,7 @@ pub fn capture_save(
     mut req: CaptureRequest,
 ) -> Result<CaptureReply, TxnError> {
     let (author, provenance) = validate_save(w, doc, &mut req)?;
-    if let Some(reply) = elide_claimed(w, doc, &req) {
+    if let Some(reply) = elide_claimed(w, doc, &req)? {
         return Ok(reply);
     }
     let observed_parent = req.observed_parent.unwrap_or_else(|| {
@@ -186,16 +190,6 @@ fn validate_save(
     Ok((author, provenance))
 }
 
-/// A verified `claimsRevision`: the base moves to the head under the verifying lock.
-fn elide_claimed(w: &Writer, doc: DocId, req: &CaptureRequest) -> Option<CaptureReply> {
-    let claimed = req.claims_revision?;
-    let mut g = w.lock();
-    let head = settled_head_holding(&g, doc, claimed, &req.postimage)?;
-    let base = ObservedRef::Revision { revision: head };
-    set_window_base(&mut g, &req.window, doc, base);
-    Some(reply(doc, JournaledFlag::Yes, None, Some(head)))
-}
-
 /// After a durable observation (whose append already moved the window's
 /// base root, in the same critical section): linearize what is pending, and
 /// report whether this observation landed.
@@ -223,22 +217,6 @@ fn reply(
         observation,
         revision,
     }
-}
-
-/// `claimed` when it is the head of `doc`, holds exactly `text`, and
-/// nothing is pending or queued ahead of it.
-fn settled_head_holding(
-    g: &Inner,
-    doc: DocId,
-    claimed: RevisionId,
-    text: &str,
-) -> Option<RevisionId> {
-    let state = g.proj.docs.get(&doc)?;
-    if !state.pending.is_empty() || g.degraded.get(&doc).is_some_and(|q| !q.is_empty()) {
-        return None;
-    }
-    let head = state.head.filter(|h| *h == claimed)?;
-    (g.proj.postimage_of(Some(head)) == Some(BlobHash::of_text(text))).then_some(head)
 }
 
 /// How a linearization pass ended.
@@ -272,7 +250,10 @@ pub fn linearize_pending(w: &Writer, doc: DocId) -> Linearization {
                 if !held {
                     log::warn!("agent journal: pending saves of a document stay pending: {e}");
                 }
-                let retry = matches!(e, TxnError::Io(_) | TxnError::StaleParent { .. });
+                let retry = matches!(
+                    e,
+                    TxnError::Io(_) | TxnError::Indeterminate(_) | TxnError::StaleParent { .. }
+                );
                 return Linearization { landed, retry };
             }
         }

@@ -107,10 +107,14 @@ pub(super) fn html_start(s: &str, in_paragraph: bool) -> Option<HtmlEnd> {
     {
         return Some(HtmlEnd::Marker(end));
     }
-    for (open, end) in [("<!--", "-->"), ("<?", "?>"), ("<![cdata[", "]]>")] {
+    for (open, end) in [("<!--", "-->"), ("<?", "?>")] {
         if lower.starts_with(open) {
             return Some(HtmlEnd::Marker(end));
         }
+    }
+    // CommonMark's CDATA opener is case-sensitive, unlike tag names.
+    if r.starts_with("<![CDATA[") {
+        return Some(HtmlEnd::Marker("]]>"));
     }
     if lower.as_bytes().get(2).is_some_and(u8::is_ascii_alphabetic) && lower.starts_with("<!") {
         return Some(HtmlEnd::Marker(">"));

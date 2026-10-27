@@ -30,11 +30,11 @@ use crate::agent_journal::admission::bound::AbandonReply;
 use crate::agent_journal::admission::page_table::PageTable;
 use crate::agent_journal::admission::payload::{admit_identity, Frame};
 use crate::agent_journal::admission::prepare::Request;
-use crate::agent_journal::admission::receipt::{Outcome, RequestId};
-use crate::agent_journal::admission::reconcile::{classify, Classified};
+use crate::agent_journal::admission::receipt::{Outcome, Receipt, RequestId};
+use crate::agent_journal::admission::reconcile::classify_prepared;
 use crate::agent_journal::controller::{invalid, Controller};
 use crate::agent_journal::errors::TxnError;
-use crate::agent_journal::ids::DocId;
+use crate::agent_journal::ids::{DocId, TxnId};
 use crate::agent_journal::record::Record;
 use crate::agent_journal::refusal::refusal;
 use crate::agent_journal::writer::{Inner, Writer};
@@ -105,41 +105,18 @@ fn abandon_in(
         if receipt.digest != request.digest {
             return refused(RequestState::Conflict);
         }
-        let Some(txn) = receipt.txn() else {
-            let reply = match receipt.outcome {
-                Outcome::CommentCreated(_) => AbandonReply::Answered("commentCreated"),
-                Outcome::CommentReplied(_) => AbandonReply::Answered("commentReplied"),
-                Outcome::Prepared(_) | Outcome::Decision(_) => AbandonReply::Decided,
-            };
-            return (Ok(reply), Then::Restart(receipt.outcome.doc()));
-        };
-        let Some(doc) = g.proj.txns.get(&txn).map(|t| t.doc) else {
-            log::error!("agent journal: receipt names unknown transaction {}", txn.0);
-            return refused(RequestState::Unavailable);
-        };
-        return match classify(g, receipt) {
-            Classified::Executable(_) => {
-                let aborted = Record::Aborted {
-                    reason: ABANDONED.into(),
-                };
-                match w.terminal(g, doc, txn, aborted, vec![]) {
-                    Ok(true) => (Ok(AbandonReply::Aborted), Then::Settle(doc)),
-                    Ok(false) => (Ok(AbandonReply::AbortQueued), Then::Settle(doc)),
-                    Err(e) => {
-                        log::error!("agent journal: abandoning {} failed ({e})", txn.0);
-                        let s = RequestState::Unavailable;
-                        (Err(request.refused(s)), Then::Settle(doc))
-                    }
-                }
+        let reply = match &receipt.outcome {
+            Outcome::Prepared(reply) => reply,
+            Outcome::CommentCreated(_) => {
+                return answered(AbandonReply::Answered("commentCreated"), receipt);
             }
-            Classified::Refused(
-                s @ (RequestState::TerminalPending(_)
-                | RequestState::Terminal(_)
-                | RequestState::Abandoned),
-            ) => (Ok(AbandonReply::Ended(s)), Then::Restart(doc)),
-            Classified::Refused(s) => (Err(request.refused(s)), Then::Restart(doc)),
-            Classified::Final(_) => (Ok(AbandonReply::Decided), Then::Restart(doc)),
+            Outcome::CommentReplied(_) => {
+                return answered(AbandonReply::Answered("commentReplied"), receipt);
+            }
+            Outcome::Decision(_) => return answered(AbandonReply::Decided, receipt),
         };
+        let verdict = classify_prepared(g, reply).map(drop);
+        return abandon_txn(w, g, request, reply.txn(), verdict);
     }
     if let Some(digest) = g.requests.inflight_digest(id) {
         if *digest != request.digest {
@@ -153,4 +130,49 @@ fn abandon_in(
         g.requests.fence_new(id, frame.generation, &live);
     }
     (Ok(AbandonReply::Fenced), Then::Nothing)
+}
+
+/// A request already answered by a final outcome: nothing to abandon.
+fn answered(reply: AbandonReply, receipt: &Receipt) -> Answered {
+    (Ok(reply), Then::Restart(receipt.outcome.doc()))
+}
+
+/// Abandon the transaction a receipted prepare opened: abort it while it
+/// is open, else answer with how it ended.
+fn abandon_txn(
+    w: &Writer,
+    g: &mut Inner,
+    request: &Request,
+    txn: TxnId,
+    verdict: Result<(), RequestState>,
+) -> Answered {
+    let Some(doc) = g.proj.txns.get(&txn).map(|t| t.doc) else {
+        log::error!("agent journal: receipt names unknown transaction {}", txn.0);
+        return (
+            Err(request.refused(RequestState::Unavailable)),
+            Then::Nothing,
+        );
+    };
+    match verdict {
+        Ok(()) => {
+            let aborted = Record::Aborted {
+                reason: ABANDONED.into(),
+            };
+            match w.terminal(g, doc, txn, aborted, vec![]) {
+                Ok(true) => (Ok(AbandonReply::Aborted), Then::Settle(doc)),
+                Ok(false) => (Ok(AbandonReply::AbortQueued), Then::Settle(doc)),
+                Err(e) => {
+                    log::error!("agent journal: abandoning {} failed ({e})", txn.0);
+                    let s = RequestState::Unavailable;
+                    (Err(request.refused(s)), Then::Settle(doc))
+                }
+            }
+        }
+        Err(
+            s @ (RequestState::TerminalPending(_)
+            | RequestState::Terminal(_)
+            | RequestState::Abandoned),
+        ) => (Ok(AbandonReply::Ended(s)), Then::Restart(doc)),
+        Err(s) => (Err(request.refused(s)), Then::Restart(doc)),
+    }
 }

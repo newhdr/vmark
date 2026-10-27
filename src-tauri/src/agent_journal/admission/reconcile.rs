@@ -77,16 +77,27 @@ pub(crate) fn receipt_doc(g: &Inner, r: &Request) -> Option<DocId> {
 
 /// Classify `receipt`'s transaction. See the module docs.
 pub(crate) fn classify(g: &Inner, receipt: &Receipt) -> Classified {
-    let reply = match &receipt.outcome {
-        Outcome::Prepared(reply) => reply,
+    match &receipt.outcome {
+        Outcome::Prepared(reply) => match classify_prepared(g, reply) {
+            Ok(reply) => Classified::Executable(reply),
+            Err(state) => Classified::Refused(state),
+        },
         final_outcome @ (Outcome::Decision(_)
         | Outcome::CommentCreated(_)
-        | Outcome::CommentReplied(_)) => return Classified::Final(final_outcome.clone()),
-    };
+        | Outcome::CommentReplied(_)) => Classified::Final(final_outcome.clone()),
+    }
+}
+
+/// Classify the transaction a prepared reply opened: the reply to return
+/// byte for byte, or the state to refuse with.
+pub(crate) fn classify_prepared(
+    g: &Inner,
+    reply: &PreparedResponse,
+) -> Result<PreparedResponse, RequestState> {
     let txn = reply.txn();
     let Some(entry) = g.proj.txns.get(&txn) else {
         log::error!("agent journal: receipt names unknown transaction {}", txn.0);
-        return Classified::Refused(RequestState::Unavailable);
+        return Err(RequestState::Unavailable);
     };
     let state = match entry.status {
         TxnStatus::Prepared => return prepared(g, reply, txn),
@@ -96,10 +107,14 @@ pub(crate) fn classify(g: &Inner, receipt: &Receipt) -> Classified {
         TxnStatus::Discarded { by } => Ended::Discarded { by },
         TxnStatus::Resolved { by } => Ended::Resolved { by },
     };
-    Classified::Refused(RequestState::Terminal(state))
+    Err(RequestState::Terminal(state))
 }
 
-fn prepared(g: &Inner, reply: &PreparedResponse, txn: TxnId) -> Classified {
+fn prepared(
+    g: &Inner,
+    reply: &PreparedResponse,
+    txn: TxnId,
+) -> Result<PreparedResponse, RequestState> {
     if let Some(queued) = queued_terminal(g, txn) {
         let ending = match queued {
             Record::Committed { .. } => Ending::Committed,
@@ -107,18 +122,18 @@ fn prepared(g: &Inner, reply: &PreparedResponse, txn: TxnId) -> Classified {
             Record::Uncommitted => Ending::Uncommitted,
             other => {
                 log::error!("agent journal: {} has a queued {other:?}", txn.0);
-                return Classified::Refused(RequestState::Unavailable);
+                return Err(RequestState::Unavailable);
             }
         };
-        return Classified::Refused(RequestState::TerminalPending(ending));
+        return Err(RequestState::TerminalPending(ending));
     }
     if g.healthy().is_err() {
-        return Classified::Refused(RequestState::Unavailable);
+        return Err(RequestState::Unavailable);
     }
     if open_txn(g, txn).is_err() {
-        return Classified::Refused(RequestState::Abandoned);
+        return Err(RequestState::Abandoned);
     }
-    Classified::Executable(reply.clone())
+    Ok(reply.clone())
 }
 
 /// `txn`'s queued terminal record, if one is queued.

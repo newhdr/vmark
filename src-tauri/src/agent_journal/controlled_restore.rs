@@ -29,12 +29,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
-use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
 use crate::agent_journal::admission::receipt::{
     Outcome, PayloadDigest, PreparedResponse, RequestId,
 };
 use crate::agent_journal::capture_seq::CaptureId;
-use crate::agent_journal::controlled::{reused_id, Prep};
+use crate::agent_journal::controlled::{prepare_kind, Prep};
 use crate::agent_journal::controlled_wire::decode;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, RevisionId, TxnId};
@@ -129,13 +128,18 @@ pub fn prepare_restore_with(
     req: RestorePrepareRequest,
     digest: Option<PayloadDigest>,
 ) -> Result<RestorePrepared, TxnError> {
-    let request = Request::from_parts(req.request_id, digest)?;
-    let prep = restore_prep(req)?;
-    let prepared = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
-    match prepared {
-        Outcome::Prepared(PreparedResponse::Restore(p)) => Ok(p),
-        _ => Err(reused_id()),
-    }
+    let id = req.request_id;
+    prepare_kind(
+        w,
+        doc,
+        id,
+        digest,
+        || restore_prep(req),
+        |o| match o {
+            Outcome::Prepared(PreparedResponse::Restore(p)) => Some(p),
+            _ => None,
+        },
+    )
 }
 
 /// What `req` asks the writer to prepare: the person's restore of its

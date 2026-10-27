@@ -27,7 +27,9 @@
 
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
-use crate::agent_journal::admission::receipt::{Outcome, PayloadDigest, PreparedResponse};
+use crate::agent_journal::admission::receipt::{
+    Outcome, PayloadDigest, PreparedResponse, RequestId,
+};
 use crate::agent_journal::capture_seq::CaptureId;
 use crate::agent_journal::comment::ids::CommentId;
 use crate::agent_journal::errors::TxnError;
@@ -66,13 +68,18 @@ pub fn prepare_controlled_with(
     req: ControlledPrepareRequest,
     digest: Option<PayloadDigest>,
 ) -> Result<ControlledPrepared, TxnError> {
-    let request = Request::from_parts(req.request_id, digest)?;
-    let prep = controlled_prep(req)?;
-    let prepared = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
-    match prepared {
-        Outcome::Prepared(PreparedResponse::Controlled(p)) => Ok(p),
-        _ => Err(reused_id()),
-    }
+    let id = req.request_id;
+    prepare_kind(
+        w,
+        doc,
+        id,
+        digest,
+        || controlled_prep(req),
+        |o| match o {
+            Outcome::Prepared(PreparedResponse::Controlled(p)) => Some(p),
+            _ => None,
+        },
+    )
 }
 
 /// What `req` asks the writer to prepare, its actor checked and its
@@ -98,6 +105,22 @@ pub(crate) fn controlled_prep(req: ControlledPrepareRequest) -> Result<Prep, Txn
 /// A request id whose receipt answers another kind of prepare.
 pub(crate) fn reused_id() -> TxnError {
     TxnError::InvalidRequest("the request id answers another kind of prepare".into())
+}
+
+/// The unframed prepare of every kind: request, then `prep`, then admission
+/// in one critical section; an outcome `accept` refuses is `reused_id`.
+pub(crate) fn prepare_kind<T>(
+    w: &Writer,
+    doc: DocId,
+    id: Option<RequestId>,
+    digest: Option<PayloadDigest>,
+    prep: impl FnOnce() -> Result<Prep, TxnError>,
+    accept: impl FnOnce(Outcome) -> Option<T>,
+) -> Result<T, TxnError> {
+    let request = Request::from_parts(id, digest)?;
+    let prep = prep()?;
+    let outcome = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
+    accept(outcome).ok_or_else(reused_id)
 }
 
 /// What a controlled prepare needs, whoever drives it.

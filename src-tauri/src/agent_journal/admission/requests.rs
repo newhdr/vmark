@@ -59,8 +59,8 @@ pub(crate) struct Requests {
     /// The page that prepared each open transaction.
     pub(crate) owners: HashMap<TxnId, Owner>,
     next_invocation: u64,
-    /// Owned transactions the sweep could not end for a reason that is a
-    /// writer bug (`Writer::end_owned_in`).
+    /// Owned transactions the sweep met in a state that is a writer bug
+    /// (`owned_end::end_owned_in`).
     pub(crate) owner_invariant_breaks: u64,
     inflight_limit: usize,
     generation_limit: usize,

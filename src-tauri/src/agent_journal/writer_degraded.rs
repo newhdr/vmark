@@ -71,7 +71,7 @@ impl Writer {
                 Err(e) => {
                     g.degraded.entry(doc).or_default().push_front(q);
                     return match e {
-                        TxnError::Io(_) => Ok(false),
+                        TxnError::Io(_) | TxnError::Indeterminate(_) => Ok(false),
                         other => Err(other),
                     };
                 }

@@ -13,8 +13,10 @@
 //!     no` lands later, in order). A save refused before its append — an
 //!     unknown observed parent, a provenance map that does not certify it —
 //!     records nothing, so the window may resend the same capture.
-//!   - A save elided through a verified `claimsRevision` appends nothing and
-//!     records no seq: the writer has proved the head already holds its text.
+//!   - A save elided through a verified `claimsRevision` appends nothing but
+//!     is checked and recorded like any other, under the lock that verifies
+//!     the claim: otherwise a delayed earlier capture of the session would
+//!     pass the check and journal its stale text after it.
 //!   - Keyed by session alone, not by view: the session mints the seq, so it
 //!     orders every capture of that session whichever view froze it.
 //!   - In memory only, never replayed. A session lives inside one webview
@@ -22,9 +24,13 @@
 //!     capture comes from a new session and no recorded seq could apply. The
 //!     minter must therefore never reuse a session id across webview
 //!     incarnations (a reload mints new ones); a reused id restarting its seq
-//!     is refused, which fails closed. One entry per session minted while the
-//!     process runs: sessions are per tab and document key, so the map stays
-//!     small for any realistic run.
+//!     is refused, which fails closed.
+//!   - Bounded at `MAX_SESSIONS`: past it the least recently recorded
+//!     session is forgotten, and its next capture is checked as a new
+//!     session's. Only a capture of that session still in flight could then
+//!     land stale, after its session sat idle while `MAX_SESSIONS` others
+//!     recorded. Refusing new sessions instead would stop journaling every
+//!     bound save for the rest of a long run.
 //!   - Optional on the wire: a save that names no capture is unbound and not
 //!     checked (a tab with no provenance session). A window sends each
 //!     session's captures in seq order, one answered before the next is
@@ -37,7 +43,7 @@
 //!
 //! @module agent_journal/capture_seq
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::Deserialize;
 
@@ -84,14 +90,39 @@ impl TryFrom<CaptureIdWire> for CaptureId {
     }
 }
 
+/// Most sessions the table remembers (see module docs).
+pub(crate) const MAX_SESSIONS: usize = 16_384;
+
 /// The last capture seq recorded per session, in memory (see module docs).
-#[derive(Debug, Default)]
-pub(crate) struct CaptureSeqs(HashMap<String, u64>);
+#[derive(Debug)]
+pub(crate) struct CaptureSeqs {
+    cap: usize,
+    /// Session → (last seq, the tick it was last recorded at).
+    last: HashMap<String, (u64, u64)>,
+    /// Tick → session: recording order, oldest first.
+    order: BTreeMap<u64, String>,
+    tick: u64,
+}
+
+impl Default for CaptureSeqs {
+    fn default() -> Self {
+        Self::with_cap(MAX_SESSIONS)
+    }
+}
 
 impl CaptureSeqs {
+    pub(crate) fn with_cap(cap: usize) -> Self {
+        Self {
+            cap,
+            last: HashMap::new(),
+            order: BTreeMap::new(),
+            tick: 0,
+        }
+    }
+
     pub(crate) fn check(&self, id: &CaptureId) -> Result<(), TxnError> {
-        match self.0.get(&id.session) {
-            Some(&last) if id.seq <= last => Err(TxnError::InvalidRequest(format!(
+        match self.last.get(&id.session) {
+            Some(&(last, _)) if id.seq <= last => Err(TxnError::InvalidRequest(format!(
                 "capture seq {} does not extend the last seq {last} recorded for its session",
                 id.seq
             ))),
@@ -100,7 +131,22 @@ impl CaptureSeqs {
     }
 
     pub(crate) fn record(&mut self, id: &CaptureId) {
-        self.0.insert(id.session.clone(), id.seq);
+        self.tick += 1;
+        if let Some((_, at)) = self.last.insert(id.session.clone(), (id.seq, self.tick)) {
+            self.order.remove(&at);
+        }
+        self.order.insert(self.tick, id.session.clone());
+        while self.last.len() > self.cap {
+            let Some((_, oldest)) = self.order.pop_first() else {
+                break;
+            };
+            self.last.remove(&oldest);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.last.len()
     }
 }
 
@@ -123,3 +169,7 @@ pub(crate) fn observe_bound(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "capture_seq.test.rs"]
+mod tests;

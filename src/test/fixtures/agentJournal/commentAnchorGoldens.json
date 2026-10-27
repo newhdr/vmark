@@ -2095,6 +2095,245 @@
           "text": "b"
         }
       ]
+    },
+    {
+      "id": "quote-math-then-root-setext",
+      "markdown": "> $$\n> x\n> $$\nplain\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 14,
+          "text": "plain"
+        }
+      ]
+    },
+    {
+      "id": "quote-definition-then-root-setext",
+      "markdown": "> [a]: b\nplain\n===\n",
+      "headings": []
+    },
+    {
+      "id": "quote-table-then-root-setext",
+      "markdown": "> |a|\n> |-|\nplain\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 12,
+          "text": "plain"
+        }
+      ]
+    },
+    {
+      "id": "list-math-then-root-setext",
+      "markdown": "- $$\n  x\n  $$\nplain\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 14,
+          "text": "plain"
+        }
+      ]
+    },
+    {
+      "id": "list-definition-then-root-setext",
+      "markdown": "- [a]: b\nplain\n===\n",
+      "headings": []
+    },
+    {
+      "id": "list-table-then-root-setext",
+      "markdown": "- |a|\n  |-|\nplain\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 12,
+          "text": "plain"
+        }
+      ]
+    },
+    {
+      "id": "quote-closed-script-then-lazy",
+      "markdown": "> <script>\n> </script>\n> para\nlazy\n===\n",
+      "headings": []
+    },
+    {
+      "id": "quote-closed-comment-then-lazy",
+      "markdown": "> <!-- c -->\n> para\nlazy\n===\n",
+      "headings": []
+    },
+    {
+      "id": "list-closed-comment-then-lazy",
+      "markdown": "- <!-- c -->\n  para\nlazy\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-unbalanced-destination",
+      "markdown": "[foo]: foo(bar\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "[foo]: foo(bar"
+        }
+      ]
+    },
+    {
+      "id": "definition-balanced-destination",
+      "markdown": "[foo]: foo(b(a)r)\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-title-on-next-line",
+      "markdown": "[foo]: /url\n'title'\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-title-spanning-lines",
+      "markdown": "[foo]: /url 'a\nb'\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-unicode-label",
+      "markdown": "[éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé]: /u\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-label-over-999-chars",
+      "markdown": "[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]: /u\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]: /u"
+        }
+      ]
+    },
+    {
+      "id": "cdata-lowercase-is-not-html",
+      "markdown": "<![cdata[\n# visible\n]]>\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 10,
+          "text": "visible"
+        }
+      ]
+    },
+    {
+      "id": "cdata-uppercase-is-html",
+      "markdown": "<![CDATA[\n# hidden\n]]>\n",
+      "headings": []
+    },
+    {
+      "id": "definition-title-across-underline",
+      "markdown": "[foo]: /url 'a\n===\nb'\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "[foo]: /url 'a"
+        }
+      ]
+    },
+    {
+      "id": "definition-paren-title-with-open-paren",
+      "markdown": "[a]: /u (x(y)\n===\n",
+      "headings": []
+    },
+    {
+      "id": "footnote-definition-then-underline",
+      "markdown": "[^1]: x\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-then-indented-definition",
+      "markdown": "[a]: b\n    [c]: d\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-then-lone-tag-then-heading",
+      "markdown": "[a]: b\n<a href='x'>\n# n\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 20,
+          "text": "n"
+        }
+      ]
+    },
+    {
+      "id": "definition-then-indented-line",
+      "markdown": "[a]: b\n    c\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "c"
+        }
+      ]
+    },
+    {
+      "id": "definition-enclosed-destination-with-space",
+      "markdown": "[a]: <b c>\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-garbage-after-title",
+      "markdown": "[a]: b 'c' d\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "[a]: b 'c' d"
+        }
+      ]
+    },
+    {
+      "id": "definition-parts-on-separate-lines",
+      "markdown": "[a]:\n/u\n'c'\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-label-across-lines",
+      "markdown": "[a\nb]: /u\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-next-line-title-with-garbage",
+      "markdown": "[a]: /u\n'c' x\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "'c' x"
+        }
+      ]
+    },
+    {
+      "id": "definition-label-1000-utf16-units",
+      "markdown": "[😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀]: /u\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "[😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀]: /u"
+        }
+      ]
+    },
+    {
+      "id": "definition-label-999-utf16-units",
+      "markdown": "[😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀a]: /u\n===\n",
+      "headings": []
+    },
+    {
+      "id": "definition-then-paragraph-then-underline",
+      "markdown": "[a]: b\nfoo\n===\n",
+      "headings": [
+        {
+          "depth": 1,
+          "offset": 0,
+          "text": "foo"
+        }
+      ]
     }
   ],
   "blockCases": [
@@ -2489,6 +2728,62 @@
         [
           18,
           21
+        ]
+      ]
+    },
+    {
+      "id": "blocks-34",
+      "markdown": "[a]: b\nfoo\n===\n",
+      "blocks": [
+        [
+          0,
+          6
+        ],
+        [
+          0,
+          14
+        ]
+      ]
+    },
+    {
+      "id": "blocks-35",
+      "markdown": "[a]: b\nfoo\n",
+      "blocks": [
+        [
+          0,
+          6
+        ],
+        [
+          7,
+          10
+        ]
+      ]
+    },
+    {
+      "id": "blocks-36",
+      "markdown": "[a]: b\n  [c]: d 't'\n",
+      "blocks": [
+        [
+          0,
+          6
+        ],
+        [
+          9,
+          19
+        ]
+      ]
+    },
+    {
+      "id": "blocks-37",
+      "markdown": "[a]: b\n'c' x\n===\n",
+      "blocks": [
+        [
+          0,
+          6
+        ],
+        [
+          0,
+          16
         ]
       ]
     }

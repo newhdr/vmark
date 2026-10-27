@@ -215,6 +215,17 @@ impl JournalFile {
         Ok(offset)
     }
 
+    /// `append` for a record frame. A failure that poisons the file may
+    /// have left the frame durable, so a reopen may replay it: that is
+    /// `Indeterminate`, never the `Io` whose contract is that nothing changed.
+    pub fn append_record(&mut self, payload: &[u8]) -> Result<u64, TxnError> {
+        let was_poisoned = self.poisoned;
+        self.append(payload).map_err(|e| match e {
+            TxnError::Io(m) if self.poisoned && !was_poisoned => TxnError::Indeterminate(m),
+            e => e,
+        })
+    }
+
     fn truncate_back(&self) -> io::Result<()> {
         if self.faults.take_truncate_failure() {
             return Err(io::Error::other("injected truncate failure"));
@@ -257,3 +268,7 @@ impl JournalFile {
         Ok(scan.frames.into_iter().map(|f| f.payload).collect())
     }
 }
+
+#[cfg(test)]
+#[path = "ambiguous_append.test.rs"]
+mod ambiguous_append_tests;

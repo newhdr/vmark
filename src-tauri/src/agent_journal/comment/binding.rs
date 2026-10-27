@@ -2,6 +2,8 @@
 //! and before every append, so the writer and replay agree byte for byte:
 //!
 //! - `c<seq>` and `r<seq>` are minted from the envelope's own sequence;
+//! - a committed record's or tombstone's addresses are at most
+//!   `MAX_ADDRESSES`, each named once (`addresses::check_set`);
 //! - a body is non-empty and within `MAX_BODY_BYTES`;
 //! - a stored anchor keeps its bounds (quote, 32-unit prefix and suffix,
 //!   heading path) and its offset hint names the creation revision;
@@ -14,8 +16,19 @@
 //! What depends on the thread's history (its state, generation, the
 //! creation revision) is the book's to check (`comment::book`).
 //!
+//! Key decisions:
+//!   - An anchor's content (quote, context, heading path, hint offset) is
+//!     not re-derived from the creation text on replay: the writer derives
+//!     it from that text, the book binds the record to the text's hash, the
+//!     text may since have been collected, and re-deriving every anchor
+//!     would read every creation text at open. Resolving trusts nothing
+//!     else in it: a hint only breaks a tie among the quote's real matches,
+//!     so an anchor that does not describe its text orphans its own thread
+//!     or lands where its own quote occurs, never past the text.
+//!
 //! @module agent_journal/comment/binding
 
+use crate::agent_journal::comment::addresses::check_set;
 use crate::agent_journal::comment::bounds::{check_body, MAX_BODY_BYTES};
 use crate::agent_journal::comment::ids::{CommentCaller, CommentId, ReplyId};
 use crate::agent_journal::comment::records::{CommentCreated, CommentRecord};
@@ -28,10 +41,13 @@ use crate::coherence::anchors::{MAX_PATH_SEGMENTS, MAX_SEGMENT_BYTES};
 
 /// Refuse a comment record that breaks a static invariant.
 pub fn check(env: &Envelope) -> Result<(), TxnError> {
+    let corrupt = |why: String| TxnError::Corrupt(format!("seq {}: {why}", env.seq));
+    if let Record::Committed { addresses, .. } | Record::Tombstone { addresses, .. } = &env.record {
+        check_set(addresses).map_err(|why| corrupt(format!("addresses: {why}")))?;
+    }
     let Some(rec) = CommentRecord::of(&env.record) else {
         return Ok(());
     };
-    let corrupt = |why: String| TxnError::Corrupt(format!("seq {}: {why}", env.seq));
     let body = |b: &str| {
         check_body(b)
             .map_err(|_| corrupt(format!("a body is empty or over {MAX_BODY_BYTES} bytes")))

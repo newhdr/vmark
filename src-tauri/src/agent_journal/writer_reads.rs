@@ -56,16 +56,18 @@ impl Writer {
         self.lock().healthy()
     }
 
-    /// Whether any document's degraded queue holds a record: something the
-    /// caller was told happened is not durable yet. Separate from `health`,
-    /// which must stay `Ok` for the drainer to retry the queue.
-    pub fn any_degraded_queue(&self) -> bool {
-        self.lock().degraded.values().any(|q| !q.is_empty())
-    }
-
     #[cfg(test)]
     pub fn journal_len(&self) -> u64 {
         self.lock().journal.len()
+    }
+
+    /// What a status reports of the writer, read in one critical section:
+    /// the generation, whether it is degraded (unhealthy, or a queued record
+    /// not durable yet) and the uncertified-fallback count.
+    pub fn status_facts(&self) -> (u64, bool, u64) {
+        let g = self.lock();
+        let degraded = g.healthy().is_err() || g.degraded.values().any(|q| !q.is_empty());
+        (g.proj.generation, degraded, g.uncertified_fallbacks)
     }
 
     pub fn blob_text(&self, hash: &BlobHash) -> Result<String, TxnError> {

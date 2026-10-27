@@ -22,7 +22,7 @@ use crate::agent_journal::comment::replies::{
     CommentCreatedReply, CommentDeletedReply, CommentRepliedReply, CommentStateReply,
 };
 use crate::agent_journal::comment::wire::StateRequest;
-use crate::agent_journal::controller::decode;
+use crate::agent_journal::controller::{decode, Controller};
 use crate::agent_journal::service::AgentJournalState;
 use crate::command_error::CommandError;
 
@@ -79,11 +79,10 @@ pub async fn comment_user_mark_addressed(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, CommentStateReply>, CommandError> {
-    let work = run(&state, move |c| {
-        let req: StateRequest = decode(&payload)?;
-        c.comments_user().mark_addressed(&req)?.into_state()
-    });
-    bind_call(&call_id, work).await
+    state_call(&state, payload, &call_id, |c, req| {
+        c.comments_user().mark_addressed(req)?.into_state()
+    })
+    .await
 }
 
 /// Resolve a thread (`payload` as `comment_user_mark_addressed`).
@@ -96,11 +95,10 @@ pub async fn comment_user_resolve(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, CommentStateReply>, CommandError> {
-    let work = run(&state, move |c| {
-        let req: StateRequest = decode(&payload)?;
-        c.comments_user().resolve(&req)?.into_state()
-    });
-    bind_call(&call_id, work).await
+    state_call(&state, payload, &call_id, |c, req| {
+        c.comments_user().resolve(req)?.into_state()
+    })
+    .await
 }
 
 /// Reopen a resolved thread (`payload` as `comment_user_mark_addressed`).
@@ -113,11 +111,10 @@ pub async fn comment_user_reopen(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, CommentStateReply>, CommandError> {
-    let work = run(&state, move |c| {
-        let req: StateRequest = decode(&payload)?;
-        c.comments_user().reopen(&req)?.into_state()
-    });
-    bind_call(&call_id, work).await
+    state_call(&state, payload, &call_id, |c, req| {
+        c.comments_user().reopen(req)?.into_state()
+    })
+    .await
 }
 
 /// Delete a resolved thread (`payload` as `comment_user_mark_addressed`).
@@ -130,11 +127,10 @@ pub async fn comment_user_delete(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, CommentDeletedReply>, CommandError> {
-    let work = run(&state, move |c| {
-        let req: StateRequest = decode(&payload)?;
-        c.comments_user().delete(&req)?.into_deleted()
-    });
-    bind_call(&call_id, work).await
+    state_call(&state, payload, &call_id, |c, req| {
+        c.comments_user().delete(req)?.into_deleted()
+    })
+    .await
 }
 
 /// A document's threads against the window's text (`payload`: JSON
@@ -153,6 +149,19 @@ pub async fn comment_user_list(
         run(&state, move |c| c.comments_user().list(&payload)),
     )
     .await
+}
+
+/// Decode a state request from `payload`, take `act` on it off the async
+/// runtime, and echo `call_id`: the body of every state change and
+/// deletion, of either family.
+pub(super) async fn state_call<T: Send + 'static>(
+    state: &AgentJournalState,
+    payload: String,
+    call_id: &str,
+    act: impl FnOnce(&Controller, &StateRequest) -> Result<T, CommandError> + Send + 'static,
+) -> Result<Bound<CallBind, T>, CommandError> {
+    let work = run(state, move |c| act(&c, &decode(&payload)?));
+    bind_call(call_id, work).await
 }
 
 #[cfg(all(test, not(target_os = "windows")))]

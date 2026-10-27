@@ -479,17 +479,27 @@ fn overlapping_occurrences_are_all_candidates() {
 fn the_heading_goldens_match_the_rust_heading_scanner() {
     let g = goldens();
     assert!(g.heading_cases.len() >= 40);
-    for c in &g.heading_cases {
-        let got: Vec<GoldenHeading> = headings(&c.markdown)
-            .into_iter()
-            .map(|h| GoldenHeading {
-                depth: h.depth,
-                offset: h.offset,
-                text: h.text,
+    let mismatches: Vec<String> = g
+        .heading_cases
+        .iter()
+        .filter_map(|c| {
+            let got: Vec<GoldenHeading> = headings(&c.markdown)
+                .into_iter()
+                .map(|h| GoldenHeading {
+                    depth: h.depth,
+                    offset: h.offset,
+                    text: h.text,
+                })
+                .collect();
+            (got != c.headings).then(|| {
+                format!(
+                    "{}: {:?}\n  rust: {got:?}\n  parser: {:?}",
+                    c.id, c.markdown, c.headings
+                )
             })
-            .collect();
-        assert_eq!(got, c.headings, "{}: {:?}", c.id, c.markdown);
-    }
+        })
+        .collect();
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
 
 #[test]

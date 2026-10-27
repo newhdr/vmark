@@ -147,3 +147,20 @@ fn a_reopened_writer_reads_the_staged_frame_with_its_blobs() {
     assert!(stored_blob(&w, "x\ny\n"));
     assert_eq!(w.head(d), p.baseline);
 }
+
+/// An admission applies item by item, so only its staged clone may become
+/// live: a frame handed to the writer without one is refused unwritten.
+#[test]
+fn an_admission_without_its_staged_projection_is_refused_unwritten() {
+    let dir = tmp();
+    let (c, _) = controller(dir.path());
+    let (frame, _) = super::admission_shape_tests::valid_admission();
+    let (len, proj) = (c.writer.journal_len(), c.writer.lock().proj.clone());
+    let err = {
+        let mut g = c.writer.lock();
+        c.writer.publish_record(&mut g, frame).unwrap_err()
+    };
+    assert_eq!(err.code(), "INVARIANT_BROKEN", "{err:?}");
+    assert_eq!(c.writer.journal_len(), len, "nothing written");
+    assert_eq!(c.writer.lock().proj, proj, "nothing applied");
+}

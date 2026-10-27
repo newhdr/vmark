@@ -1551,6 +1551,209 @@
       ]
     },
     {
+      "name": "inverted-span-meets-bounded-break",
+      "why": "a span given inverted (from > to, as an earlier window can map it) is blocked when its gaps [lo, hi] meet a bounded break, as if written the other way round",
+      "cap": 16384,
+      "pre": "abcdefghij",
+      "post": "abZefghij",
+      "transactions": [
+        {
+          "kind": "breakRange",
+          "fromA": 2,
+          "toA": 4,
+          "insert": "Z",
+          "reason": "uncertifiedRange",
+          "origin": "wysiwyg"
+        }
+      ],
+      "payload": {
+        "provenanceVersion": 1,
+        "unit": "utf16CodeUnit",
+        "cap": 16384,
+        "document": "doc-0001",
+        "epoch": "1",
+        "basis": "r0001",
+        "preHash": "72399361da6a7754fec986dca5b7cbaf1c810a28ded4abaf56b2106d06cb78b0",
+        "postHash": "546351819823aef24643c1eea7918e9185be21b68b07798a39311443e3d0f912",
+        "body": {
+          "lenA": 10,
+          "lenB": 9,
+          "transactions": 1,
+          "map": {
+            "L0": 0,
+            "R0": 0,
+            "runs": [
+              [
+                2,
+                1,
+                1
+              ],
+              [
+                1,
+                0,
+                1
+              ],
+              [
+                1,
+                1,
+                0
+              ],
+              [
+                6,
+                1,
+                1
+              ]
+            ]
+          },
+          "deletedChars": [
+            [
+              2,
+              3
+            ]
+          ],
+          "touchedGaps": [
+            [
+              3,
+              3
+            ]
+          ],
+          "breaks": {
+            "whole": null,
+            "bounded": [
+              {
+                "normal": [
+                  4,
+                  2
+                ],
+                "growing": [
+                  4,
+                  2
+                ],
+                "reason": "uncertifiedRange",
+                "origin": "wysiwyg"
+              }
+            ]
+          }
+        }
+      },
+      "spans": [
+        {
+          "input": {
+            "from": 5,
+            "to": 3,
+            "growing": false
+          },
+          "expect": {
+            "span": {
+              "from": 4,
+              "to": 2,
+              "growing": false
+            },
+            "hit": true,
+            "edited": true,
+            "block": {
+              "reason": "uncertifiedRange",
+              "origin": "wysiwyg"
+            }
+          }
+        },
+        {
+          "input": {
+            "from": 3,
+            "to": 0,
+            "growing": false
+          },
+          "expect": {
+            "span": {
+              "from": 3,
+              "to": 0,
+              "growing": false
+            },
+            "hit": true,
+            "edited": true,
+            "block": {
+              "reason": "uncertifiedRange",
+              "origin": "wysiwyg"
+            }
+          }
+        },
+        {
+          "input": {
+            "from": 4,
+            "to": 2,
+            "growing": false
+          },
+          "expect": {
+            "span": {
+              "from": 3,
+              "to": 2,
+              "growing": false
+            },
+            "hit": true,
+            "edited": true,
+            "block": {
+              "reason": "uncertifiedRange",
+              "origin": "wysiwyg"
+            }
+          }
+        },
+        {
+          "input": {
+            "from": 3,
+            "to": 5,
+            "growing": false
+          },
+          "expect": {
+            "span": {
+              "from": 3,
+              "to": 4,
+              "growing": false
+            },
+            "hit": true,
+            "edited": true,
+            "block": {
+              "reason": "uncertifiedRange",
+              "origin": "wysiwyg"
+            }
+          }
+        },
+        {
+          "input": {
+            "from": 9,
+            "to": 6,
+            "growing": false
+          },
+          "expect": {
+            "span": {
+              "from": 8,
+              "to": 5,
+              "growing": false
+            },
+            "hit": false,
+            "edited": false,
+            "block": null
+          }
+        },
+        {
+          "input": {
+            "from": 6,
+            "to": 9,
+            "growing": false
+          },
+          "expect": {
+            "span": {
+              "from": 5,
+              "to": 8,
+              "growing": false
+            },
+            "hit": false,
+            "edited": false,
+            "block": null
+          }
+        }
+      ]
+    },
+    {
       "name": "whole-break-keeps-first-reason",
       "why": "a snapshot-only update then an external reload: the first reason stays, every span is blocked",
       "cap": 16384,

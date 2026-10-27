@@ -1,4 +1,4 @@
-// WI-AL2.2h — owner death through the page entries and the cleanup worker's pass, one case per state at revocation: prepared is recorded uncommitted, released and durable; a failing append is queued with the reservation kept and the drainer alone releases it, also behind a held save and after three failed retries; a queued commit or abort is left as it is and survives; committed, aborted and uncommitted are already terminal; a full byte budget still queues the uncommitted record, the queue's bytes unchanged; destroying one window ends only its transactions; a corrupt writer ends nothing; a poisoned journal queues and a reopen records uncommitted; discarded and resolved are already terminal too, with nothing appended; a missing reservation is a counted invariant break; revocation never re-enters the writer lock; and a transaction the live prepare left without an owner is refused to a registered page's commit
+// WI-AL2.2h — owner death through the page entries and the cleanup worker's pass, one case per state at revocation: prepared is recorded uncommitted, released and durable; a failing append is queued with the reservation kept and the drainer alone releases it, also behind a held save and after three failed retries; a queued commit or abort is left as it is and survives; committed, aborted and uncommitted are already terminal; a full byte budget still queues the uncommitted record, the queue's bytes unchanged; destroying one window ends only its transactions; a corrupt writer ends nothing; a poisoned journal queues and a reopen records uncommitted; discarded and resolved are already terminal too, with nothing appended; a missing reservation is counted and the transaction still ended uncommitted, durably, another transaction's reservation untouched; revocation never re-enters the writer lock; and a transaction the live prepare left without an owner is refused to a registered page's commit
 //! R66 and R72 as amended by R78, through `Life` (hook, destroy) and the
 //! production sweep pass.
 
@@ -10,13 +10,13 @@ use serde_json::{json, Value};
 
 use crate::agent_journal::admission::admission_support::{body, doc, request_id, KEY};
 use crate::agent_journal::admission::lifecycle_support::{life, wait_until, Life};
-use crate::agent_journal::admission::owned::{OwnedBreak, OwnedEnd};
+use crate::agent_journal::admission::owned::OwnedEnd;
 use crate::agent_journal::admission::request_support::*;
 use crate::agent_journal::admission::requests::Owner;
 use crate::agent_journal::ids::TxnId;
 use crate::agent_journal::projection::TxnStatus;
 use crate::agent_journal::test_support::human_save;
-use crate::agent_journal::writer::RetentionBudget;
+use crate::agent_journal::writer::{Reservation, RetentionBudget};
 
 const OTHER: &str = "path:/notes/other.md";
 
@@ -354,16 +354,34 @@ fn an_io_failure_clearing_after_three_retries_is_released_by_the_drainer() {
 }
 
 #[test]
-fn a_missing_reservation_is_a_counted_invariant_break() {
+fn a_missing_reservation_is_counted_and_still_ended_uncommitted() {
     let l = life();
     let (a, txn) = owned(&l);
-    l.r.c.writer.lock().reservations.clear();
+    let other = TxnId::new();
+    {
+        let mut g = l.r.c.writer.lock();
+        let doc = g.proj.txns[&txn].doc;
+        g.reservations.insert(doc, Reservation { txn: other });
+    }
     reload(&l, &a.label);
-    assert_eq!(
-        l.ended(),
-        vec![(txn, OwnedEnd::Invariant(OwnedBreak::NoReservation))]
-    );
+    assert_eq!(l.ended(), vec![(txn, OwnedEnd::Recorded)]);
+    assert_eq!(l.r.status(txn), Some(TxnStatus::Uncommitted));
     assert_eq!((l.r.sizes().2, breaks(&l)), (0, 1));
+    let kept: Vec<TxnId> =
+        l.r.c
+            .writer
+            .lock()
+            .reservations
+            .values()
+            .map(|r| r.txn)
+            .collect();
+    assert_eq!(
+        kept,
+        vec![other],
+        "another transaction's reservation is not released"
+    );
+    let r = l.into_rig().reopen();
+    assert_eq!(r.status(txn), Some(TxnStatus::Uncommitted), "durable");
 }
 
 #[test]

@@ -18,7 +18,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
+#[cfg(test)]
 use crate::agent_journal::admission::receipt::PayloadDigest;
+#[cfg(test)]
 use crate::agent_journal::controlled_restore::{
     decode_restore_prepare, prepare_restore_with, RestorePrepared,
 };
@@ -66,6 +68,7 @@ impl Controller {
     ///
     /// # Errors
     /// The journal refusal, with `detail.journalCode`.
+    #[cfg(test)]
     pub fn restore_prepare(&self, payload: &str) -> Result<RestorePrepared, CommandError> {
         let digest = PayloadDigest::of(payload);
         let req = decode_restore_prepare(payload.as_bytes()).map_err(|e| refusal(&e))?;
@@ -85,31 +88,28 @@ impl Controller {
         let Some(doc) = self.docs.find(&req.doc_key).map_err(|e| refusal(&e))? else {
             return Ok(Vec::new());
         };
-        let open: Vec<_> = {
-            let g = self.writer.lock();
-            g.proj
-                .txns
-                .iter()
-                .filter(|(_, t)| t.doc == doc && t.status == TxnStatus::Uncommitted)
-                .map(|(id, t)| (*id, t.clone()))
-                .collect()
-        };
-        let mut out = Vec::with_capacity(open.len());
-        for (txn, t) in open {
-            let text = self
-                .writer
-                .blob_text(&t.preimage)
-                .map_err(|e| refusal(&e))?;
+        // One critical section: a discard and a collection between the
+        // selection and the reads could drop a preimage already selected.
+        let mut g = self.writer.lock();
+        let inner = &mut *g;
+        let (txns, blobs) = (&inner.proj.txns, &mut inner.blobs);
+        let mut out = Vec::new();
+        for (txn, t) in txns
+            .iter()
+            .filter(|(_, t)| t.doc == doc && t.status == TxnStatus::Uncommitted)
+        {
+            let text = blobs.get(&t.preimage).map_err(|e| refusal(&e))?;
             let preview: String = text.chars().take(PREVIEW_CHARS).collect();
             out.push(UncommittedEntry {
-                txn,
-                actor: t.actor,
-                tool: t.tool,
+                txn: *txn,
+                actor: t.actor.clone(),
+                tool: t.tool.clone(),
                 seq: t.seq,
                 complete: preview.len() == text.len(),
                 preview,
             });
         }
+        drop(g);
         out.sort_by_key(|e| e.seq);
         Ok(out)
     }

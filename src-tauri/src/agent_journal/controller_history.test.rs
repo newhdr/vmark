@@ -9,21 +9,28 @@ use std::time::Duration;
 use super::controller::Controller;
 use super::degraded_drain::{Backoff, DrainScheduler};
 use super::doc_registry::DocRegistry;
+use super::faults::Faults;
+use super::gc_policy::GcPolicy;
 use super::test_support::*;
 use crate::agent_journal::ids::TxnId;
 use crate::agent_journal::projection::TxnStatus;
 use crate::agent_journal::writer::Writer;
 
 fn controller() -> (tempfile::TempDir, Controller, Arc<Writer>) {
+    let (dir, c, w, _) = controller_with_faults();
+    (dir, c, w)
+}
+
+fn controller_with_faults() -> (tempfile::TempDir, Controller, Arc<Writer>, Arc<Faults>) {
     let dir = tmp();
-    let (w, _) = open_fast(dir.path());
+    let (w, faults) = open_fast(dir.path());
     let w = Arc::new(w);
     let drains = DrainScheduler::new(Backoff {
         first: Duration::from_millis(1),
         max: Duration::from_millis(4),
     });
     let c = Controller::new(w.clone(), Arc::default(), Arc::new(drains));
-    (dir, c, w)
+    (dir, c, w, faults)
 }
 
 fn write(c: &Controller, key: &str, parent: Option<&str>, pre: &str, post: &str) -> String {
@@ -179,4 +186,34 @@ fn reading_or_acting_on_an_unknown_key_mints_no_document() {
             "{key}: a read or a refused act never mints a document id"
         );
     }
+}
+
+/// The list is one snapshot: a discard and a collection that land while it
+/// is being built cannot remove a preimage it already selected.
+#[test]
+fn the_list_reads_every_preimage_in_the_snapshot_it_selected() {
+    let (_dir, c, w, faults) = controller_with_faults();
+    let t = uncommitted(&c, &w, "path:/a.md", "the preimage");
+    let mut head = w
+        .head(c.docs.resolve("path:/a.md").unwrap())
+        .map(|r| r.to_string());
+    for (pre, post) in [("the preimage", "one"), ("one", "two"), ("two", "three")] {
+        head = Some(write(&c, "path:/a.md", head.as_deref(), pre, post));
+    }
+    let w2 = w.clone();
+    faults.before_nth_lock(
+        2,
+        Some(Box::new(move || {
+            w2.discard(t).expect("discard");
+            let keep_one = GcPolicy {
+                max_revisions: 1,
+                ..GcPolicy::default()
+            };
+            w2.collect(&keep_one).expect("collect");
+        })),
+    );
+    let out = listed(&c, "path:/a.md");
+    faults.before_nth_lock(0, None);
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0]["preview"], "the preimage");
 }

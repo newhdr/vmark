@@ -55,13 +55,6 @@ pub struct Step {
     physical: u64,
 }
 
-impl Step {
-    /// The thread as the step leaves it.
-    pub fn thread(&self) -> &Thread {
-        &self.thread
-    }
-}
-
 impl CommentBook {
     /// The undeleted thread `comment` of `doc` at `expected` generation.
     pub fn thread_at(
@@ -104,13 +97,34 @@ impl CommentBook {
         limits: Option<&Limits>,
     ) -> Result<Step, TxnError> {
         let charge = bounds::charge(env);
-        let (before, mut after, action) = match rec {
-            CommentRecord::Created(c) => (None, self.created(c, revisions)?, None),
+        let (before, mut after, action) = self.transition(rec, revisions)?;
+        after.charges = after.charges.checked_add(charge).ok_or_else(overflow)?;
+        if charge > terminal_reserve(action) {
+            return Err(TxnError::Invariant(format!(
+                "a {charge}-byte terminal record exceeds its reserve"
+            )));
+        }
+        let step = self.totals(rec.comment(), before, after)?;
+        if let Some(l) = limits {
+            check_live(&step, action, l)?;
+        }
+        Ok(step)
+    }
+
+    /// The thread `rec` acts on (none for a create), the thread it leaves
+    /// before its charge, and its action (none for a create).
+    fn transition(
+        &self,
+        rec: CommentRecord<'_>,
+        revisions: &BTreeMap<RevisionId, RevisionMeta>,
+    ) -> Result<(Option<&Thread>, Thread, Option<Action>), TxnError> {
+        match rec {
+            CommentRecord::Created(c) => Ok((None, self.created(c, revisions)?, None)),
             CommentRecord::Replied(r) => {
                 let t = self.thread_at(r.comment, r.doc, r.expected_comment_gen)?;
                 let mut after = act(r.comment, t, Action::Reply, r.caller, None)?;
                 after.replies += 1;
-                (Some(t), after, Some(Action::Reply))
+                Ok((Some(t), after, Some(Action::Reply)))
             }
             CommentRecord::State(s) => {
                 let t = self.thread_at(s.comment, s.doc, s.expected_comment_gen)?;
@@ -119,50 +133,15 @@ impl CommentBook {
                     .ok_or_else(|| {
                         TxnError::Corrupt("not a transition from the thread's state".into())
                     })?;
-                (
-                    Some(t),
-                    act(s.comment, t, action, s.caller, Some(s.to))?,
-                    Some(action),
-                )
+                let after = act(s.comment, t, action, s.caller, Some(s.to))?;
+                Ok((Some(t), after, Some(action)))
             }
             CommentRecord::Deleted(d) => {
                 let t = self.thread_at(d.comment, d.doc, d.expected_comment_gen)?;
-                (
-                    Some(t),
-                    act(d.comment, t, Action::Delete, d.caller, None)?,
-                    Some(Action::Delete),
-                )
-            }
-        };
-        after.charges = after.charges.checked_add(charge).ok_or_else(overflow)?;
-        let terminal_reserve = match action {
-            Some(Action::Resolve) => MAX_RESOLVE_FRAME,
-            Some(Action::Delete) => MAX_DELETE_FRAME,
-            _ => u64::MAX,
-        };
-        if charge > terminal_reserve {
-            return Err(TxnError::Invariant(format!(
-                "a {charge}-byte terminal record exceeds its reserve"
-            )));
-        }
-        let step = self.totals(rec.comment(), before, after)?;
-        if let Some(l) = limits {
-            if action.is_none() {
-                check_count("comments", step.usage.comments, MAX_COMMENTS_PER_DOC)?;
-            }
-            if action == Some(Action::Reply) {
-                check_count("replies", step.thread.replies, MAX_REPLIES)?;
-            }
-            if !action.is_some_and(terminal) {
-                l.check(
-                    step.thread.logical(),
-                    step.usage.bytes,
-                    step.logical,
-                    step.physical,
-                )?;
+                let after = act(d.comment, t, Action::Delete, d.caller, None)?;
+                Ok((Some(t), after, Some(Action::Delete)))
             }
         }
-        Ok(step)
     }
 
     fn created(
@@ -275,4 +254,35 @@ impl CommentBook {
         self.threads.retain(|c, _| !gone.contains(c));
         Ok(())
     }
+}
+
+/// The most a record of `action` (none for a create) may charge: a
+/// terminal record fits the reserve held for it, anything else is bounded
+/// by the live limits instead.
+fn terminal_reserve(action: Option<Action>) -> u64 {
+    match action {
+        Some(Action::Resolve) => MAX_RESOLVE_FRAME,
+        Some(Action::Delete) => MAX_DELETE_FRAME,
+        None | Some(Action::Reply | Action::MarkAddressed | Action::Reopen) => u64::MAX,
+    }
+}
+
+/// The live writer's caps on `step`: a create counts against the
+/// document's threads, a reply against the thread's replies, and every
+/// record but a terminal one against the storage limits.
+fn check_live(step: &Step, action: Option<Action>, l: &Limits) -> Result<(), TxnError> {
+    match action {
+        None => check_count("comments", step.usage.comments, MAX_COMMENTS_PER_DOC)?,
+        Some(Action::Reply) => check_count("replies", step.thread.replies, MAX_REPLIES)?,
+        Some(Action::MarkAddressed | Action::Resolve | Action::Reopen | Action::Delete) => {}
+    }
+    if action.is_some_and(terminal) {
+        return Ok(());
+    }
+    l.check(
+        step.thread.logical(),
+        step.usage.bytes,
+        step.logical,
+        step.physical,
+    )
 }

@@ -10,6 +10,9 @@
 //! valid record's strings have none), decoding allocates without this
 //! check, and an overcommitting OS (macOS) can still end the process.
 //!
+//! Every record's `seq` must extend the order before it (`replay_seq`):
+//! a repeated or backward `seq` is corruption.
+//!
 //! A record newer than the reader stops replay as `FUTURE_FORMAT` at that
 //! frame: the scan then neither truncates a torn tail nor completes the
 //! projection, and the writer is never built, so nothing is repaired or
@@ -21,10 +24,15 @@ use crate::agent_journal::faults::Faults;
 use crate::agent_journal::frame::FrameSink;
 use crate::agent_journal::projection::Projection;
 
+#[path = "replay_seq.rs"]
+mod replay_seq;
+use replay_seq::SeqOrder;
+
 /// What replay built: the projection.
 pub(super) struct Replay {
     pub proj: Projection,
     max: u32,
+    order: SeqOrder,
     /// Test-injected allocator refusal past this many buffered bytes.
     reserve_cap: Option<usize>,
     cur: Vec<u8>,
@@ -38,6 +46,7 @@ impl Replay {
         Replay {
             proj: Projection::default(),
             max,
+            order: SeqOrder::default(),
             reserve_cap: faults.replay_reserve_cap(),
             cur: Vec::new(),
             failed: None,
@@ -74,7 +83,10 @@ impl Replay {
 
     fn fold(&mut self, payload: &[u8]) -> Result<(), TxnError> {
         match codec::decode_with_max(payload, self.max)? {
-            Decoded::Known(env) => self.proj.apply(&env),
+            Decoded::Known(env) => {
+                self.order.check(&env)?;
+                self.proj.apply(&env)
+            }
             Decoded::Future { version, .. } => Err(TxnError::FutureFormat { version }),
         }
     }
@@ -113,3 +125,7 @@ mod tests;
 #[cfg(test)]
 #[path = "future_format.test.rs"]
 mod future_format;
+
+#[cfg(test)]
+#[path = "replay_seq.test.rs"]
+mod seq_order_tests;

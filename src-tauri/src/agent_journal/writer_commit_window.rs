@@ -38,55 +38,103 @@ impl Writer {
         req: &CommitRequest,
         sent: Option<&Certificate>,
     ) -> Result<Window, TxnError> {
-        let refuse = |what: &str| Err(TxnError::InvalidRequest(what.into()));
-        let barrier = |reason, origin| whole_window(preimage, &req.postimage, reason, origin);
-        let plain = |w: Provenance| (w, None, Certification::Absent);
-        match (&t.review_op, &req.provenance) {
-            (ReviewOp::Review, None) => {
-                let agent = || barrier(BreakReason::WholeDocumentWrite, "agent");
-                Ok(
-                    match certify_commit(g, t, preimage, &req.postimage, sent)? {
-                        None => plain(agent()?),
-                        Some(Ok((w, hunks))) => (w, None, Certification::Certified(hunks)),
-                        Some(Err(r)) => (agent()?, None, Certification::Fallback(r)),
-                    },
-                )
-            }
-            _ if sent.is_some() => refuse("a certificate is for a review write without provenance"),
-            (ReviewOp::HunkRevert { .. } | ReviewOp::Restore { .. }, Some(_)) => {
+        let Some(payload) = &req.provenance else {
+            return writer_built(g, t, preimage, req, sent);
+        };
+        if sent.is_some() {
+            return refuse(CERTIFICATE_ONLY_FOR_REVIEW);
+        }
+        match t.review_op {
+            ReviewOp::HunkRevert { .. } | ReviewOp::Restore { .. } => {
                 refuse("a hunkRevert or restore carries no worker provenance")
             }
-            (ReviewOp::HunkRevert { hunk_id, .. }, None) => {
-                let inner = &mut *g;
-                let p = plan(&inner.proj, &mut inner.blobs, t.doc, hunk_id, preimage)?;
-                match (p.decision, p.window) {
-                    (RevertDecision::Apply { postimage, .. }, Some((w, r)))
-                        if postimage == req.postimage =>
-                    {
-                        Ok((
-                            w,
-                            Some((hunk_id.clone(), r, p.effects)),
-                            Certification::Absent,
-                        ))
-                    }
-                    _ => refuse("the postimage is not the revert of the hunk"),
-                }
-            }
-            (ReviewOp::Restore { .. }, None) => {
-                Ok(plain(barrier(BreakReason::Restore, "restore")?))
-            }
-            (ReviewOp::None, None) => Ok(plain(barrier(BreakReason::SnapshotOnly, "snapshot")?)),
-            (_, Some(p)) => {
-                let window = check_payload(
-                    &g.proj,
-                    t.doc,
-                    &basis_of(t.parent),
-                    preimage,
-                    &req.postimage,
-                    p,
-                )?;
+            ReviewOp::Review | ReviewOp::None => {
+                let basis = basis_of(t.parent);
+                let window =
+                    check_payload(&g.proj, t.doc, &basis, preimage, &req.postimage, payload)?;
                 Ok(plain(window))
             }
         }
     }
 }
+
+const CERTIFICATE_ONLY_FOR_REVIEW: &str = "a certificate is for a review write without provenance";
+
+fn refuse<T>(what: &str) -> Result<T, TxnError> {
+    Err(TxnError::InvalidRequest(what.into()))
+}
+
+fn plain(w: Provenance) -> Window {
+    (w, None, Certification::Absent)
+}
+
+/// A commit with no worker provenance: the writer builds its window.
+fn writer_built(
+    g: &mut Inner,
+    t: &TxnEntry,
+    preimage: &str,
+    req: &CommitRequest,
+    sent: Option<&Certificate>,
+) -> Result<Window, TxnError> {
+    let barrier = |reason, origin| whole_window(preimage, &req.postimage, reason, origin);
+    match &t.review_op {
+        ReviewOp::Review => certified(g, t, preimage, req, sent),
+        _ if sent.is_some() => refuse(CERTIFICATE_ONLY_FOR_REVIEW),
+        ReviewOp::HunkRevert { hunk_id, .. } => reverted(g, t, hunk_id, preimage, req),
+        ReviewOp::Restore { .. } => Ok(plain(barrier(BreakReason::Restore, "restore")?)),
+        ReviewOp::None => Ok(plain(barrier(BreakReason::SnapshotOnly, "snapshot")?)),
+    }
+}
+
+/// A review write: its certificate's window once checked, else the
+/// `wholeDocumentWrite` barrier (a failed certificate is a counted fallback).
+fn certified(
+    g: &mut Inner,
+    t: &TxnEntry,
+    preimage: &str,
+    req: &CommitRequest,
+    sent: Option<&Certificate>,
+) -> Result<Window, TxnError> {
+    let agent = || {
+        whole_window(
+            preimage,
+            &req.postimage,
+            BreakReason::WholeDocumentWrite,
+            "agent",
+        )
+    };
+    Ok(
+        match certify_commit(g, t, preimage, &req.postimage, sent)? {
+            None => plain(agent()?),
+            Some(Ok((w, hunks))) => (w, None, Certification::Certified(hunks)),
+            Some(Err(r)) => (agent()?, None, Certification::Fallback(r)),
+        },
+    )
+}
+
+/// A `hunkRevert`: the exact change its plan derives, only when the
+/// postimage is that revert.
+fn reverted(
+    g: &mut Inner,
+    t: &TxnEntry,
+    hunk_id: &HunkId,
+    preimage: &str,
+    req: &CommitRequest,
+) -> Result<Window, TxnError> {
+    let inner = &mut *g;
+    let p = plan(&inner.proj, &mut inner.blobs, t.doc, hunk_id, preimage)?;
+    match (p.decision, p.window) {
+        (RevertDecision::Apply { postimage, .. }, Some((w, r))) if postimage == req.postimage => {
+            Ok((
+                w,
+                Some((hunk_id.clone(), r, p.effects)),
+                Certification::Absent,
+            ))
+        }
+        _ => refuse("the postimage is not the revert of the hunk"),
+    }
+}
+
+#[cfg(test)]
+#[path = "commit_window.test.rs"]
+mod tests;

@@ -20,16 +20,25 @@ pub const MAX_ADDRESSES: usize = 64;
 
 /// Refuse `ids` unless each names a distinct, retained, undeleted and
 /// unresolved thread of `doc`, and there are at most `MAX_ADDRESSES`.
-pub(crate) fn check(book: &CommentBook, doc: DocId, ids: &[CommentId]) -> Result<(), TxnError> {
-    let refuse = |why: String| Err(TxnError::InvalidAddresses(format!("addresses: {why}")));
+/// The static half of `check`, which replay holds a stored set to
+/// (`binding::check`): at most `MAX_ADDRESSES`, no id twice.
+pub(crate) fn check_set(ids: &[CommentId]) -> Result<(), String> {
     if ids.len() > MAX_ADDRESSES {
-        return refuse(format!("at most {MAX_ADDRESSES} comments"));
+        return Err(format!("at most {MAX_ADDRESSES} comments"));
     }
     let mut seen = BTreeSet::new();
+    match ids.iter().find(|id| !seen.insert(**id)) {
+        Some(id) => Err(format!("comment {id} is named twice")),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn check(book: &CommentBook, doc: DocId, ids: &[CommentId]) -> Result<(), TxnError> {
+    let refuse = |why: String| Err(TxnError::InvalidAddresses(format!("addresses: {why}")));
+    if let Err(why) = check_set(ids) {
+        return refuse(why);
+    }
     for &id in ids {
-        if !seen.insert(id) {
-            return refuse(format!("comment {id} is named twice"));
-        }
         match book.threads.get(&id) {
             None => return refuse(format!("no comment {id}")),
             Some(t) if t.deleted => return refuse(format!("comment {id} is deleted")),

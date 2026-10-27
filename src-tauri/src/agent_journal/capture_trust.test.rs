@@ -138,3 +138,36 @@ fn malformed_capture_ids_are_refused_at_decode() {
         "nothing extends u64::MAX"
     );
 }
+
+/// A save of `post` claiming `head`, carrying `capture`.
+fn claimed_save(head: RevisionId, post: &str, capture: Value) -> String {
+    let mut v: Value = serde_json::from_str(&bound_save(Some(head), post, capture)).unwrap();
+    v["claimsRevision"] = serde_json::to_value(head).unwrap();
+    v.to_string()
+}
+
+#[test]
+fn an_elided_save_records_its_seq_so_an_older_capture_is_refused() {
+    let (_dir, w, c, _faults) = setup();
+    let head = agent_write(&c, "k", None, "", "base");
+    let len = w.journal_len();
+    let elided = c
+        .capture(&claimed_save(head, "base", id("source", "s-1", "2")))
+        .unwrap();
+    assert_eq!(elided.observation, None, "the claim is verified and elided");
+    assert_eq!(w.journal_len(), len);
+
+    // The delayed earlier capture would journal stale text over it.
+    assert_eq!(
+        save(&w, &c, "stale", id("source", "s-1", "1")),
+        Err("INVALID_REQUEST".to_owned())
+    );
+    // An elided save is checked too: its seq must extend the session's.
+    let replayed = c.capture(&claimed_save(head, "base", id("source", "s-1", "2")));
+    assert_eq!(
+        replayed.map_err(|e| journal_code(&e)).err().as_deref(),
+        Some("INVALID_REQUEST")
+    );
+    assert_eq!(w.journal_len(), len, "nothing appended");
+    assert!(save(&w, &c, "next", id("source", "s-1", "3")).is_ok());
+}

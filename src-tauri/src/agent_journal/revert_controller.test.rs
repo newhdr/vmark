@@ -1,4 +1,4 @@
-// WI-AL2.2d — the framed revert prepare through the controller: an applied revert replies kind prepared in its bind envelope and commits through the owning page; a conflicted revert replies kind decided with no transaction; a refused revert (R31) leaves the projection, generation, record count and every byte on disk exactly as they were
+// WI-AL2.2d — the framed revert prepare through the controller: an applied revert replies kind prepared in its bind envelope and commits through the owning page; a conflicted revert replies kind decided with no transaction; a refused revert (R31) leaves the projection, generation, record count and every byte on disk exactly as they were; a one-item staged revert may take the journal's last legal generation, and only the write after it is refused
 //! R31 and R34 at the controller boundary, through `revert_prepare_framed`.
 
 use std::path::Path;
@@ -116,4 +116,24 @@ fn a_refused_revert_changes_nothing_on_disk_or_in_the_projection() {
     let e = revert(&r, &a, &p).expect_err("ambiguous");
     assert_eq!(journal_code(&e), "AMBIGUOUS_REVERT", "{e:?}");
     assert_eq!((mark(&r.c.writer), dir_bytes(r.dir.path())), before);
+}
+
+#[test]
+fn a_staged_revert_takes_the_last_legal_generation_and_the_next_write_is_refused() {
+    let (r, a, d) = seeded();
+    let (h, _) = two_hunks(&r.c.writer, d);
+    r.c.writer.lock().proj.generation = u64::MAX - 2;
+    let out = revert(&r, &a, &revert_p(&r, &a, "xx", &h)).expect("u64::MAX - 1 is legal");
+    assert_eq!(
+        out["reply"]["response"]["generation"],
+        json!((u64::MAX - 1).to_string()),
+        "{out}"
+    );
+    let before = mark(&r.c.writer);
+    let e =
+        r.c.writer
+            .arm_epoch(DocId::new())
+            .expect_err("u64::MAX is reserved");
+    assert!(e.to_string().contains("generation exhausted"), "{e}");
+    assert_eq!(mark(&r.c.writer), before, "nothing written");
 }

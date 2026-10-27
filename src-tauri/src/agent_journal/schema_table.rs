@@ -90,6 +90,34 @@ pub(crate) fn check(env: &Envelope) -> Result<(), TxnError> {
     Ok(())
 }
 
+/// The versioned fields, as (`at`, key): `None` the envelope, else the record.
+const VERSIONED_FIELDS: [(Option<&str>, &str); 3] = [
+    (None, "receipt"),
+    (Some("record"), "certificate"),
+    (Some("record"), "addresses"),
+];
+
+/// Refuse a versioned field written as `null` or `[]`. Serde reads either
+/// as absent, so `check` could not see it labelled below its version; the
+/// writer never emits one (each is skipped when empty), so at any label it
+/// is not a record this build wrote.
+pub(crate) fn check_raw(value: &serde_json::Value) -> Result<(), TxnError> {
+    for (at, key) in VERSIONED_FIELDS {
+        let object = at.map_or(Some(value), |at| value.get(at));
+        let empty = match object.and_then(|o| o.get(key)) {
+            Some(serde_json::Value::Null) => true,
+            Some(serde_json::Value::Array(items)) => items.is_empty(),
+            _ => false,
+        };
+        if empty {
+            return Err(TxnError::Corrupt(format!(
+                "a versioned field `{key}` is present but empty"
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "schema_table.test.rs"]
 mod tests;

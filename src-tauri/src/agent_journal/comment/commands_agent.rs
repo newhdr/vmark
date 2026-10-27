@@ -16,12 +16,11 @@
 
 use crate::agent_journal::admission::bound::{bind_call, Bound, CallBind, RequestBind};
 use crate::agent_journal::commands::run;
+use crate::agent_journal::comment::commands_user::state_call;
 use crate::agent_journal::comment::list::CommentList;
 use crate::agent_journal::comment::replies::{
     CommentCreatedReply, CommentRepliedReply, CommentStateReply,
 };
-use crate::agent_journal::comment::wire::StateRequest;
-use crate::agent_journal::controller::decode;
 use crate::agent_journal::service::AgentJournalState;
 use crate::command_error::CommandError;
 
@@ -75,11 +74,10 @@ pub async fn comment_agent_mark_addressed(
     payload: String,
     call_id: String,
 ) -> Result<Bound<CallBind, CommentStateReply>, CommandError> {
-    let work = run(&state, move |c| {
-        let req: StateRequest = decode(&payload)?;
-        c.comments_agent().mark_addressed(&req)?.into_state()
-    });
-    bind_call(&call_id, work).await
+    state_call(&state, payload, &call_id, |c, req| {
+        c.comments_agent().mark_addressed(req)?.into_state()
+    })
+    .await
 }
 
 /// The document's threads against the window's text (`payload`: JSON

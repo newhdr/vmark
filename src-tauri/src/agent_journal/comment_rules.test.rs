@@ -1,4 +1,4 @@
-// WI-AL3.1b — comment rules: every cell of the state matrix through the user and agent handles (an allowed cell moves the thread and bumps commentGen, a refused one is COMMENT_NOT_ALLOWED with nothing appended); only a resolved thread is deleted and replay removes it; an A-B-A return to the same state at a newer commentGen is STALE_COMMENT; an actor on the user route, none on the agent route, or a caller field is INVALID_REQUEST; the MAX-3 exhaustion sequence; and a thread whose creation revision was collected still reopens
+// WI-AL3.1b — comment rules: every cell of the state matrix through the user and agent handles (an allowed cell moves the thread and bumps commentGen, a refused one is COMMENT_NOT_ALLOWED with nothing appended); only a resolved thread is deleted and replay removes it; an A-B-A return to the same state at a newer commentGen is STALE_COMMENT; a comment id the journal has never minted, or one of another document, is INVALID_REQUEST (INVALID_COMMENT at the bridge), not STALE_COMMENT, with nothing appended; an actor on the user route, none on the agent route, or a caller field is INVALID_REQUEST; the MAX-3 exhaustion sequence; and a thread whose creation revision was collected still reopens
 //! R36, R37 and R45 through the comment handles of a live controller.
 
 use serde_json::json;
@@ -218,6 +218,31 @@ fn an_aba_return_to_the_same_state_is_stale_comment() {
     assert_eq!(code(&e), "STALE_COMMENT");
     assert_eq!(r.journal_len(), len);
     assert!(user(&r, Action::Delete, c, 3).is_ok());
+}
+
+#[test]
+fn an_unknown_or_other_document_comment_is_invalid_request() {
+    let (r, page) = rig();
+    let c = comment_of(&create(&r, &page, "mine").expect("create"));
+    r.c.docs.resolve("doc-other").expect("another document");
+    let len = r.journal_len();
+    let unknown = CommentId::at(u64::MAX - 1);
+    let e = user(&r, Action::Resolve, unknown, 0).expect_err("never minted");
+    assert_eq!(code(&e), "INVALID_REQUEST", "unknown: {e:?}");
+    let mut req = state_req(c, 0);
+    req.doc_key = "doc-other".into();
+    let e =
+        r.c.comments_user()
+            .resolve(&req)
+            .expect_err("another document");
+    assert_eq!(code(&e), "INVALID_REQUEST", "other document: {e:?}");
+    let p = r.frame(&page, reply_body(unknown, 0, "to nothing"));
+    assert_eq!(
+        code(&reply_as(&r, &page, CommentCaller::Agent, &p).unwrap_err()),
+        "INVALID_REQUEST"
+    );
+    assert_eq!(r.journal_len(), len, "a refusal appends nothing");
+    assert_eq!(thread(&r, c).comment_gen, 0);
 }
 
 #[test]

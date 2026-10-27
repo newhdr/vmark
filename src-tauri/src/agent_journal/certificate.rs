@@ -262,6 +262,7 @@ pub(crate) fn note_fallback(g: &mut Inner, doc: DocId, reason: FallbackReason) {
 
 impl Writer {
     /// Certificates that fell back to a barrier since the writer opened.
+    #[cfg(test)]
     pub fn uncertified_fallbacks(&self) -> u64 {
         self.lock().uncertified_fallbacks
     }

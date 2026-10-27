@@ -199,6 +199,7 @@ fn revert_effects(
 impl Writer {
     /// What a revert of `hunk` would do to the head text, or why it is
     /// refused (`AMBIGUOUS_REVERT` for a blocked span). Appends nothing.
+    #[cfg(test)]
     pub fn plan_revert(&self, doc: DocId, hunk: &HunkId) -> Result<RevertPlan, TxnError> {
         let mut g = self.lock();
         let head = g

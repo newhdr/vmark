@@ -32,12 +32,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent_journal::actor::Actor;
-use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
 use crate::agent_journal::admission::receipt::{
     Outcome, PayloadDigest, PreparedResponse, RequestId,
 };
 use crate::agent_journal::capture_seq::CaptureId;
-use crate::agent_journal::controlled::{reused_id, Prep};
+use crate::agent_journal::controlled::{prepare_kind, Prep};
 use crate::agent_journal::controlled_wire::decode;
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{BlobHash, DocId, HunkId, RevisionId, TxnId};
@@ -150,13 +149,18 @@ pub fn prepare_revert_with(
     req: RevertPrepareRequest,
     digest: Option<PayloadDigest>,
 ) -> Result<Outcome, TxnError> {
-    let request = Request::from_parts(req.request_id, digest)?;
-    let prep = revert_prep(req)?;
-    let outcome = prepare_admitted(w, &mut w.lock(), doc, prep, request)?;
-    match &outcome {
-        Outcome::Prepared(PreparedResponse::Revert(_)) | Outcome::Decision(_) => Ok(outcome),
-        _ => Err(reused_id()),
-    }
+    let id = req.request_id;
+    prepare_kind(
+        w,
+        doc,
+        id,
+        digest,
+        || revert_prep(req),
+        |o| match o {
+            Outcome::Prepared(PreparedResponse::Revert(_)) | Outcome::Decision(_) => Some(o),
+            _ => None,
+        },
+    )
 }
 
 /// What `req` asks the writer to prepare: the person's revert of one

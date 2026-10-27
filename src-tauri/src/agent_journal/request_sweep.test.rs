@@ -145,17 +145,14 @@ fn the_sweep_reports_each_way_an_owned_transaction_ends() {
     let r = r.reopen();
     assert_eq!(r.status(txn), Some(TxnStatus::Uncommitted));
 
-    // Its reservation gone: a writer bug, counted, the owner dropped.
+    // Its reservation gone: a writer bug, counted, and still ended uncommitted.
     let r = rig();
     let a = r.page("doc-a", 1);
     let txn = txn_of(&r.prepare(&a, &r.p_head(&a, "text")).expect("prepare"));
     r.c.writer.lock().reservations.clear();
     r.pages.started(&a.label);
-    let ended = r.c.sweep(&r.pages);
-    assert_eq!(
-        ended,
-        vec![(txn, OwnedEnd::Invariant(OwnedBreak::NoReservation))]
-    );
+    assert_eq!(r.c.sweep(&r.pages), vec![(txn, OwnedEnd::Recorded)]);
+    assert_eq!(r.status(txn), Some(TxnStatus::Uncommitted));
     assert_eq!((r.sizes().2, breaks(&r)), (0, 1));
 
     // An owner naming no transaction, and one whose transaction ended.

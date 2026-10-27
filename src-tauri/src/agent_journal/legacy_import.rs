@@ -102,9 +102,10 @@ pub(crate) fn import_legacy_file_within(
         Err(e) => return Err(e.into()),
     };
     // One byte past the cap is read, so a log that grew after any size
-    // check is still caught.
+    // check is still caught; at `u64::MAX` the cap is the whole file.
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut std::io::Read::take(file, max_bytes + 1), &mut bytes)?;
+    let limit = max_bytes.saturating_add(1);
+    std::io::Read::read_to_end(&mut std::io::Read::take(file, limit), &mut bytes)?;
     if bytes.len() as u64 > max_bytes {
         return Err(TxnError::Io(format!(
             "the legacy checkpoint log exceeds the {max_bytes}-byte import limit; it is kept unimported"
@@ -232,7 +233,11 @@ pub(crate) fn retire_with(
     report: &LegacyImportReport,
     claim: impl Fn(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<PathBuf, RetireError> {
-    if !report.found || !path.exists() {
+    // A failed existence check is an I/O failure, not an absence.
+    let exists = path
+        .try_exists()
+        .map_err(|e| RetireError::Io(e.to_string()))?;
+    if !report.found || !exists {
         return Err(RetireError::NotFound);
     }
     if !report.verified {
@@ -265,3 +270,7 @@ pub(crate) fn retire_with(
     }
     Err(RetireError::TargetExists)
 }
+
+#[cfg(test)]
+#[path = "legacy_import_bounds.test.rs"]
+mod bounds_tests;

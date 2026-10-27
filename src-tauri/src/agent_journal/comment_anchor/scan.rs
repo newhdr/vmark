@@ -8,18 +8,22 @@
 //!     markers stripped; a heading-like line in there is never a root heading.
 //!   - A `$$` math opener counts only when the production parser keeps it
 //!     (see `math`). List items and block quotes are read in `container`.
+//!   - Paragraph text (definitions, setext headings, tables) is read in
+//!     `paragraph`.
 //!   - The scan is linear: every block consumes its lines once, and math
 //!     validity is precomputed (`MathIndex`).
 //!
 //! @module agent_journal/comment_anchor/scan
 
-use super::html::{delimiter_cells, html_ends, html_start, table_cells, HtmlEnd};
+use super::html::{html_ends, html_start, HtmlEnd};
 use super::lines::{
-    atx, definition, fence_close, fence_open, is_blank, lead, list_marker, quote_content,
-    setext_underline, thematic, Line, ListKind,
+    atx, fence_close, fence_open, is_blank, lead, list_marker, quote_content, thematic, Line,
+    ListKind,
 };
 use super::math::MathIndex;
 use super::work;
+
+mod paragraph;
 
 /// What a root block is, as far as the outline cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,9 +128,8 @@ impl Scanner<'_> {
         if let Some(end) = html_start(t, false) {
             return self.html(i, end);
         }
-        if let Some(last) = definition(self.lines, i) {
-            self.other(i, last);
-            return last + 1;
+        if let Some(next) = self.definitions(i) {
+            return next;
         }
         self.paragraph(i)
     }
@@ -148,57 +151,6 @@ impl Scanner<'_> {
             || thematic(t)
             || quote_content(t).is_some()
             || html_start(t, true).is_some()
-    }
-
-    pub(super) fn paragraph(&mut self, first: usize) -> usize {
-        let mut last = first;
-        let mut j = first + 1;
-        while j < self.lines.len() {
-            let t = self.text(j);
-            if is_blank(t) {
-                break;
-            }
-            if let Some(depth) = setext_underline(t).filter(|_| self.setext) {
-                let line = self.lines[first].start;
-                let text_end =
-                    self.lines[last].start + self.text(last).trim_end_matches([' ', '\t']).len();
-                let kind = Kind::Heading {
-                    depth,
-                    line,
-                    text: (self.first_char(first), text_end),
-                };
-                self.push(self.first_char(first), self.lines[j].end(), kind);
-                return j + 1;
-            }
-            if delimiter_cells(t).is_some_and(|n| n == table_cells(self.text(last))) {
-                if last > first {
-                    self.other(first, last - 1);
-                }
-                return self.table(last, j);
-            }
-            if self.interrupts(j, false) {
-                break;
-            }
-            last = j;
-            j += 1;
-        }
-        self.other(first, last);
-        j
-    }
-
-    fn table(&mut self, head: usize, delimiter: usize) -> usize {
-        let mut last = delimiter;
-        let mut j = delimiter + 1;
-        while j < self.lines.len() {
-            let t = self.text(j);
-            if is_blank(t) || lead(t).0 >= 4 || self.interrupts(j, true) {
-                break;
-            }
-            last = j;
-            j += 1;
-        }
-        self.other(head, last);
-        j
     }
 
     fn indented_code(&mut self, first: usize) -> usize {

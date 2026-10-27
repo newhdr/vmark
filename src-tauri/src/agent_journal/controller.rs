@@ -6,6 +6,9 @@
 //! touched document is left degraded (a failed `committed`, `aborted`,
 //! baseline or capture append) or a save failed to linearize, so neither
 //! waits for a restart. The review panel's decisions live in `review`.
+//! The unframed `prepare`, `commit`, `abort` (and `restore_prepare`) are
+//! test-only: a window reaches the framed, page-owned entries
+//! (`admission::framed`), which carry request receipts and page ownership.
 //!
 //! @module agent_journal/controller
 
@@ -14,10 +17,12 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+#[cfg(test)]
 use crate::agent_journal::admission::receipt::PayloadDigest;
 use crate::agent_journal::capture::{
     capture_save, decode_capture, linearize_pending, CaptureReply, WINDOW_MAX_BYTES,
 };
+#[cfg(test)]
 use crate::agent_journal::controlled::{
     abort_controlled, commit_controlled, decode_prepare, prepare_controlled_with, txn_doc,
     AbortReason, ControlledCommitted, ControlledPrepared,
@@ -60,6 +65,7 @@ impl Controller {
     ///
     /// # Errors
     /// The journal refusal, with `detail.journalCode`.
+    #[cfg(test)]
     pub fn prepare(&self, payload: &str) -> Result<ControlledPrepared, CommandError> {
         let digest = PayloadDigest::of(payload);
         let req = decode_prepare(payload.as_bytes()).map_err(|e| refusal(&e))?;
@@ -86,6 +92,7 @@ impl Controller {
     /// # Errors
     /// The journal refusal; an I/O failure is not an error but
     /// `durable: false`.
+    #[cfg(test)]
     pub fn commit(&self, txn: &str, payload: &str) -> Result<ControlledCommitted, CommandError> {
         let txn = parse_txn(txn)?;
         let doc = txn_doc(&self.writer, txn);
@@ -98,6 +105,7 @@ impl Controller {
     ///
     /// # Errors
     /// An unknown reason or transaction is `invalid-input`.
+    #[cfg(test)]
     pub fn abort(&self, txn: &str, reason: &str) -> Result<AbortReply, CommandError> {
         let txn = parse_txn(txn)?;
         let reason: AbortReason = serde_json::from_value(json!(reason)).map_err(|_| {

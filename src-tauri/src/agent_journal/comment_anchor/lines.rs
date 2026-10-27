@@ -1,6 +1,6 @@
 //! Line-level CommonMark classifiers for the outline scanner: indentation,
-//! ATX and setext headings, thematic breaks, list and quote markers, code
-//! fences, and link reference definitions.
+//! ATX and setext headings, thematic breaks, list and quote markers, and
+//! code fences.
 //!
 //! Each classifier reads one line without its line ending. Columns follow
 //! CommonMark: a tab advances to the next multiple of four.
@@ -226,58 +226,4 @@ pub(super) fn fence_close(s: &str, ch: char, run: usize) -> bool {
         return false;
     };
     matches!(fence_run(r), Some((c, n)) if c == ch && n >= run && is_blank(&r[n..]))
-}
-
-/// A link reference definition starting at line `i`: the index of its last line.
-/// Single-line definitions, and a label line whose destination is on the next line.
-pub(super) fn definition(lines: &[Line<'_>], i: usize) -> Option<usize> {
-    let r = unindented(lines[i].text)?.strip_prefix('[')?;
-    let mut escaped = false;
-    let mut close = None;
-    for (at, b) in r.bytes().enumerate() {
-        match b {
-            _ if escaped => escaped = false,
-            b'\\' => escaped = true,
-            b'[' => return None,
-            b']' => {
-                close = Some(at);
-                break;
-            }
-            _ => {}
-        }
-    }
-    let close = close?;
-    if is_blank(&r[..close]) || close > 999 {
-        return None;
-    }
-    let after = r[close + 1..].strip_prefix(':')?.trim_matches([' ', '\t']);
-    if !after.is_empty() {
-        return destination_and_title(after).then_some(i);
-    }
-    let next = lines.get(i + 1)?.text.trim_matches([' ', '\t']);
-    (!next.is_empty() && destination_and_title(next)).then_some(i + 1)
-}
-
-fn destination_and_title(s: &str) -> bool {
-    let rest = if let Some(inner) = s.strip_prefix('<') {
-        match inner.find(['<', '>']) {
-            Some(at) if inner.as_bytes()[at] == b'>' => &inner[at + 1..],
-            _ => return false,
-        }
-    } else {
-        let n = s.find([' ', '\t']).unwrap_or(s.len());
-        if s[..n].bytes().any(|b| b.is_ascii_control()) {
-            return false;
-        }
-        &s[n..]
-    };
-    let title = rest.trim_start_matches([' ', '\t']);
-    if title.is_empty() {
-        return true;
-    }
-    if title.len() == rest.len() || title.len() < 2 {
-        return false;
-    }
-    let (open, close) = (title.as_bytes()[0], title.as_bytes()[title.len() - 1]);
-    matches!((open, close), (b'"', b'"') | (b'\'', b'\'') | (b'(', b')'))
 }

@@ -11,8 +11,10 @@ use serde_json::{json, Value};
 use crate::agent_journal::actor::Actor;
 use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse, Receipt};
 use crate::agent_journal::codec::{self, Decoded};
+use crate::agent_journal::controlled_restore::RestorePrepared;
+use crate::agent_journal::controlled_revert::RevertPrepared;
 use crate::agent_journal::controlled_wire::ControlledPrepared;
-use crate::agent_journal::ids::{BlobHash, DocId, RevisionId, TxnId};
+use crate::agent_journal::ids::{BlobHash, DocId, HunkId, RevisionId, TxnId};
 use crate::agent_journal::record::{Envelope, ObservedRef, Record, SCHEMA_V2, SCHEMA_V3};
 use crate::agent_journal::review::ReviewOp;
 use crate::agent_journal::test_support::agent;
@@ -161,12 +163,13 @@ fn a_child_envelope_is_refused_like_a_top_level_record() {
 }
 
 #[test]
-fn a_prepared_receipt_must_name_its_own_txn_revision_and_document() {
+fn a_prepared_receipt_must_name_its_own_txn_revision_document_and_generation() {
     let (a, _) = valid_admission();
     for (field, value) in [
         ("txn", json!(TxnId::new())),
         ("revision", json!(RevisionId::new())),
         ("doc", json!(DocId::new())),
+        ("generation", json!("13")),
     ] {
         let mut child = to_value(&a);
         items(&mut child)[2]["receipt"]["outcome"]["response"][field] = value.clone();
@@ -181,6 +184,116 @@ fn a_prepared_receipt_must_name_its_own_txn_revision_and_document() {
         let mut top = to_value(&inner[2]);
         top["receipt"]["outcome"]["response"][field] = value;
         assert_corrupt(&top, &format!("a top-level receipt with another {field}"));
+    }
+}
+
+/// A `prepared` at seq 12 on `parent`, receipted with `response`, its
+/// record carrying `review_op`; with `doc`, its document.
+fn receipted(
+    review_op: ReviewOp,
+    parent: Option<RevisionId>,
+    response: impl FnOnce(DocId, TxnId, RevisionId) -> PreparedResponse,
+) -> (Envelope, DocId) {
+    let (doc, t, rev) = (DocId::new(), TxnId::new(), RevisionId::new());
+    let mut e = env(12, t, prepared(doc, parent, rev, "x"));
+    if let Record::Prepared { review_op: op, .. } = &mut e.record {
+        *op = review_op;
+    }
+    let mut r = receipt(doc, t, rev, 12);
+    r.outcome = Outcome::Prepared(response(doc, t, rev));
+    e.schema_version = crate::agent_journal::schema_table::receipt_min(&r);
+    e.receipt = Some(r);
+    (e, doc)
+}
+
+/// `last` carried as the outcome of an admission that first observes and
+/// linearizes its document onto `base`, all at `last`'s schema.
+fn carried(last: Envelope, doc: DocId, base: RevisionId) -> Envelope {
+    let o = TxnId::new();
+    let schema = last.schema_version;
+    let mut items = vec![
+        env(10, o, observation(doc, "x")),
+        env(11, o, linearized(base)),
+    ];
+    for item in &mut items {
+        item.schema_version = schema;
+    }
+    let mut a = env(10, last.txn, Record::Admission { items: vec![] });
+    a.schema_version = schema;
+    items.push(last);
+    a.record = Record::Admission { items };
+    a
+}
+
+#[test]
+fn a_restore_or_revert_receipt_must_name_its_own_txn_revision_document_and_generation() {
+    for base in [None, Some(RevisionId::new())] {
+        restore_and_revert_receipts_bind(base);
+    }
+}
+
+/// Top-level when `base` is `None`; otherwise carried by an admission
+/// linearized onto `base`.
+fn restore_and_revert_receipts_bind(base: Option<RevisionId>) {
+    let hunk = HunkId("h-1".into());
+    let restore = receipted(ReviewOp::Review, base, |doc, txn, revision| {
+        PreparedResponse::Restore(RestorePrepared {
+            doc,
+            txn,
+            revision,
+            generation: 12,
+            baseline: None,
+            text: "x".into(),
+            resolves: None,
+        })
+    });
+    let op = ReviewOp::HunkRevert {
+        hunk_id: hunk.clone(),
+        expected_review_gen: 3,
+    };
+    let revert = receipted(op, base, |doc, txn, revision| {
+        PreparedResponse::Revert(RevertPrepared {
+            doc,
+            txn,
+            revision,
+            generation: 12,
+            baseline: None,
+            hunk,
+            review_gen: 3,
+            from: 0,
+            to: 1,
+            insert: String::new(),
+            postimage_hash: BlobHash::of_text(""),
+        })
+    });
+    for (kind, (e, doc)) in [("restore", restore), ("revert", revert)] {
+        let e = match base {
+            Some(b) => carried(e, doc, b),
+            None => e,
+        };
+        let bytes = codec::encode(&e);
+        let control = codec::decode(&bytes);
+        assert!(
+            matches!(control, Ok(Decoded::Known(_))),
+            "{kind} ({base:?}): the control decodes: {control:?}"
+        );
+        for (field, value) in [
+            ("txn", json!(TxnId::new())),
+            ("revision", json!(RevisionId::new())),
+            ("doc", json!(DocId::new())),
+            ("generation", json!("13")),
+        ] {
+            let mut v = to_value(&e);
+            let receipt = match base {
+                Some(_) => &mut items(&mut v)[2]["receipt"],
+                None => &mut v["receipt"],
+            };
+            receipt["outcome"]["response"][field] = value;
+            assert_corrupt(
+                &v,
+                &format!("a {kind} receipt ({base:?}) with another {field}"),
+            );
+        }
     }
 }
 
@@ -244,6 +357,41 @@ fn the_admission_frame_shape_is_enforced() {
     let mut txn = base.clone();
     txn["txn"] = json!(TxnId::new());
     assert_corrupt(&txn, "an outer txn that is not the outcome item's");
+}
+
+/// An admission of `records` at seq 10, its `txn` the last item's.
+fn frame_of(records: Vec<(TxnId, Record)>) -> Value {
+    let items: Vec<Envelope> = (10..)
+        .zip(records)
+        .map(|(seq, (txn, record))| env(seq, txn, record))
+        .collect();
+    let txn = items.last().expect("an item").txn;
+    to_value(&env(10, txn, Record::Admission { items }))
+}
+
+#[test]
+fn an_admission_ends_in_exactly_one_outcome() {
+    let doc = DocId::new();
+    let (o, t, u) = (TxnId::new(), TxnId::new(), TxnId::new());
+    let (b, rev, rev2) = (RevisionId::new(), RevisionId::new(), RevisionId::new());
+    let obs = || (o, observation(doc, "x"));
+    let lin = || (o, linearized(b));
+    let prep = |txn, r| (txn, prepared(doc, Some(b), r, "x"));
+
+    assert_corrupt(&frame_of(vec![obs(), lin()]), "no outcome");
+    assert_corrupt(
+        &frame_of(vec![obs(), lin(), prep(t, rev), prep(u, rev2)]),
+        "two outcomes",
+    );
+    assert_corrupt(
+        &frame_of(vec![obs(), prep(t, rev), lin()]),
+        "an outcome before a linearization",
+    );
+    let ok = frame_of(vec![obs(), lin(), prep(t, rev)]);
+    assert!(
+        codec::decode(&serde_json::to_vec(&ok).unwrap()).is_ok(),
+        "observation, linearization, one outcome last"
+    );
 }
 
 #[test]

@@ -77,11 +77,12 @@ pub enum PreparedResponse {
 }
 
 impl PreparedResponse {
-    fn names(&self) -> (DocId, TxnId, RevisionId) {
+    /// The document, transaction, revision and generation the reply names.
+    fn names(&self) -> (DocId, TxnId, RevisionId, u64) {
         match self {
-            Self::Controlled(p) => (p.doc, p.txn, p.revision),
-            Self::Restore(p) => (p.doc, p.txn, p.revision),
-            Self::Revert(p) => (p.doc, p.txn, p.revision),
+            Self::Controlled(p) => (p.doc, p.txn, p.revision, p.generation),
+            Self::Restore(p) => (p.doc, p.txn, p.revision, p.generation),
+            Self::Revert(p) => (p.doc, p.txn, p.revision, p.generation),
         }
     }
 
@@ -152,9 +153,9 @@ pub fn check_binding(env: &Envelope) -> Result<(), TxnError> {
                 ..
             },
         ) => {
-            if response.names() != (*doc, env.txn, *revision) {
+            if response.names() != (*doc, env.txn, *revision, env.seq) {
                 return Err(corrupt(
-                    "the receipt names another document, transaction or revision",
+                    "the receipt names another document, transaction, revision or generation",
                 ));
             }
             match (response, review_op) {

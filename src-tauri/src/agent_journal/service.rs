@@ -263,11 +263,12 @@ impl AgentJournalState {
             }
             Some(Ok(s)) => {
                 status.phase = Phase::Ready;
-                status.generation = Some(s.writer.generation().to_string());
-                status.degraded = s.writer.health().is_err() || s.writer.any_degraded_queue();
+                let (generation, degraded, fallbacks) = s.writer.status_facts();
+                status.generation = Some(generation.to_string());
+                status.degraded = degraded;
                 status.truncated_tail_bytes = s.open.truncated_tail_bytes;
                 status.uncommitted_at_start = s.open.uncommitted.len();
-                status.uncertified_fallbacks = s.writer.uncertified_fallbacks();
+                status.uncertified_fallbacks = fallbacks;
                 status.incarnation = Some(s.writer.incarnation().to_string());
                 status.retirement = Some(s.retirement.clone());
                 status.gc = Some(s.gc.clone());

@@ -81,6 +81,7 @@ pub struct Linearized {
 }
 
 impl Writer {
+    #[cfg(test)]
     pub fn observe(&self, req: ObserveRequest) -> Result<ObserveOutcome, TxnError> {
         self.observe_for_window(req, None)
     }
@@ -163,7 +164,9 @@ impl Writer {
                 queued.blobs.iter().map(|(h, t)| (h, t.as_str())).collect();
             match self.append(g, queued.txn, queued.record.clone(), &refs) {
                 Ok(_) => return Ok(Journaled::Pending),
-                Err(TxnError::Io(_)) => queued.blobs.retain(|(h, _)| !g.blobs.contains(h)),
+                Err(TxnError::Io(_) | TxnError::Indeterminate(_)) => {
+                    queued.blobs.retain(|(h, _)| !g.blobs.contains(h))
+                }
                 Err(e) => return Err(e),
             }
         }

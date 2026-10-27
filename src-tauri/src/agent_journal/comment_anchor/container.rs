@@ -1,32 +1,41 @@
 //! Root list items and block quotes, and what is open inside them as far
-//! as lazy continuation cares: a paragraph, a fence, or an HTML block.
+//! as lazy continuation cares: a paragraph, a table, a fence, a `$$` math
+//! block, or an HTML block.
 //!
 //! An approximation, stated: nested containers are not modelled, only their
-//! markers stripped, and an HTML block inside a container ends at a blank
-//! line whatever its kind. Only whether a paragraph is open decides
-//! anything at the root.
+//! markers stripped. A `$$` opener inside a container always opens math
+//! (the text is canonical, so an opener the parser would escape is already
+//! written escaped) and runs to its closer or the container's end. Only
+//! whether a paragraph is open decides anything at the root: a table, math
+//! or a closed HTML block ends it, so the next unprefixed line is not lazy.
 //!
 //! @module agent_journal/comment_anchor/container
 
-use super::html::html_start;
+use super::html::{delimiter_cells, html_ends, html_start, table_cells, HtmlEnd};
 use super::lines::{
     atx, fence_close, fence_open, is_blank, lead, list_marker, quote_content, setext_underline,
     strip_cols, thematic,
 };
+use super::math::{math_close, math_open};
 use super::scan::Scanner;
 
 /// What is open inside a container, as far as lazy continuation cares.
 #[derive(Debug, Default)]
 pub(super) struct Inner {
     pub para: bool,
+    /// The cell count of the open paragraph's last line, for a table's delimiter row.
+    cells: usize,
+    table: bool,
     fence: Option<(char, usize)>,
-    html: bool,
+    math: Option<usize>,
+    html: Option<HtmlEnd>,
 }
 
 impl Inner {
     pub fn blank(&mut self) {
         self.para = false;
-        self.html = false;
+        self.table = false;
+        self.html = None;
     }
 
     /// Feed one line of the container's content; nested markers are stripped,
@@ -40,21 +49,36 @@ impl Inner {
             }
             return;
         }
+        if let Some(run) = self.math {
+            if math_close(c).is_some_and(|n| n >= run) {
+                self.math = None;
+            }
+            return;
+        }
         for _ in 0..MAX_NESTED {
             if is_blank(c) {
                 return self.blank();
             }
-            if self.html || lead(c).0 >= 4 {
+            if let Some(end) = self.html {
+                if matches!(end, HtmlEnd::Marker(m) if html_ends(c, m)) {
+                    self.html = None;
+                }
+                return;
+            }
+            if lead(c).0 >= 4 {
                 return;
             }
             if let Some(f) = fence_open(c) {
-                self.fence = Some(f);
-                self.para = false;
-                return;
+                return self.open(|s| s.fence = Some(f));
+            }
+            if let Some(run) = math_open(c) {
+                return self.open(|s| s.math = Some(run));
             }
             if atx(c).is_some() || thematic(c) || (self.para && setext_underline(c).is_some()) {
-                self.para = false;
-                return;
+                return self.open(|_| {});
+            }
+            if self.para && delimiter_cells(c) == Some(self.cells) {
+                return self.open(|s| s.table = true);
             }
             if let Some(q) = quote_content(c) {
                 c = q;
@@ -65,17 +89,26 @@ impl Inner {
                 let marker = c[at..].find([' ', '\t']).unwrap_or(c.len() - at);
                 c = c[at + marker..].trim_start_matches([' ', '\t']);
                 self.para = false;
+                self.table = false;
                 continue;
             }
-            if html_start(c, self.para).is_some() {
-                self.html = true;
-                self.para = false;
-                return;
+            if let Some(end) = html_start(c, self.para) {
+                let closed = matches!(end, HtmlEnd::Marker(m) if html_ends(c, m));
+                return self.open(|s| s.html = (!closed).then_some(end));
             }
-            self.para = true;
+            self.para = !self.table;
+            self.cells = table_cells(c);
             return;
         }
-        self.para = true;
+        self.para = !self.table;
+    }
+
+    /// A block other than a paragraph starts: whatever paragraph or table
+    /// was open ends, and `set` records what is open now.
+    fn open(&mut self, set: impl FnOnce(&mut Self)) {
+        self.para = false;
+        self.table = false;
+        set(self);
     }
 }
 

@@ -15,6 +15,11 @@
 //!   - The sweep matches every refusal of the terminal append with no
 //!     wildcard; one that means a writer bug keeps the owner (the next
 //!     sweep tries again) and is counted.
+//!   - An owner whose transaction the writer does not know is counted and
+//!     dropped: no later sweep could succeed. One prepared with no
+//!     reservation is counted and still ended `uncommitted` by a plain
+//!     append that releases no reservation (`end_unreserved`); a failed
+//!     append keeps the owner for the next sweep.
 //!
 //! @module agent_journal/admission/owned
 
@@ -28,35 +33,15 @@ use crate::agent_journal::controlled::{
 use crate::agent_journal::controller::{invalid, parse_txn, AbortReply, Controller};
 use crate::agent_journal::errors::TxnError;
 use crate::agent_journal::ids::{DocId, TxnId};
-use crate::agent_journal::projection::TxnStatus;
-use crate::agent_journal::record::Record;
 use crate::agent_journal::refusal::refusal;
-use crate::agent_journal::writer::{Inner, Writer};
+use crate::agent_journal::writer::Inner;
+use crate::agent_journal::writer_txn::Authorize;
 use crate::command_error::CommandError;
 
-/// How the sweep left a transaction whose page is gone.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OwnedEnd {
-    /// `uncommitted` appended.
-    Recorded,
-    /// `uncommitted` queued behind a failed append.
-    Queued,
-    /// It had already ended.
-    AlreadyTerminal,
-    /// Its terminal record was already queued.
-    AlreadyQueued,
-    /// The writer is corrupt; the owner is kept for after a reopen.
-    WriterStopped,
-    /// A writer bug: the owner names something the writer cannot end.
-    Invariant(OwnedBreak),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OwnedBreak {
-    UnknownTxn,
-    NoReservation,
-    Refused(&'static str),
-}
+#[path = "owned_end.rs"]
+mod end;
+use end::end_owned_in;
+pub use end::{OwnedBreak, OwnedEnd};
 
 /// The page pair a commit or abort names.
 struct Pair {
@@ -132,14 +117,8 @@ impl Controller {
     ) -> Result<Bound<PairBind, ControlledCommitted>, CommandError> {
         let txn = parse_txn(txn)?;
         let pair = Pair::parse(page_identity, generation)?;
-        let auth = |g: &Inner| pair.authorize(g, pages, label, txn);
-        let doc = txn_doc(&self.writer, txn);
-        let out = commit_controlled_with(&self.writer, txn, payload.as_bytes(), Some(&auth));
-        doc.inspect(|&d| self.settle(d));
-        let reply = out.map_err(|e| refusal(&e))?;
-        Ok(Bound {
-            bind: pair.bind(txn),
-            reply,
+        self.end_owned(pages, label, txn, &pair, |auth| {
+            commit_controlled_with(&self.writer, txn, payload.as_bytes(), Some(auth))
         })
     }
 
@@ -161,14 +140,29 @@ impl Controller {
         let pair = Pair::parse(page_identity, generation)?;
         let reason: AbortReason = serde_json::from_value(serde_json::json!(reason))
             .map_err(|_| invalid(&format!("unknown abort reason {reason:?}")))?;
+        self.end_owned(pages, label, txn, &pair, |auth| {
+            abort_controlled_with(&self.writer, txn, reason, Some(auth))
+                .map(|d| AbortReply { durable: d.durable })
+        })
+    }
+
+    /// Run `end` on `txn` behind the pair's authorization, then settle its
+    /// document whatever the outcome.
+    fn end_owned<R>(
+        &self,
+        pages: &PageTable,
+        label: &str,
+        txn: TxnId,
+        pair: &Pair,
+        end: impl FnOnce(Authorize<'_>) -> Result<R, TxnError>,
+    ) -> Result<Bound<PairBind, R>, CommandError> {
         let auth = |g: &Inner| pair.authorize(g, pages, label, txn);
         let doc = txn_doc(&self.writer, txn);
-        let out = abort_controlled_with(&self.writer, txn, reason, Some(&auth));
+        let out = end(&auth);
         doc.inspect(|&d| self.settle(d));
-        let d = out.map_err(|e| refusal(&e))?;
         Ok(Bound {
             bind: pair.bind(txn),
-            reply: AbortReply { durable: d.durable },
+            reply: out.map_err(|e| refusal(&e))?,
         })
     }
 
@@ -202,70 +196,5 @@ impl Controller {
             self.settle(doc);
         }
         ended
-    }
-}
-
-/// End `txn`, whose owner is gone, `uncommitted`. See the module docs.
-pub(crate) fn end_owned_in(w: &Writer, g: &mut Inner, txn: TxnId) -> OwnedEnd {
-    let broken = |g: &mut Inner, why: OwnedBreak, drop_owner: bool| {
-        log::error!(
-            "agent journal: cannot end owned transaction {} ({why:?})",
-            txn.0
-        );
-        g.requests.owner_invariant_breaks += 1;
-        if drop_owner {
-            g.requests.owners.remove(&txn);
-        }
-        OwnedEnd::Invariant(why)
-    };
-    let Some(t) = g.proj.txns.get(&txn).cloned() else {
-        return broken(g, OwnedBreak::UnknownTxn, true);
-    };
-    if t.status != TxnStatus::Prepared {
-        g.requests.owners.remove(&txn);
-        return OwnedEnd::AlreadyTerminal;
-    }
-    if g.degraded
-        .get(&t.doc)
-        .is_some_and(|q| q.iter().any(|q| q.txn == txn))
-    {
-        g.requests.owners.remove(&txn);
-        return OwnedEnd::AlreadyQueued;
-    }
-    if !g.reservations.get(&t.doc).is_some_and(|r| r.txn == txn) {
-        return broken(g, OwnedBreak::NoReservation, true);
-    }
-    match w.terminal(g, t.doc, txn, Record::Uncommitted, vec![]) {
-        Ok(true) => OwnedEnd::Recorded,
-        Ok(false) => OwnedEnd::Queued,
-        Err(e) => match &e {
-            TxnError::Corrupt(_) => OwnedEnd::WriterStopped,
-            TxnError::JournalBusy { .. }
-            | TxnError::StaleParent { .. }
-            | TxnError::JournalDegraded
-            | TxnError::StaleReview { .. }
-            | TxnError::ReviewBacklogFull { .. }
-            | TxnError::ReviewStateExhausted { .. }
-            | TxnError::AmbiguousRevert { .. }
-            | TxnError::RevertRefused { .. }
-            | TxnError::Saturated(_)
-            | TxnError::StalePage(_)
-            | TxnError::StaleRegistration(_)
-            | TxnError::Request(_)
-            | TxnError::InvalidRequest(_)
-            | TxnError::InvalidProvenance(_)
-            | TxnError::InvalidAddresses(_)
-            | TxnError::InvalidText(_)
-            | TxnError::CommentAnchorTooLong { .. }
-            | TxnError::StaleComment { .. }
-            | TxnError::CommentStateExhausted { .. }
-            | TxnError::CommentStorageFull { .. }
-            | TxnError::CommentLimit { .. }
-            | TxnError::CommentNotAllowed { .. }
-            | TxnError::Io(_)
-            | TxnError::Indeterminate(_)
-            | TxnError::Invariant(_)
-            | TxnError::FutureFormat { .. } => broken(g, OwnedBreak::Refused(e.code()), false),
-        },
     }
 }

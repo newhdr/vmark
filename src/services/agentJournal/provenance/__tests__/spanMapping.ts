@@ -44,9 +44,10 @@ export function mapSpan(p: Provenance, { from, to, growing }: SpanInput) {
   const T = p.touchedGaps;
   const hit = growing ? intersects(T, lo, hi) || intersects(D, lo, hi - 1) : intersects(D, lo, hi - 1) || intersects(T, lo + 1, hi - 1);
   const edited = hit || (growing ? intersects(D, lo - 1, hi) : from >= to && intersects(T, lo, hi));
+  // An inverted span covers gaps [lo, hi], mapped onto [L(lo), R(hi)]: the growing hull.
   const reaches = (x: BoundedBreak) => {
-    const [fromMax, toMin] = growing ? x.growing : x.normal;
-    return from <= fromMax && to >= toMin;
+    const [fromMax, toMin] = growing || from > to ? x.growing : x.normal;
+    return lo <= fromMax && hi >= toMin;
   };
   const b = p.whole ?? p.bounded.find(reaches) ?? null;
   return { span, hit, edited, block: b && { reason: b.reason, origin: b.origin } };

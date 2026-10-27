@@ -1,4 +1,5 @@
-//! Admissions and request receipts (journal schema v3).
+//! Admissions and request receipts (journal schemas v3 to v5: v4 adds the
+//! revert receipts, v5 the comment receipts and admissions).
 //!
 //! - `receipt` — a prepare's request id, payload digest and stored reply,
 //!   kept on its `prepared` so a retried request is answered from the
@@ -125,6 +126,10 @@ mod request_order_tests;
 #[cfg(test)]
 #[path = "../request_bounds.test.rs"]
 mod request_bounds_tests;
+
+#[cfg(test)]
+#[path = "../request_text.test.rs"]
+mod request_text_tests;
 
 #[cfg(test)]
 #[path = "../request_abandon.test.rs"]

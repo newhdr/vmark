@@ -33,7 +33,7 @@ use crate::agent_journal::admission::bound::{Bound, RequestBind};
 use crate::agent_journal::admission::page_table::{Liveness, PageTable};
 use crate::agent_journal::admission::payload::{admit_identity, Frame};
 use crate::agent_journal::admission::prepare::{prepare_admitted, Request};
-use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse};
+use crate::agent_journal::admission::receipt::{Outcome, PreparedResponse, RequestId};
 use crate::agent_journal::admission::reconcile::{lookup, receipt_doc};
 use crate::agent_journal::admission::requests::{Owner, RequestGuard};
 use crate::agent_journal::controlled::{controlled_prep, decode_prepare, reused_id, Prep};
@@ -56,6 +56,10 @@ enum Begun {
     Held(u64),
 }
 
+/// What a framed prepare reads from its decoded body: the request id, the
+/// document key, and the prepare (or why the body cannot be one).
+type Body = (Option<RequestId>, String, Result<Prep, TxnError>);
+
 impl Controller {
     /// Prepare an agent write from a framed payload.
     ///
@@ -67,16 +71,12 @@ impl Controller {
         label: &str,
         payload: &str,
     ) -> Result<Bound<RequestBind, ControlledPrepared>, CommandError> {
-        let frame = Frame::decode(payload)?;
-        let req = decode_prepare(frame.body().as_bytes()).map_err(|e| refusal(&e))?;
-        let request = frame.request(req.request_id)?;
-        let key = req.doc_key.clone();
-        let prep = controlled_prep(req).map_err(|e| refusal(&e))?;
-        match self.run_framed(pages, label, &frame, &request, &key, prep)? {
-            Outcome::Prepared(PreparedResponse::Controlled(reply)) => Ok(Bound {
-                bind: frame.bind(&request),
-                reply,
-            }),
+        let (bind, out) = self.prepare_body(pages, label, payload, |b| {
+            let req = decode_prepare(b)?;
+            Ok((req.request_id, req.doc_key.clone(), controlled_prep(req)))
+        })?;
+        match out {
+            Outcome::Prepared(PreparedResponse::Controlled(reply)) => Ok(Bound { bind, reply }),
             _ => Err(refusal(&reused_id())),
         }
     }
@@ -91,16 +91,12 @@ impl Controller {
         label: &str,
         payload: &str,
     ) -> Result<Bound<RequestBind, RestorePrepared>, CommandError> {
-        let frame = Frame::decode(payload)?;
-        let req = decode_restore_prepare(frame.body().as_bytes()).map_err(|e| refusal(&e))?;
-        let request = frame.request(req.request_id)?;
-        let key = req.doc_key.clone();
-        let prep = restore_prep(req).map_err(|e| refusal(&e))?;
-        match self.run_framed(pages, label, &frame, &request, &key, prep)? {
-            Outcome::Prepared(PreparedResponse::Restore(reply)) => Ok(Bound {
-                bind: frame.bind(&request),
-                reply,
-            }),
+        let (bind, out) = self.prepare_body(pages, label, payload, |b| {
+            let req = decode_restore_prepare(b)?;
+            Ok((req.request_id, req.doc_key.clone(), restore_prep(req)))
+        })?;
+        match out {
+            Outcome::Prepared(PreparedResponse::Restore(reply)) => Ok(Bound { bind, reply }),
             _ => Err(refusal(&reused_id())),
         }
     }
@@ -116,33 +112,35 @@ impl Controller {
         label: &str,
         payload: &str,
     ) -> Result<Bound<RequestBind, RevertReply>, CommandError> {
-        let frame = Frame::decode(payload)?;
-        let req = decode_revert_prepare(frame.body().as_bytes()).map_err(|e| refusal(&e))?;
-        let request = frame.request(req.request_id)?;
-        let key = req.doc_key.clone();
-        let prep = revert_prep(req).map_err(|e| refusal(&e))?;
-        let reply = match self.run_framed(pages, label, &frame, &request, &key, prep)? {
+        let (bind, out) = self.prepare_body(pages, label, payload, |b| {
+            let req = decode_revert_prepare(b)?;
+            Ok((req.request_id, req.doc_key.clone(), revert_prep(req)))
+        })?;
+        let reply = match out {
             Outcome::Prepared(PreparedResponse::Revert(p)) => RevertReply::Prepared(p),
             Outcome::Decision(d) => RevertReply::Decided(d),
             _ => return Err(refusal(&reused_id())),
         };
-        Ok(Bound {
-            bind: frame.bind(&request),
-            reply,
-        })
+        Ok(Bound { bind, reply })
     }
 
-    fn run_framed(
+    /// The pipeline every framed prepare shares: the frame, the body
+    /// `decode` reads from it, the request id, the prepare, then the
+    /// request protocol. Each step refuses before the next runs.
+    fn prepare_body(
         &self,
         pages: &PageTable,
         label: &str,
-        frame: &Frame,
-        request: &Request,
-        key: &str,
-        prep: Prep,
-    ) -> Result<Outcome, CommandError> {
+        payload: &str,
+        decode: impl FnOnce(&[u8]) -> Result<Body, TxnError>,
+    ) -> Result<(RequestBind, Outcome), CommandError> {
+        let frame = Frame::decode(payload)?;
+        let (id, key, prep) = decode(frame.body().as_bytes()).map_err(|e| refusal(&e))?;
+        let request = frame.request(id)?;
+        let prep = prep.map_err(|e| refusal(&e))?;
         let work = |w: &Writer, g: &mut Inner, doc, r| prepare_admitted(w, g, doc, prep, Some(r));
-        self.run_framed_with(pages, label, frame, request, key, work)
+        let out = self.run_framed_with(pages, label, &frame, &request, &key, work)?;
+        Ok((frame.bind(&request), out))
     }
 
     /// The request protocol around `work`, which runs in the second

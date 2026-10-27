@@ -65,7 +65,11 @@ impl Frame {
         record: Record,
         receipt: Option<Receipt>,
     ) -> Result<u64, TxnError> {
-        let seq = self.next_seq;
+        // `u64::MAX` is reserved (replay refuses it): the last legal
+        // generation may be staged, and only a push after it refuses.
+        let seq = Some(self.next_seq)
+            .filter(|s| *s < u64::MAX)
+            .ok_or_else(|| TxnError::Io("journal generation exhausted".into()))?;
         let env = Envelope {
             schema_version: self.schema,
             seq,
@@ -78,10 +82,7 @@ impl Frame {
             .apply(&env)
             .map_err(|e| TxnError::Invariant(format!("staged item {seq}: {e}")))?;
         self.items.push(env);
-        self.next_seq = seq
-            .checked_add(1)
-            .filter(|s| *s < u64::MAX)
-            .ok_or_else(|| TxnError::Io("journal generation exhausted".into()))?;
+        self.next_seq = seq + 1;
         Ok(seq)
     }
 

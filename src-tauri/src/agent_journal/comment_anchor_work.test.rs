@@ -1,4 +1,4 @@
-// WI-AL3.2 — the growth tests' counter cannot go blind: every primitive that reads a text or its headings counts what it reads, at least one unit per line, byte or heading — splitting lines, reading the outline (headings and blocks), the UTF-16 encoder, the heading path at an offset, the many-quote search, the resolver's own reads of the headings (every heading at least once beyond reading the outline), and resolving and creating anchors — so a per-anchor re-read anywhere shows in `comment_list_cost`
+// WI-AL3.2 — the growth tests' counter cannot go blind: every primitive that reads a text or its headings counts what it reads, at least one unit per line, byte or heading — splitting lines, reading the outline (headings and blocks), the UTF-16 encoder, the heading path at an offset, the many-quote search, the resolver's own reads of the headings (every heading at least once beyond reading the outline), and resolving and creating anchors — so a per-anchor re-read anywhere shows in `comment_list_cost`; and reading the outline of hostile definition-shaped text (titles that never close, labels and tables that cut a paragraph short) stays linear
 use super::lines::split_lines;
 use super::multi::occurrences_of_all;
 use super::outline::{heading_path_at, outline};
@@ -116,4 +116,26 @@ fn the_heading_path_tier_counts_a_read_per_heading_beyond_the_outline() {
         path - context - outline >= N as u64,
         "path {path}, context {context}, outline {outline}"
     );
+}
+
+#[test]
+fn reading_hostile_definition_text_is_linear() {
+    let units = [
+        "[a]: b\n'x\n",
+        "[a]: b 'x\n",
+        "[a]: b\n(\n",
+        "[x\n===\n",
+        "[x\n|-|\n2. a\n",
+        "[a]: b\n[c\n",
+        "[a\\]\n",
+    ];
+    for unit in units {
+        let work = |n: usize| counted(|| drop(outline(&unit.repeat(n))));
+        let (small, large) = (work(N), work(4 * N));
+        assert!(
+            large <= 5 * small,
+            "{unit:?}: {small} units at {N} repeats, {large} at {}",
+            4 * N
+        );
+    }
 }

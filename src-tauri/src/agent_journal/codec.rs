@@ -5,7 +5,8 @@
 //! stops there and the journal stays off, untouched, rather than build or
 //! repair a history it cannot fully read. An unknown `kind` is corruption,
 //! not an extension point. A known kind labelled below its version
-//! (`schema_table`) is corruption too.
+//! (`schema_table`) is corruption too, as is a versioned field written
+//! as `null` or `[]`, which serde would read as absent (`check_raw`).
 //!
 //! A v1 record is upgraded conservatively (`v1`): its snapshot-era span
 //! fields are dropped and it carries no provenance, so `apply` blocks every
@@ -75,6 +76,7 @@ pub fn decode_with_max(payload: &[u8], max: u32) -> Result<Decoded, TxnError> {
 /// upgraded or skipped).
 fn decode_known(mut value: serde_json::Value, version: u32) -> Result<Envelope, TxnError> {
     refuse_fields_on_unit_kinds(&value)?;
+    crate::agent_journal::schema_table::check_raw(&value)?;
     let children = take_admission_items(&mut value);
     let mut env: Envelope = serde_json::from_value(value)
         .map_err(|e| TxnError::Corrupt(format!("invalid v{version} record: {e}")))?;

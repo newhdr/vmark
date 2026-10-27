@@ -28,6 +28,7 @@
 
 mod container;
 mod create;
+mod definition;
 mod html;
 mod lines;
 mod math;

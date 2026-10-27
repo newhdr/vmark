@@ -62,6 +62,11 @@ uuid_id!(
 #[serde(try_from = "String", into = "String")]
 pub struct BlobHash(String);
 
+#[cfg(test)]
+thread_local! {
+    static HASHED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 impl BlobHash {
     /// Hash canonical text (its UTF-8 bytes).
     pub fn of_text(text: &str) -> Self {
@@ -70,7 +75,15 @@ impl BlobHash {
 
     /// Hash raw bytes.
     pub fn of_bytes(bytes: &[u8]) -> Self {
+        #[cfg(test)]
+        HASHED.with(|h| h.set(h.get() + bytes.len() as u64));
         Self(format!("sha256-{}", sha256_hex(bytes)))
+    }
+
+    /// The bytes hashed on this thread since the last take.
+    #[cfg(test)]
+    pub(crate) fn take_hashed() -> u64 {
+        HASHED.with(|h| h.replace(0))
     }
 
     /// The textual form stored in records.

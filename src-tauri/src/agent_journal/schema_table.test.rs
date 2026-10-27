@@ -95,3 +95,62 @@ fn a_prepared_certificate_is_a_v3_field() {
     let err = check(&env(SCHEMA_V2, prepared(Some(cert)))).unwrap_err();
     assert_eq!(err.code(), "JOURNAL_CORRUPT", "{err}");
 }
+
+/// A tombstone, labelled v2, with no addresses.
+fn tombstone() -> Record {
+    Record::Tombstone {
+        doc: DocId::new(),
+        revision: RevisionId::new(),
+        parent: None,
+        actor: Actor::Human,
+        preimage: None,
+        postimage: BlobHash::of_text("a"),
+        review_op: ReviewOp::Review,
+        hunks: vec![],
+        transitions: vec![],
+        attached_to: None,
+        addresses: vec![],
+    }
+}
+
+/// `record` labelled v2 and encoded, with `key` set to `value` at `at`
+/// (`""`: the envelope, `"record"`: the record).
+fn with_explicit(record: Record, at: &str, key: &str, value: serde_json::Value) -> Vec<u8> {
+    let mut json: serde_json::Value =
+        serde_json::from_slice(&codec::encode(&env(SCHEMA_V2, record))).unwrap();
+    let target = if at.is_empty() {
+        &mut json
+    } else {
+        &mut json[at]
+    };
+    target.as_object_mut().unwrap().insert(key.into(), value);
+    serde_json::to_vec(&json).unwrap()
+}
+
+#[test]
+fn a_versioned_field_present_but_empty_under_an_older_label_is_corrupt() {
+    // serde reads `null` and `[]` as absent, so presence is checked in the raw record.
+    let cases = [
+        with_explicit(
+            prepared(None),
+            "record",
+            "certificate",
+            serde_json::Value::Null,
+        ),
+        with_explicit(tombstone(), "record", "addresses", serde_json::json!([])),
+        with_explicit(prepared(None), "", "receipt", serde_json::Value::Null),
+    ];
+    for bytes in cases {
+        let err = codec::decode(&bytes).unwrap_err();
+        assert_eq!(
+            err.code(),
+            "JOURNAL_CORRUPT",
+            "{err}: {}",
+            String::from_utf8_lossy(&bytes)
+        );
+    }
+    for clean in [prepared(None), tombstone()] {
+        let bytes = codec::encode(&env(SCHEMA_V2, clean));
+        assert!(matches!(codec::decode(&bytes), Ok(Decoded::Known(_))));
+    }
+}

@@ -170,6 +170,7 @@ impl Writer {
     /// (`req.effects` is ignored). With no provenance a
     /// `review` commit is a `wholeDocumentWrite` barrier unless its
     /// selection certificate checks (`derive_commit_effects_with`).
+    #[cfg(test)]
     pub fn derive_commit_effects(
         &self,
         txn: TxnId,
