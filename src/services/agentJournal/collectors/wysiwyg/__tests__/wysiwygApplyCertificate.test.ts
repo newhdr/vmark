@@ -9,8 +9,7 @@ import { Plugin } from "@tiptap/pm/state";
 import { createTiptapExtensions } from "@/services/assembly/createTiptapExtensions";
 import { provenanceSessionFor, startProvenanceSessions } from "@/services/agentJournal/provenanceSessions";
 import { decodePayload, verifyPayloadTexts } from "@/services/agentJournal/provenance/payload";
-import { deleteAndRetype, destroyEditors, flush, load, mapHunk, mount, posOf, store, typeAfter } from "@/test/wysiwygNetZeroHarness";
-import { MAX_RETAINED_STEPS } from "../txnLedger";
+import { deleteAndRetype, destroyEditors, flush, load, mapHunk, mount, passStepBudget, posOf, store, typeAfter } from "@/test/wysiwygNetZeroHarness";
 import { captureWysiwygApply } from "../wysiwygCollector";
 import { wysiwygApplyCertificate } from "../wysiwygCertificate";
 
@@ -131,9 +130,8 @@ describe("WYSIWYG selection.set — post-apply certificate", () => {
     const editor = loaded();
     const { p } = await certify(editor, () => {
       const at = posOf(editor, "one");
-      const tr = editor.state.tr;
-      for (let i = 0; i * 2 <= MAX_RETAINED_STEPS; i++) tr.insertText("z", at).delete(at, at + 1);
-      editor.view.dispatch(tr.insertText("Z", at));
+      passStepBudget(editor, at);
+      editor.view.dispatch(editor.state.tr.insertText("Z", at));
     });
     expect(p.whole).toEqual({ reason: "capOverflow", origin: "wysiwyg:chain-cap" });
   });

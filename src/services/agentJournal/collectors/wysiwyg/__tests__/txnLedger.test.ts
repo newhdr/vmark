@@ -162,6 +162,16 @@ describe("TxnLedger", () => {
     expect(next.ok && next.edges.length).toBe(2);
   });
 
+  it.each([
+    ["retained step maps", { maxSteps: 2 }],
+    ["replaced ranges", { maxRanges: 2 }],
+  ] as const)("one transaction past its %s budget on its own drops the log into a chain-cap", (_name, budgets) => {
+    const { ledger, view } = setup(budgets);
+    const from = ledger.boundary(view.state);
+    view.dispatch(view.state.tr.insertText("a", 1).insertText("b", 2).insertText("c", 3));
+    expect(ledger.chain(from, view.state)).toMatchObject({ ok: false, reason: "chain-cap" });
+  });
+
   it("a boundary from another ledger is refused loudly", () => {
     const one = setup();
     const two = setup();

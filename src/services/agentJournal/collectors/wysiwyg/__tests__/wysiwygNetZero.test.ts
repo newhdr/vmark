@@ -11,8 +11,8 @@ import { createSourceProvenance } from "@/services/agentJournal/collectors/sourc
 import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
 import { ProvenanceSession, type ProvenanceCollector } from "@/services/agentJournal/provenance/session";
 import { provenanceSessionFor, startProvenanceSessions } from "@/services/agentJournal/provenanceSessions";
-import { MAX_RETAINED_STEPS, TxnLedger } from "../txnLedger";
-import { deleteAndRetype, destroyEditors, flush, freezeDecoded, load, mapHunk, mount, posOf, store } from "@/test/wysiwygNetZeroHarness";
+import { TxnLedger } from "../txnLedger";
+import { deleteAndRetype, destroyEditors, flush, freezeDecoded, load, mapHunk, mount, passStepBudget, posOf, store } from "@/test/wysiwygNetZeroHarness";
 
 const TEXT = "# Title\n\npara one\n\npara two 中文😀\n";
 let stop: (() => void) | null = null;
@@ -150,11 +150,8 @@ describe("wysiwyg collector — net-zero flushes", () => {
 
   it("a capped chain at equal text reports a whole capOverflow break", async () => {
     const editor = loaded();
-    const at = posOf(editor, "one");
-    const tr = editor.state.tr;
-    // Net zero in one transaction, past the ledger's step budget.
-    for (let i = 0; i * 2 <= MAX_RETAINED_STEPS; i++) tr.insertText("z", at).delete(at, at + 1);
-    editor.view.dispatch(tr);
+    // Net zero after every transaction, past the ledger's step budget in sum.
+    passStepBudget(editor, posOf(editor, "one"));
     expect(flush(editor)).toBe(TEXT);
     const { touched, p } = await freezeDecoded("t1", TEXT);
     expect(touched).toBe(true);

@@ -17,6 +17,7 @@ import { decodePayload } from "@/services/agentJournal/provenance/payload";
 import type { Provenance } from "@/services/agentJournal/provenance/accumulator";
 import { mapSpan } from "@/services/agentJournal/provenance/__tests__/spanMapping";
 import { noteWysiwygFlush, wysiwygProvenanceExtension } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCollector";
+import { MAX_RETAINED_STEPS } from "@/services/agentJournal/collectors/wysiwyg/txnLedger";
 
 const OPTS = { preserveBlankLines: true } as const;
 export const store = () => useDocumentStore.getState();
@@ -62,6 +63,25 @@ export function deleteAndRetype(editor: Editor, needle: string): void {
   const at = posOf(editor, needle);
   editor.view.dispatch(editor.state.tr.delete(at, at + needle.length));
   editor.view.dispatch(editor.state.tr.insertText(needle, at));
+}
+
+/** Steps per transaction in `passStepBudget`. */
+const STEPS_PER_TRANSACTION = 256;
+
+/**
+ * Net-zero transactions at `at` whose step maps, summed, pass the ledger's
+ * step budget: the document text is unchanged after each one. Each stays
+ * small because the editor's own plugins cost the square of one
+ * transaction's step count (Tiptap's `getChangedRanges` inverts the whole
+ * mapping per step); a single transaction over the budget is the ledger
+ * unit test's case.
+ */
+export function passStepBudget(editor: Editor, at: number): void {
+  for (let total = 0; total <= MAX_RETAINED_STEPS; total += STEPS_PER_TRANSACTION) {
+    const tr = editor.state.tr;
+    for (let i = 0; i < STEPS_PER_TRANSACTION; i += 2) tr.insertText("z", at).delete(at, at + 1);
+    editor.view.dispatch(tr);
+  }
 }
 
 export function typeAfter(editor: Editor, needle: string, text: string): void {
