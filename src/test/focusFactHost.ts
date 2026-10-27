@@ -2,6 +2,8 @@
  * Focus fact host — the fixture the focus facts (`focusFacts.ts`) run in: a
  * fresh host element per case, element and event helpers, and a button whose
  * `disabled` follows React state, for the cases a React commit drives.
+ * `openFactHost`/`closeFactHost` bracket one case for a runner without
+ * vitest hooks (the in-app WKWebView journey).
  *
  * @coordinates-with test/focusFacts.ts — the facts that use it
  * @module test/focusFactHost
@@ -35,14 +37,27 @@ let host: HTMLElement;
 /** The current case's host element. */
 export const factHost = (): HTMLElement => host;
 
+/**
+ * Start a case: a fresh host element with nothing focused.
+ * @public — the in-app WKWebView journey imports it inside webview-evaluated
+ * code, which static analysis (knip) cannot trace.
+ */
+export function openFactHost(): void {
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  host = document.createElement("div");
+  document.body.appendChild(host);
+}
+
+/**
+ * End a case: remove its host element.
+ * @public — imported by the in-app WKWebView journey, as `openFactHost` is.
+ */
+export const closeFactHost = (): void => host.remove();
+
 /** Give every case a fresh host element with nothing focused; call inside the runner's `describe`. */
 export function useFocusFactHost(): void {
-  beforeEach(() => {
-    (document.activeElement as HTMLElement | null)?.blur?.();
-    host = document.createElement("div");
-    document.body.appendChild(host);
-  });
-  afterEach(() => host.remove());
+  beforeEach(openFactHost);
+  afterEach(closeFactHost);
 }
 
 export function add<K extends keyof HTMLElementTagNameMap>(tag: K, id: string): HTMLElementTagNameMap[K] {

@@ -30,6 +30,8 @@ export interface FocusEngine {
 
 export interface FocusFact {
   name: string;
+  /** The case needs a real pointer: a runner that can only dispatch synthetic events does not run it. */
+  pointer?: true;
   run(engine: FocusEngine): Promise<void>;
 }
 
@@ -37,6 +39,7 @@ export interface FocusFact {
 export const FOCUS_FACTS: readonly FocusFact[] = [
   {
     name: "F1: a mouse click does not focus the clicked button",
+    pointer: true,
     run: async (engine) => {
       const b = add("button", "b");
       await engine.click(b);
@@ -58,6 +61,7 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
   },
   {
     name: "F3: a mouse click elsewhere moves focus from a focused textarea to the page, with a focusout",
+    pointer: true,
     run: async (engine) => {
       const area = add("textarea", "area");
       const other = add("button", "other");
@@ -71,6 +75,7 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
   },
   {
     name: "F3b: a mouse click elsewhere moves focus from a focused button to the page, with a focusout",
+    pointer: true,
     run: async (engine) => {
       const b = add("button", "b");
       const other = add("button", "other");
@@ -84,6 +89,7 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
   },
   {
     name: "F3c: a mouse click elsewhere moves focus from a focused button just disabled to the page, with one focusout",
+    pointer: true,
     run: async (engine) => {
       const b = add("button", "b");
       const other = add("button", "other");
@@ -219,6 +225,7 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
   },
   {
     name: "trace: the click path, from a focused button to a click on another",
+    pointer: true,
     run: async (engine) => {
       const b = add("button", "b");
       const other = add("button", "other");
