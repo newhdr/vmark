@@ -69,6 +69,9 @@ fn a_real_repository_opens() {
     assert_eq!(git.dir(), dir.as_path());
 }
 
+// Not on Windows: Win32 strips a trailing space from a path component, so
+// such a directory cannot be created there and the case cannot arise.
+#[cfg(not(windows))]
 #[test]
 fn a_bare_repository_whose_path_ends_in_a_space_keeps_it() {
     let root = tmp();

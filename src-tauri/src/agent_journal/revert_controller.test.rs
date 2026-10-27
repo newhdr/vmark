@@ -36,11 +36,16 @@ fn revert(r: &Rig, page: &Page, p: &str) -> Result<Value, CommandError> {
     Ok(serde_json::to_value(out).expect("reply"))
 }
 
-/// Every byte under `dir`: the journal and its blobs.
+/// Every byte under `dir`: the journal and its blobs. The `.lock` sidecar
+/// holds no data and is skipped: on Windows the writer's lock on it is
+/// mandatory, so reading it while the writer is open fails.
 fn dir_bytes(dir: &Path) -> Vec<(String, Vec<u8>)> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir).expect("read dir") {
         let path = entry.expect("entry").path();
+        if path.extension().is_some_and(|e| e == "lock") {
+            continue;
+        }
         if path.is_dir() {
             out.extend(dir_bytes(&path));
         } else {

@@ -14,8 +14,16 @@ fn path() -> std::path::PathBuf {
 }
 
 pub fn golden_text() -> String {
-    std::fs::read_to_string(path())
-        .unwrap_or_else(|e| panic!("golden fixture {} missing: {e}", path().display()))
+    let text = std::fs::read_to_string(path())
+        .unwrap_or_else(|e| panic!("golden fixture {} missing: {e}", path().display()));
+    // The byte checks compare LF layouts; a CRLF checkout (Git for Windows'
+    // autocrlf) would fail them all with a misleading diff.
+    assert!(
+        !text.contains('\r'),
+        "golden fixture {} has CRLF line endings: .gitattributes must keep it eol=lf",
+        path().display()
+    );
+    text
 }
 
 pub fn golden() -> Value {
