@@ -177,6 +177,8 @@ La comprobación de la ruta se repite cuando le llega el turno al guardado en la
 
 `save_as` nunca reemplaza un archivo que no sea el propio de la pestaña. Un destino que ya contiene un archivo se rechaza con `APPROVAL_REQUIRED`, incluso un archivo creado después de comprobar la solicitud, mientras el guardado estaba en curso: el archivo solo se escribe si no hay nada en esa ruta en el momento de colocarlo, y el archivo encontrado allí conserva su contenido. Si el disco no puede escribir de esa forma, el guardado se rechaza en lugar de sobrescribir.
 
+Un `save` o `save_as` se rechaza con `STALE` cuando un guardado hecho después de este — desde cualquier documento o ventana — ya llegó a ese archivo (por ejemplo, a través de un enlace simbólico y el archivo al que apunta), así que este, más antiguo, no escribió nada. Lee el documento antes de volver a escribir. `document.write` informa del mismo caso como `saved: false` con un `save_error`.
+
 ### `close`
 
 Cierra una pestaña de documento. Se niega a descartar trabajo no guardado sin `force` y nunca cierra una pestaña fijada.
@@ -844,7 +846,7 @@ Aparecen dos formas de error:
 
 | Código | Se expone como | Significado |
 |---|---|---|
-| `STALE` | sobre | `expected_revision` no coincidió; vuelve a leer y reintenta |
+| `STALE` | sobre | `expected_revision` no coincidió; vuelve a leer y reintenta. O `save` / `save_as`: un guardado hecho después de este ya llegó a ese archivo, así que este no escribió nada — lee antes de volver a escribir |
 | `INVALID_PATCH` | sobre | `workflow.apply_patch` recibió un array `patches` mal formado |
 | `INVALID_TAB` | sobre | No se pudo resolver `tabId` |
 | `INVALID_PATH` | sobre | No se pudo leer un `filePath`, o está fuera del alcance del espacio de trabajo abierto / del documento |

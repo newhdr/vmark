@@ -26,7 +26,7 @@
 //!   order the frontend submitted them.
 //!
 //! @coordinates-with files/write/lock_key.rs — the key folding
-//! @coordinates-with files/write.rs — `write_checked` holds the guard
+//! @coordinates-with files/write.rs — `write_ordered` holds the guard
 //! @module files/write/target_lock
 
 use std::collections::HashSet;

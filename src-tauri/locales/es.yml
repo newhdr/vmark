@@ -313,6 +313,7 @@ errors:
   save.noParentDirectory: "La ruta del archivo no tiene carpeta contenedora"
   save.symlinkLoop: "El alias de este archivo apunta en círculo, así que no se encontró el archivo real"
   save.targetExists: "Ya existe un archivo en %{path}, así que no se reemplazó"
+  save.superseded: "Un guardado hecho después de este ya llegó a %{path}, así que este más antiguo no se escribió"
   save.noReplaceUnsupported: "Este disco no puede guardar sin reemplazar un archivo existente, así que %{path} no se guardó"
   save.writeFailed: "No se pudo guardar el archivo: %{detail}"
   window.pdfExportMenu: "No se pudo asignar una barra de menús vacía a la ventana Exportar PDF: %{detail}"

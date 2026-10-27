@@ -313,6 +313,7 @@ errors:
   save.noParentDirectory: "O caminho do arquivo não tem pasta superior"
   save.symlinkLoop: "O atalho deste arquivo aponta em círculo, então o arquivo real não foi encontrado"
   save.targetExists: "Já existe um arquivo em %{path}, então ele não foi substituído"
+  save.superseded: "Um salvamento feito depois deste já chegou a %{path}, então este mais antigo não foi gravado"
   save.noReplaceUnsupported: "Este disco não consegue salvar sem substituir um arquivo existente, então %{path} não foi salvo"
   save.writeFailed: "Não foi possível salvar o arquivo: %{detail}"
   window.pdfExportMenu: "Não foi possível dar uma barra de menus vazia à janela Exportar PDF: %{detail}"

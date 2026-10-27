@@ -182,6 +182,8 @@ La vérification du chemin est refaite lorsque vient le tour de l'enregistrement
 
 `save_as` ne remplace jamais un fichier qui n'est pas celui de l'onglet. Une destination qui contient déjà un fichier est refusée avec `APPROVAL_REQUIRED` — y compris un fichier créé après la vérification de la requête, pendant l'enregistrement : le fichier n'est écrit que si rien ne se trouve à ce chemin au moment où il est mis en place, et le fichier trouvé là garde son contenu. Si le disque ne peut pas écrire ainsi, l'enregistrement est refusé plutôt que d'écraser.
 
+Un `save` ou `save_as` est refusé avec `STALE` lorsqu'un enregistrement effectué après celui-ci — depuis n'importe quel document ou fenêtre — a déjà atteint ce fichier (par exemple via un lien symbolique et le fichier vers lequel il pointe) : celui-ci, plus ancien, n'a donc rien écrit. Relire le document avant d'écrire de nouveau. `document.write` signale le même cas par `saved: false` avec un `save_error`.
+
 ### `close`
 
 Fermer un onglet de document. Refuse de jeter du travail non enregistré sans `force`, et ne ferme jamais un onglet épinglé.
@@ -887,7 +889,7 @@ Deux formes d'erreurs apparaissent&nbsp;:
 
 | Code | Apparaît comme | Signification |
 |---|---|---|
-| `STALE` | enveloppe | `expected_revision` ne correspondait pas&nbsp;; relire et réessayer |
+| `STALE` | enveloppe | `expected_revision` ne correspondait pas&nbsp;; relire et réessayer. Ou `save` / `save_as`&nbsp;: un enregistrement effectué après celui-ci a déjà atteint ce fichier, donc celui-ci n'a rien écrit — relire avant d'écrire de nouveau |
 | `INVALID_PATCH` | enveloppe | `workflow.apply_patch` a reçu un tableau `patches` malformé |
 | `INVALID_TAB` | enveloppe | `tabId` n'a pas pu être résolu |
 | `INVALID_PATH` | enveloppe | Un `filePath` n'a pas pu être lu, ou se trouve hors de la portée de l'espace de travail ouvert / des documents |

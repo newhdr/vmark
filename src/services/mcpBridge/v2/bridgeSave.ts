@@ -112,6 +112,11 @@ function describeFailure(failure: SaveFailure): string {
       return failure.detail;
     case "target-exists":
       return overwriteRefusal(getFileName(failure.path) || failure.path);
+    case "superseded":
+      return (
+        `A save made after this one already reached ${failure.path}, so this older one wrote nothing. ` +
+        "Read the document before writing again"
+      );
   }
 }
 
@@ -163,6 +168,8 @@ const REFUSAL_CODE: Record<Exclude<BridgeSaveFailure["reason"], "write-failed">,
   // Overwriting a file that is not the tab's own needs the user, as when
   // save_as's own probe finds it.
   "target-exists": "APPROVAL_REQUIRED",
+  // The file already holds a save made after this one: read, then retry.
+  superseded: "STALE",
 };
 
 /**

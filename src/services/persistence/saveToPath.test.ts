@@ -92,6 +92,9 @@ import { useRecentFilesStore } from "@/stores/workspaceStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { registerPendingSave, clearPendingSave, clearPendingSaveAfterGrace } from "@/utils/pendingSaves";
 
+/** Every save names its place in its document's order. */
+const ORDER = { seq: expect.any(Number) };
+
 /** Factory for settings store mock with overrides */
 function makeSettings(overrides?: {
   general?: Partial<Record<string, unknown>>;
@@ -164,7 +167,7 @@ describe("saveToPath", () => {
     const result = await saveToPath("tab-1", "/tmp/doc.md", "Hello", "manual");
 
     expect(result).toBe(true);
-    expect(invoke).toHaveBeenCalledWith("atomic_write_file", { path: "/tmp/doc.md", content: "Hello" });
+    expect(invoke).toHaveBeenCalledWith("atomic_write_file", { path: "/tmp/doc.md", content: "Hello", order: ORDER });
     expect(mockSetFilePath).toHaveBeenCalledWith("tab-1", "/tmp/doc.md");
     expect(mockMarkSaved).toHaveBeenCalledWith("tab-1", { editorSnapshot: "Hello", diskSnapshot: "Hello" });
     expect(mockUpdateTabPath).toHaveBeenCalledWith("tab-1", "/tmp/doc.md");
@@ -253,7 +256,7 @@ describe("saveToPath", () => {
     const result = await saveToPath("tab-1", "/tmp/doc.md", "a\nb\n", "manual");
 
     expect(result).toBe(true);
-    expect(invoke).toHaveBeenCalledWith("atomic_write_file", { path: "/tmp/doc.md", content: "a\r\nb\r\n" });
+    expect(invoke).toHaveBeenCalledWith("atomic_write_file", { path: "/tmp/doc.md", content: "a\r\nb\r\n", order: ORDER });
     expect(mockSetLineMetadata).toHaveBeenCalledWith("tab-1", {
       lineEnding: "crlf",
       hardBreakStyle: "twoSpaces", // Default for unknown docs (wider compatibility)
@@ -270,7 +273,7 @@ describe("saveToPath", () => {
     const result = await saveToPath("tab-1", "/tmp/doc.md", "a\\\nb\n", "manual");
 
     expect(result).toBe(true);
-    expect(invoke).toHaveBeenCalledWith("atomic_write_file", { path: "/tmp/doc.md", content: "a  \nb\n" });
+    expect(invoke).toHaveBeenCalledWith("atomic_write_file", { path: "/tmp/doc.md", content: "a  \nb\n", order: ORDER });
     expect(mockSetLineMetadata).toHaveBeenCalledWith("tab-1", {
       lineEnding: "lf",
       hardBreakStyle: "twoSpaces",
@@ -687,6 +690,7 @@ describe("saveToPath", () => {
       expect(invoke).toHaveBeenCalledWith("atomic_write_file", {
         path: "/tmp/doc.md",
         content: "﻿a\nb",
+        order: ORDER,
       });
     });
 
@@ -699,6 +703,7 @@ describe("saveToPath", () => {
       expect(invoke).toHaveBeenCalledWith("atomic_write_file", {
         path: "/tmp/doc.md",
         content: "a\nb",
+        order: ORDER,
       });
     });
 
@@ -711,6 +716,7 @@ describe("saveToPath", () => {
       expect(invoke).toHaveBeenCalledWith("atomic_write_file", {
         path: "/tmp/doc.md",
         content: "﻿a\r\nb\r\n",
+        order: ORDER,
       });
     });
   });

@@ -162,6 +162,8 @@ Die Pfadprüfung läuft erneut, wenn das Speichern in der Warteschlange der Spei
 
 `save_as` ersetzt nie eine Datei, die nicht die eigene Datei des Tabs ist. Ein Ziel, an dem bereits eine Datei liegt, wird mit `APPROVAL_REQUIRED` abgelehnt — auch eine Datei, die erst nach der Prüfung der Anfrage entstanden ist, während das Speichern lief: Die Datei wird nur geschrieben, wenn in dem Moment, in dem sie an ihren Platz kommt, nichts unter diesem Pfad liegt, und die dort gefundene Datei behält ihren Inhalt. Kann das Laufwerk so nicht schreiben, wird das Speichern abgelehnt, statt zu überschreiben.
 
+Ein `save` oder `save_as` wird mit `STALE` abgelehnt, wenn bereits ein nach diesem vorgenommenes Speichern — aus einem beliebigen Dokument oder Fenster — diese Datei erreicht hat (zum Beispiel über einen Symlink und die Datei, auf die er zeigt), sodass dieses ältere nichts geschrieben hat. Das Dokument vor einem erneuten Schreiben lesen. `document.write` meldet denselben Fall als `saved: false` mit einem `save_error`.
+
 ### `close`
 
 Einen Dokument-Tab schließen. Verwirft ungespeicherte Arbeit nicht ohne `force` und schließt nie einen angehefteten Tab.
@@ -632,7 +634,7 @@ Es treten zwei Fehlerformen auf:
 
 | Code | Form | Bedeutung |
 |---|---|---|
-| `STALE` | Hülle | `expected_revision` stimmte nicht; erneut lesen und wiederholen |
+| `STALE` | Hülle | `expected_revision` stimmte nicht; erneut lesen und wiederholen. Oder `save` / `save_as`: ein nach diesem vorgenommenes Speichern hat diese Datei bereits erreicht, also hat dieses nichts geschrieben — vor erneutem Schreiben lesen |
 | `INVALID_PATCH` | Hülle | `workflow.apply_patch` hat ein fehlerhaftes `patches`-Array erhalten |
 | `INVALID_TAB` | Hülle | `tabId` konnte nicht aufgelöst werden |
 | `INVALID_PATH` | Hülle | Ein `filePath` konnte nicht gelesen werden oder liegt außerhalb des Geltungsbereichs des offenen Arbeitsbereichs / Dokuments |

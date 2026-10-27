@@ -5,7 +5,8 @@
 //! the machine-readable half the frontend branches on: `detail.dir` for a
 //! vanished folder (routes into Save As), `detail.stage` for a failed atomic
 //! replacement, `detail.kind = "target-exists"` for a no-replace publication
-//! that found a file already there.
+//! that found a file already there. (`detail.kind = "superseded"` lives with
+//! the order it enforces, in `save_order.rs`.)
 //!
 //! @coordinates-with files/write.rs — the write core these errors come from
 //! @coordinates-with src/services/persistence/saveToPath.ts — reads code + detail
@@ -23,6 +24,16 @@ pub(crate) fn parent_missing(dir: &std::path::Path) -> CommandError {
         dir = dir.display()
     )
     .with_detail(json!({ "dir": dir.to_string_lossy() }))
+}
+
+/// The write itself failed with `e`.
+#[cfg(unix)]
+pub(crate) fn write_failed(e: std::io::Error) -> CommandError {
+    localized_error!(
+        ErrorCode::Io,
+        "errors.save.writeFailed",
+        detail = e.to_string()
+    )
 }
 
 /// A no-replace publication found a file already at `target`; nothing was

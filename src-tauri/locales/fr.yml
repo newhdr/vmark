@@ -313,6 +313,7 @@ errors:
   save.noParentDirectory: "Le chemin du fichier n'a pas de dossier parent"
   save.symlinkLoop: "L'alias de ce fichier pointe en boucle, le fichier réel est donc introuvable"
   save.targetExists: "Un fichier existe déjà à l'emplacement %{path}, il n'a donc pas été remplacé"
+  save.superseded: "Un enregistrement effectué après celui-ci a déjà atteint %{path}, celui-ci, plus ancien, n'a donc pas été écrit"
   save.noReplaceUnsupported: "Ce disque ne peut pas enregistrer sans remplacer un fichier existant, %{path} n'a donc pas été enregistré"
   save.writeFailed: "Impossible d'enregistrer le fichier : %{detail}"
   window.pdfExportMenu: "Impossible d'attribuer une barre de menus vide à la fenêtre Exporter en PDF : %{detail}"

@@ -180,6 +180,8 @@ A verificação do caminho é feita de novo quando chega a vez do salvamento na 
 
 `save_as` nunca substitui um arquivo que não seja o da própria aba. Um destino que já contém um arquivo é recusado com `APPROVAL_REQUIRED` — inclusive um arquivo criado depois da verificação da solicitação, enquanto o salvamento estava em andamento: o arquivo só é gravado se não houver nada naquele caminho no momento em que é colocado no lugar, e o arquivo encontrado ali mantém seu conteúdo. Se o disco não puder gravar dessa forma, o salvamento é recusado em vez de sobrescrever.
 
+Um `save` ou `save_as` é recusado com `STALE` quando um salvamento feito depois deste — a partir de qualquer documento ou janela — já chegou àquele arquivo (por exemplo, por meio de um link simbólico e do arquivo para o qual ele aponta), então este, mais antigo, não gravou nada. Releia o documento antes de gravar novamente. `document.write` informa o mesmo caso como `saved: false` com um `save_error`.
+
 ### `close`
 
 Fecha uma aba de documento. Recusa-se a descartar trabalho não salvo sem `force` e nunca fecha uma aba fixada.
@@ -858,7 +860,7 @@ Aparecem dois formatos de erro:
 
 | Código | Apresentado como | Significado |
 |---|---|---|
-| `STALE` | envelope | `expected_revision` não combinou; releia e tente novamente |
+| `STALE` | envelope | `expected_revision` não combinou; releia e tente novamente. Ou `save` / `save_as`: um salvamento feito depois deste já chegou àquele arquivo, então este não gravou nada — releia antes de gravar novamente |
 | `INVALID_PATCH` | envelope | `workflow.apply_patch` recebeu um array `patches` malformado |
 | `INVALID_TAB` | envelope | `tabId` não pôde ser resolvido |
 | `INVALID_PATH` | envelope | Um `filePath` não pôde ser lido, ou está fora do escopo do workspace aberto / dos documentos |

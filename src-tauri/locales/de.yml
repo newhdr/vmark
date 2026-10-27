@@ -313,6 +313,7 @@ errors:
   save.noParentDirectory: "Der Dateipfad hat keinen übergeordneten Ordner"
   save.symlinkLoop: "Der Alias dieser Datei verweist im Kreis, daher wurde die eigentliche Datei nicht gefunden"
   save.targetExists: "Unter %{path} existiert bereits eine Datei, daher wurde sie nicht ersetzt"
+  save.superseded: "Eine nach dieser vorgenommene Speicherung hat %{path} bereits erreicht, daher wurde diese ältere nicht geschrieben"
   save.noReplaceUnsupported: "Dieses Laufwerk kann nicht speichern, ohne eine vorhandene Datei zu ersetzen, daher wurde %{path} nicht gespeichert"
   save.writeFailed: "Datei konnte nicht gespeichert werden: %{detail}"
   window.pdfExportMenu: "Das Export-PDF-Fenster konnte keine leere Menüleiste erhalten: %{detail}"

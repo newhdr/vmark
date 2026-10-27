@@ -47,7 +47,7 @@ describe("save_as to another spelling of the tab's own file", () => {
       expect(responseTo("req-alias").error ?? null).toBeNull();
       expect(warning).not.toHaveBeenCalled();
       expect(writes).toEqual([
-        { path: alias, content: "hi again\n" },
+        { path: alias, content: "hi again\n", order: { seq: expect.any(Number) } },
       ]);
     },
   );

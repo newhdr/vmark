@@ -180,6 +180,8 @@ Il controllo del percorso viene ripetuto quando arriva il turno del salvataggio 
 
 `save_as` non sostituisce mai un file che non sia quello della scheda. Una destinazione che contiene già un file viene rifiutata con `APPROVAL_REQUIRED`, anche un file creato dopo il controllo della richiesta, mentre il salvataggio era in corso: il file viene scritto solo se in quel percorso non c'è nulla nel momento in cui viene messo al suo posto, e il file trovato lì conserva il suo contenuto. Se il disco non può scrivere in questo modo, il salvataggio viene rifiutato invece di sovrascrivere.
 
+Un `save` o `save_as` viene rifiutato con `STALE` quando un salvataggio fatto dopo questo — da qualsiasi documento o finestra — ha già raggiunto quel file (per esempio tramite un collegamento simbolico e il file a cui punta), quindi questo, più vecchio, non ha scritto nulla. Rileggi il documento prima di scrivere di nuovo. `document.write` segnala lo stesso caso come `saved: false` con un `save_error`.
+
 ### `close`
 
 Chiude una scheda di documento. Rifiuta di scartare lavoro non salvato senza `force`, e non chiude mai una scheda fissata.
@@ -857,7 +859,7 @@ Compaiono due forme di errore:
 
 | Codice | Mostrato come | Significato |
 |---|---|---|
-| `STALE` | busta | `expected_revision` non corrispondeva; rileggi e riprova |
+| `STALE` | busta | `expected_revision` non corrispondeva; rileggi e riprova. Oppure `save` / `save_as`: un salvataggio fatto dopo questo ha già raggiunto quel file, quindi questo non ha scritto nulla — rileggi prima di scrivere di nuovo |
 | `INVALID_PATCH` | busta | `workflow.apply_patch` ha ricevuto un array `patches` malformato |
 | `INVALID_TAB` | busta | `tabId` non poteva essere risolto |
 | `INVALID_PATH` | busta | Un `filePath` non poteva essere letto, o è al di fuori dell'ambito del workspace aperto / del documento |

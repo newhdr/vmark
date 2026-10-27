@@ -18,7 +18,12 @@
  *     second and be recorded as the saved snapshot — see serializeByPath.ts.
  *     A symlink is not a spelling: Rust's per-file lock
  *     (`files/write/target_lock.rs`) keeps writes through it and its target
- *     from interleaving. One document's saves
+ *     from interleaving, and refuses a save older than one already published
+ *     there (`files/write/save_order.rs`), whichever document asked for it;
+ *     the close door (`saveToPathForClose`) reports that refusal as saved
+ *     when the save that refused it is the document's own and left nothing
+ *     to save — after waiting, a bounded time, for the document's newer
+ *     saves — so a close is not cancelled. One document's saves
  *     to two paths are deliberately not queued together, so a stalled write
  *     to the old path never blocks a Save As.
  *   - History snapshots live in saveHistorySnapshot.ts. Failures don't block
@@ -62,6 +67,7 @@
  * @coordinates-with saveNormalize.ts — line ending, hard break and BOM normalization
  * @coordinates-with documentStore.ts — markSaved/markAutoSaved state updates
  * @coordinates-with serializeByPath.ts — the per-path save queue
+ * @coordinates-with saveInFlight.ts — each document's saves in flight, for the close door
  * @coordinates-with saveTargetClaim.ts — per-DOCUMENT identity ordering, which
  *     the per-path queue cannot provide
  * @coordinates-with saveHistorySnapshot.ts — version history snapshots
@@ -82,13 +88,15 @@ import {
   showFileOwnershipConflictToast,
 } from "@/services/workspaces/fileOwnership";
 import { registerPendingSave } from "@/utils/pendingSaves";
-import { handleWriteError } from "./saveWriteError";
+import { handleWriteError, isDocumentAtRest } from "./saveWriteError";
 import { fileIdentityKey } from "@/utils/paths/fileIdentity";
 import { getRuntimePlatform } from "@/utils/platform";
 import { serializeByPath } from "./serializeByPath";
+import { claimInFlight, isOwnNewest, recordPublished, trackInFlight, waitForNewerSaves } from "./saveInFlight";
 import {
   activateSaveTarget,
   claimSaveTarget,
+  saveOrderOf,
   isSameDocument,
   type SaveTargetClaim,
   type SaveTargetReservation,
@@ -155,11 +163,13 @@ async function performSave(
   try {
     // `noReplace` only when asked, so an ordinary save's call is unchanged.
     const exclusive = ticket.noReplace ? { noReplace: true } : {};
-    await invoke("atomic_write_file", { path, content: normalized.output, ...exclusive });
+    const order = saveOrderOf(claim);
+    await invoke("atomic_write_file", { path, content: normalized.output, order, ...exclusive });
   } catch (error) {
     return handleWriteError(claim, path, saveToken, saveType, error);
   }
   ticket.wrote = true;
+  recordPublished(claim);
 
   if (ticket.reservation) activateSaveTarget(ticket.reservation);
   applyPostSaveState(tabId, path, content, normalized, saveToken, saveType, claim);
@@ -202,7 +212,7 @@ function submitSave(
     noReplace: admission.noReplace === true,
   };
   // Keyed by file identity: two spellings of one file share one queue.
-  return serializeByPath(fileIdentityKey(path, getRuntimePlatform()), async () => {
+  return trackInFlight(ticket.claim, serializeByPath(fileIdentityKey(path, getRuntimePlatform()), async () => {
     try {
       // The admission check runs at the save's turn, so its await cannot let
       // a later save of this file reach the disk first.
@@ -215,7 +225,7 @@ function submitSave(
       // next write. A batch admitted with the request is its owner's to give back.
       if (!ticket.wrote && origin.saveType === "mcp" && !admission.reads) restoreMcpReads(origin.reads);
     }
-  });
+  }));
 }
 
 /**
@@ -235,6 +245,32 @@ export function saveToPath(
   saveType: "manual" | "auto" = "manual"
 ): Promise<boolean> {
   return submitSave(tabId, path, content, { saveType }).then((outcome) => outcome.ok);
+}
+
+/**
+ * The same save, for a close or quit, which needs the document saved: true
+ * when this content was written for the document the tab still holds, or was
+ * refused as superseded by the document's own newest save while the document
+ * has nothing more to save. An edit that lands during the write stays dirty;
+ * the close and quit loops revalidate and save it again. Save As and Move
+ * keep `saveToPath`, whose path must be written.
+ */
+export async function saveToPathForClose(tabId: string, path: string, content: string): Promise<boolean> {
+  const save = submitSave(tabId, path, content, { saveType: "manual" });
+  const claim = claimInFlight(tabId, save);
+  const outcome = await save;
+  if (!claim) return false;
+  // Written; but if the tab now holds another document, that one is unsaved.
+  if (outcome.ok) return isSameDocument(claim);
+  if (outcome.reason !== "superseded") return false;
+  // Saved only when the file holds this document's own newer save, and the
+  // document has nothing more to save.
+  const savedByNewer = () => isOwnNewest(claim, outcome.newest) && isDocumentAtRest(tabId);
+  if (savedByNewer()) return true;
+  // That save is on disk, but its answer can reach this webview after the
+  // refusal did: let it finish recording itself (bounded), then look again.
+  await waitForNewerSaves(tabId, claim.seq);
+  return savedByNewer();
 }
 
 /**

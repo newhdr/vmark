@@ -426,6 +426,12 @@ A `STALE` refusal from `document.write`, `document.transform`, or
 Branch on `current_revision` — re-read and retry with the new token rather than
 writing the stale content back.
 
+`workspace.save` and `workspace.save_as` also answer `STALE` (with no
+`current_revision`) when a save made after this one — from any document or
+window — already reached that file, through a symlink and its referent, say,
+so the older save wrote nothing. `document.write` reports that case as `saved: false` with a
+`save_error`. Read the document before writing again.
+
 While the user is composing text with an input method (IME), a write into the
 editor they are typing in is refused with `BUSY` and changes nothing:
 `document.write` and `document.transform` for the tab the WYSIWYG editor is

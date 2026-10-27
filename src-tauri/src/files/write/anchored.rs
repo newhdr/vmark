@@ -25,7 +25,7 @@
 //! synced — but read from the existing entry opened through the held
 //! folder, never by path.
 //!
-//! @coordinates-with files/write.rs — write_checked, create_checked
+//! @coordinates-with files/write.rs — write_ordered, create_checked
 //! @coordinates-with workspace/grants/protect.rs — held_write_reaches_list
 //! @module files/write/anchored
 

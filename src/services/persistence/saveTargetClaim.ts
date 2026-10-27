@@ -34,11 +34,28 @@
  * Key decisions:
  *   - Sequence numbers and incarnations are module-wide and never reused, so
  *     closing a tab and reopening its id cannot recreate an equal claim.
+ *   - A sequence number is a time: the later of one past the last issued and
+ *     the wall clock's milliseconds counted in microseconds, so it increases
+ *     even when the clock steps back, and saves from different documents and
+ *     windows compare by when they were asked for. A refusal naming a newer
+ *     time moves this clock past it (`observeSaveOrder`), so the next save is
+ *     not refused.
  *   - A claim only names the document it was taken for while that document is
  *     open (`isSameDocument`): a queued save that outlives its document keeps
  *     the closed document's file conventions and never marks the new one saved.
+ *   - The same order is sent with the write (`saveOrderOf`), so Rust can
+ *     refuse a save older than one already published to that file, whichever
+ *     document or window asked for it: the per-path queue cannot order two
+ *     spellings of one file, nor a reopened document and its closed self.
+ *
+ * Known limitations:
+ *   - Each window counts on its own clock, which reads whole milliseconds.
+ *     Two windows' saves to one file asked for within the same millisecond
+ *     (or with the clock stepping back between them) are ordered
+ *     arbitrarily: either may be the one the file keeps.
  *
  * @coordinates-with saveToPath.ts — the pipeline that checks claims
+ * @coordinates-with src-tauri/src/files/write/save_order.rs — enforces the order per file
  * @coordinates-with services/mcpBridge/v2/workspaceSaveAs.ts — reserves at admission; saveToPath.ts activates once written
  * @module services/persistence/saveTargetClaim
  */
@@ -82,7 +99,8 @@ export function reserveSaveTarget(tabId: string): SaveTargetReservation {
   const incarnation = entry?.incarnation ?? ++lastIncarnation;
   // seq 0 is never issued, so a fresh entry makes no claim current.
   if (!entry) latestClaim.set(tabId, { seq: 0, incarnation });
-  return { reserved: { tabId, seq: ++lastSeq, incarnation } };
+  lastSeq = Math.max(lastSeq + 1, Math.floor(Date.now() * 1000));
+  return { reserved: { tabId, seq: lastSeq, incarnation } };
 }
 
 /**
@@ -139,6 +157,22 @@ export function isSameDocument(claim: SaveTargetClaim): boolean {
  */
 export function forgetSaveTarget(tabId: string): void {
   latestClaim.delete(tabId);
+}
+
+/** When the claim's save was asked for, as `atomic_write_file` takes it. */
+export function saveOrderOf(claim: SaveTargetClaim): { seq: number } {
+  return { seq: claim.seq };
+}
+
+/**
+ * Move this clock past `newest`, the time of a save Rust already published,
+ * so the next save is asked for after it. A value this clock could not have
+ * issued (not a safe integer) is ignored.
+ */
+export function observeSaveOrder(newest: unknown): void {
+  if (typeof newest === "number" && Number.isSafeInteger(newest) && newest > lastSeq) {
+    lastSeq = newest;
+  }
 }
 
 /** Test seam: drop every claim. */

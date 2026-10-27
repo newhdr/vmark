@@ -181,6 +181,8 @@ The path check runs again when the save's turn comes in the queue of saves to th
 
 `save_as` never replaces a file that is not the tab's own. A destination that already holds a file is refused with `APPROVAL_REQUIRED` — including a file created after the request was checked, while the save was in flight: the file is written only if nothing is at that path at the moment it is put in place, and the file found there keeps its contents. If the disk cannot write that way, the save is refused rather than overwriting.
 
+A `save` or `save_as` is refused with `STALE` when a save made after this one — from any document or window — already reached that file, for example through a symlink and the file it points to, so this older one wrote nothing. Read the document before writing again. `document.write` reports the same case as `saved: false` with a `save_error`.
+
 ### `close`
 
 Close a document tab. Refuses to discard unsaved work without `force`, and never closes a pinned tab.
@@ -845,7 +847,7 @@ Two error shapes appear:
 
 | Code | Surfaced as | Meaning |
 |---|---|---|
-| `STALE` | envelope | `expected_revision` did not match; re-read and retry |
+| `STALE` | envelope | `expected_revision` did not match; re-read and retry. Or `save` / `save_as`: a save made after this one already reached that file, so this one wrote nothing — read before writing again |
 | `INVALID_PATCH` | envelope | `workflow.apply_patch` received a malformed `patches` array |
 | `INVALID_TAB` | envelope | `tabId` could not be resolved |
 | `INVALID_PATH` | envelope | A `filePath` could not be read, or is outside the open workspace / document scope |

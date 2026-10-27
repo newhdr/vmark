@@ -12,11 +12,18 @@
  *     document's own file.
  *   - `conflict` + `detail.kind = "target-exists"`: a no-replace write found a
  *     file already at the path when it published; that file was kept.
+ *   - `conflict` + `detail.kind = "superseded"`: a save asked for after this
+ *     one already reached that file, so this older one wrote nothing. Never
+ *     toasted: the newer save is the user's latest, and it succeeded. The
+ *     refusal's `detail.newest` moves the save clock past that save, and the
+ *     failure carries it, so a close can tell whether that save was its
+ *     document's own (`saveInFlight.ts`).
  *   - anything else is a plain write failure, carried raw.
  *
  * @coordinates-with saveToPath.ts — the only caller
  * @coordinates-with saveTargetClaim.ts — `isSameDocument`, which ties a failure to its document
  * @coordinates-with src-tauri/src/files/write/failures.rs — the typed errors read here
+ * @coordinates-with src-tauri/src/files/write/save_order.rs — the superseded refusal
  * @module services/persistence/saveWriteError
  */
 import { imeToast as toast } from "@/services/ime/imeToast";
@@ -26,8 +33,12 @@ import { isSameFile } from "@/utils/paths/fileIdentity";
 import { getRuntimePlatform } from "@/utils/platform";
 import { clearPendingSave, type registerPendingSave } from "@/utils/pendingSaves";
 import { saveError } from "@/utils/debug";
-import { commandErrorDetailString, isCommandErrorCode } from "@/services/commands/commandError";
-import { isSameDocument, type SaveTargetClaim } from "./saveTargetClaim";
+import {
+  commandErrorDetailString,
+  isCommandErrorCode,
+  parseCommandError,
+} from "@/services/commands/commandError";
+import { isSameDocument, observeSaveOrder, type SaveTargetClaim } from "./saveTargetClaim";
 import type { SaveType } from "./saveHistorySnapshot";
 import type { SaveOutcome } from "./saveOutcome";
 
@@ -61,6 +72,12 @@ function isOwnFile(claim: SaveTargetClaim, path: string): boolean {
   if (!isSameDocument(claim)) return false;
   const live = useDocumentStore.getState().getDocument(claim.tabId)?.filePath;
   return !!live && isSameFile(live, path, getRuntimePlatform());
+}
+
+/** Whether the document is open with nothing to save: not dirty, not divergent from its file. */
+export function isDocumentAtRest(tabId: string): boolean {
+  const doc = useDocumentStore.getState().getDocument(tabId);
+  return !!doc && !doc.isDirty && !doc.isDivergent;
 }
 
 /** Mark the claim's document missing when `path` is still that document's own file. */
@@ -105,6 +122,14 @@ export function handleWriteError(
   // its caller reports the refusal to the client.
   const kind = conflictKind(error);
   if (kind === "target-exists") return { ok: false, reason: "target-exists", path };
+  if (kind === "superseded") {
+    const detail = parseCommandError(error)?.detail;
+    const newest: unknown = detail?.newest;
+    observeSaveOrder(newest);
+    // Only a save recorded for this file names who the file holds; the floor's names a forgotten file's.
+    const named = detail?.recorded === true && Number.isSafeInteger(newest) ? (newest as number) : null;
+    return { ok: false, reason: "superseded", path, newest: named };
+  }
 
   // Manual saves toast; auto-saves stay quiet so a flaky disk doesn't pop
   // a notification every interval. The next manual save (or an external

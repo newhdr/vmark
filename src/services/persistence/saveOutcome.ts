@@ -47,7 +47,12 @@ export type SaveFailure =
   | { reason: "path-denied"; detail: string }
   /** A no-replace save found a file already at `path` when it published;
    *  that file was kept and nothing was written. */
-  | { reason: "target-exists"; path: string };
+  | { reason: "target-exists"; path: string }
+  /** A save asked for after this one already reached the file at `path`;
+   *  this older one wrote nothing. `newest`: the order of the save the file
+   *  holds, as Rust recorded it (`null` when Rust named its floor, or no
+   *  order a webview could issue). */
+  | { reason: "superseded"; path: string; newest: number | null };
 
 /**
  * How a save ended. `written` is the exact text that reached the disk;

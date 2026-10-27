@@ -314,6 +314,7 @@ errors:
   save.noParentDirectory: "The file path has no containing folder"
   save.symlinkLoop: "This file's alias points in a circle, so the real file could not be found"
   save.targetExists: "A file already exists at %{path}, so it was not replaced"
+  save.superseded: "A save made after this one already reached %{path}, so this older one was not written"
   save.noReplaceUnsupported: "This disk cannot save without replacing an existing file, so %{path} was not saved"
   save.writeFailed: "Could not save the file: %{detail}"
   window.pdfExportMenu: "The Export PDF window could not be given an empty menu bar: %{detail}"

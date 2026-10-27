@@ -313,6 +313,7 @@ errors:
   save.noParentDirectory: "檔案路徑沒有上層資料夾"
   save.symlinkLoop: "此檔案的替身指向形成循環，因此找不到真正的檔案"
   save.targetExists: "%{path} 處已有檔案，因此未取代它"
+  save.superseded: "在這次儲存之後進行的另一次儲存已寫入 %{path}，因此未寫入這次較舊的儲存"
   save.noReplaceUnsupported: "此磁碟無法在不取代現有檔案的情況下儲存，因此未儲存 %{path}"
   save.writeFailed: "無法儲存檔案：%{detail}"
   window.pdfExportMenu: "無法為匯出 PDF 視窗設定空選單列：%{detail}"
