@@ -14556,7 +14556,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-qs 6.16.0 (BSD-3-Clause)
+qs 6.16.1 (BSD-3-Clause)
 
 BSD 3-Clause License
 
