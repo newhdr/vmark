@@ -22,7 +22,11 @@
  *     own readers.
  *   - `uncertifiedFallbacks` is required and checked the same way: the
  *     selection certificates that fell back to a whole-document barrier
- *     since the journal opened.
+ *     since the journal opened. So are `registrationCapRefusals` and
+ *     `cleanupWorkerFailures` (page registrations refused at the per-window
+ *     cap, cleanup-worker runs lost, both since launch): dropping them would
+ *     read a refusing or leaking journal as healthy.
+ *   - A pin breakdown is a record of counts; an array is malformed.
  *
  * @coordinates-with src-tauri/src/agent_journal/service.rs — `AgentJournalStatus`
  * @module services/agentJournal/journalStatusClient
@@ -42,9 +46,12 @@ type IdentityMode = (typeof IDENTITY_MODES)[number];
 const isIdentityMode = (v: unknown): v is IdentityMode => IDENTITY_MODES.some((m) => m === v);
 
 const WARNING_KINDS = ["nearCap", "pinnedOverCap"] as const;
+const isWarningKind = (v: unknown): v is (typeof WARNING_KINDS)[number] => WARNING_KINDS.some((k) => k === v);
 const LIMITS = ["revisions", "docBytes", "totalBytes"] as const;
+const isLimit = (v: unknown): v is (typeof LIMITS)[number] => LIMITS.some((l) => l === v);
 const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const optionalString = (v: unknown): v is string | undefined => v === undefined || isString(v);
+const isCountRecord = (v: unknown): v is Record<string, number> => isObject(v) && !Array.isArray(v) && Object.values(v).every(isCount);
 
 /** A retention cap warning from the startup pass; `doc` is `null` for the global byte cap. */
 interface JournalRetentionWarning {
@@ -93,22 +100,18 @@ export interface JournalHealth {
   retention: JournalRetention | null;
   /** Selection certificates recorded as a whole-document barrier instead, since the journal opened. */
   uncertifiedFallbacks: number;
+  /** Page registrations refused at the per-window cap since launch: agent edits there were refused. */
+  registrationCapRefusals: number;
+  /** Cleanup-worker runs lost to a failed start or a panic since launch. */
+  cleanupWorkerFailures: number;
 }
 
 function parseWarning(w: unknown): JournalRetentionWarning | null {
-  if (
-    !isObject(w) ||
-    !(w.doc === null || isString(w.doc)) ||
-    !WARNING_KINDS.some((k) => k === w.kind) ||
-    !LIMITS.some((l) => l === w.limit) ||
-    !isCount(w.used) ||
-    !isCount(w.cap) ||
-    !isObject(w.pinnedBy) ||
-    !Object.values(w.pinnedBy).every(isCount)
-  ) {
+  if (!isObject(w)) return null;
+  const { doc, kind, limit, used, cap, pinnedBy } = w;
+  if (!(doc === null || isString(doc)) || !isWarningKind(kind) || !isLimit(limit) || !isCount(used) || !isCount(cap) || !isCountRecord(pinnedBy)) {
     return null;
   }
-  const { doc, kind, limit, used, cap, pinnedBy } = w as unknown as JournalRetentionWarning;
   return { doc, kind, limit, used, cap, pinnedBy: { ...pinnedBy } };
 }
 
@@ -149,7 +152,9 @@ export async function readJournalHealth(): Promise<JournalHealth> {
     !isIdentityMode(r.identity) ||
     (r.identity === "disabled") !== (r.identityError !== undefined) ||
     retention === null ||
-    !isCount(r.uncertifiedFallbacks)
+    !isCount(r.uncertifiedFallbacks) ||
+    !isCount(r.registrationCapRefusals) ||
+    !isCount(r.cleanupWorkerFailures)
   ) {
     throw malformed(COMMAND);
   }
@@ -164,5 +169,7 @@ export async function readJournalHealth(): Promise<JournalHealth> {
     identityError: r.identityError ?? null,
     retention: retention ?? null,
     uncertifiedFallbacks: r.uncertifiedFallbacks,
+    registrationCapRefusals: r.registrationCapRefusals,
+    cleanupWorkerFailures: r.cleanupWorkerFailures,
   };
 }

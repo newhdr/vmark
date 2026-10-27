@@ -98,6 +98,7 @@ macro_rules! all_commands {
             mcp_bridge::control::mcp_bridge_connected_clients,
             mcp_bridge::commands::mcp_bridge_respond,
             mcp_bridge::commands::mcp_bridge_set_window_workspace,
+            mcp_bridge::commands::mcp_bridge_set_window_tabs,
             mcp_bridge::commands::mcp_bridge_heartbeat,
             agent_journal::commands::agent_journal_status,
             agent_journal::commands::agent_journal_prepare,

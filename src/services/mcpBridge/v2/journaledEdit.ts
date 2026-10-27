@@ -39,6 +39,16 @@
  *     starts, and the re-verify if one moved it during the prepare, so the
  *     edit is never prepared or committed under a key the guards did not see
  *     or the tab no longer holds.
+ *   - The request's admitted reads (`admittedReads.ts`) are marked consumed
+ *     once the edit applied — or may have (`appliedWithError`,
+ *     `recoveryRequired`) — so they are given back only by an edit that
+ *     changed nothing.
+ *   - Read-only is checked again where the edit starts and where it applies:
+ *     the request's entry gate (`handleRequest.ts`) ran before the guards and
+ *     the prepare awaited, and the user may lock the document meanwhile. A
+ *     lock before the capture is refused READ_ONLY with nothing prepared; one
+ *     during the prepare aborts it (`applyRefused`, the journal's closed set
+ *     has no read-only reason) and is answered READ_ONLY.
  *   - The awaited provenance payload is followed by the same identity and
  *     content check (`recheck`), so the prepare never carries a preimage or
  *     key that changed while it was computed.
@@ -49,6 +59,7 @@
  * @coordinates-with services/agentJournal/review/declaredScript.ts — the certificate of `target` (loaded on first use)
  * @coordinates-with writeTarget.ts — the re-verify
  * @coordinates-with journalV2Error.ts — refusal and abort answers
+ * @coordinates-with admittedReads.ts — the reads the edit consumes
  * @module services/mcpBridge/v2/journaledEdit
  */
 
@@ -62,7 +73,12 @@ import { selectionCertificate, type ExactChange, type SelectionCertificate } fro
 import { journalWarn } from "@/utils/debug";
 import { structuredError } from "./tabGuard";
 import { captureWriteTarget, recheckWriteTarget, reverifyWriteTarget } from "./writeTarget";
+import type { AdmittedReads } from "./admittedReads";
 import { abortedError, appliedWithErrorError, journalRefusalError, recoveryRequiredError } from "./journalV2Error";
+import type { V2Error } from "./types";
+
+const READ_ONLY: V2Error = { error: "READ_ONLY", message: "Document is read-only" };
+const isReadOnly = (tabId: string) => useDocumentStore.getState().isReadOnly(tabId);
 
 export interface JournaledEdit<T> {
   /** The tab as the request's guards resolved it (`GuardedTab`). */
@@ -93,6 +109,8 @@ export interface JournaledEdit<T> {
    */
   certify?: (preimage: string, postimage: string) => Promise<SelectionCertificate | null>;
   context: McpWriteContext;
+  /** The reads the request was admitted with: marked consumed once the edit applied. */
+  reads: AdmittedReads;
   /**
    * Apply now, synchronously. `postimage` is the text the store holds
    * afterwards, read back before any await.
@@ -143,21 +161,30 @@ async function commitCertificate(edit: JournaledEdit<unknown>, preimage: string,
   }
 }
 
-/** The applied edit, or `null` when the request was refused or aborted (already answered). */
+/**
+ * The applied edit, with the tab's lifecycle token taken when it started
+ * (`life`: a caller that awaits again checks it before acting on the tab), or
+ * `null` when the request was refused or aborted (already answered).
+ */
 export async function runJournaledEdit<T>(
   id: string,
   edit: JournaledEdit<T>,
-): Promise<{ value: T; durable: boolean } | null> {
+): Promise<{ value: T; durable: boolean; life: number } | null> {
   const { tab } = edit;
   // Taken before the first await: a tab closed and reopened under the same id
   // while the journal answers is another tab, whose basis this edit must not
   // remember or forget into.
   const life = journalTabLife(tab.tabId);
+  if (isReadOnly(tab.tabId)) {
+    await structuredError(id, READ_ONLY);
+    return null;
+  }
   const target = captureWriteTarget(tab, edit.requireFocus, edit.preimage);
   if ("refused" in target) {
     await structuredError(id, abortedError(target.refused));
     return null;
   }
+  let lockedDuringPrepare = false;
   return runJournaledMutation({
     tabId: tab.tabId,
     life,
@@ -183,21 +210,26 @@ export async function runJournaledEdit<T>(
       });
     },
     verify: () => reverifyWriteTarget(target),
-    apply: edit.apply,
+    apply: () => {
+      if (!isReadOnly(tab.tabId)) return edit.apply();
+      lockedDuringPrepare = true;
+      return { refused: "applyRefused" };
+    },
     ...(edit.certify ? { effects: (preimage: string, postimage: string) => commitCertificate(edit, preimage, postimage) } : {}),
     recover: () => {
       edit.recover?.();
       return storeText(tab.tabId);
     },
     outcome: async (outcome: JournaledOutcome<T>) => {
+      if (outcome.status !== "refused" && outcome.status !== "aborted") edit.reads.consumed = true;
       switch (outcome.status) {
         case "applied":
-          return { value: outcome.value, durable: outcome.durable };
+          return { value: outcome.value, durable: outcome.durable, life };
         case "refused":
           await structuredError(id, journalRefusalError(outcome.refusal));
           return null;
         case "aborted":
-          await structuredError(id, abortedError(outcome.reason));
+          await structuredError(id, lockedDuringPrepare ? READ_ONLY : abortedError(outcome.reason));
           return null;
         case "recoveryRequired":
           await structuredError(id, recoveryRequiredError(outcome.error));

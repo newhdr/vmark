@@ -97,6 +97,7 @@ describe("resolveTab", () => {
 
     expect(resolveTab(undefined)).toEqual({
       tabId: "t-active",
+      windowLabel: "main",
       filePath: "/w/a.md",
       content: "# hi\n",
       dirty: false,
@@ -109,7 +110,7 @@ describe("resolveTab", () => {
     openTabs("main", [{ id: "t-main" }]);
     openTabs("doc-1", [{ id: "t-elsewhere", content: "there\n" }]);
 
-    expect(resolveTab("t-elsewhere")).toMatchObject({ tabId: "t-elsewhere", content: "there\n" });
+    expect(resolveTab("t-elsewhere")).toMatchObject({ tabId: "t-elsewhere", windowLabel: "doc-1", content: "there\n" });
   });
 
   it("reports the document's dirty flag as it is now", () => {
@@ -159,6 +160,7 @@ describe("resolveTab", () => {
 
       expect(resolveTab(undefined, "focused")).toMatchObject({ tabId: "t-focused" });
       expect(resolveTab("t-focused", "focused")).toMatchObject({ tabId: "t-focused" });
+      expect(resolveTab("", "focused")).toMatchObject({ tabId: "t-focused", windowLabel: "main" });
     });
 
     it("refuses another open tab instead of redirecting to the focused one", () => {

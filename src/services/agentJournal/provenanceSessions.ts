@@ -46,6 +46,7 @@ import { armEpoch, closeEpoch } from "./epochClient";
 import { bindJournalDocument, isJournalDocumentUnbound, journalDocumentReady, noteJournalDocument } from "./documentBinding";
 import { carryJournalBasis, docKeyFor, isJournalTabLive, journalKeyNow, journalTabLife } from "./documentIdentity";
 import { ProvenanceSession } from "./provenance/session";
+import type { SessionJournal } from "./provenance/epochLease";
 import { registerUnsavedProvenanceSource } from "./unsavedProvenance";
 
 interface Entry {
@@ -64,13 +65,15 @@ export function provenanceSessionFor(tabId: string): ProvenanceSession | null {
   return entries.get(tabId)?.session ?? null;
 }
 
-function open(tabId: string, doc: DocumentState, docKey: string, previous: Promise<void> = Promise.resolve()): void {
-  // Arm and close run on one serialized chain, so the last arm names the
-  // document every close is for. The writer allows one open epoch per
-  // document and a bind carries the document to the new key, so the first
-  // arm also waits for the previous session's close.
+/**
+ * The session's journal for `docKey`: arm and close run on one serialized
+ * chain, so the last arm names the document every close is for. The writer
+ * allows one open epoch per document and a bind carries the document to the
+ * new key, so the first arm also waits for `previous`, the old session's
+ * close. An arm still waiting when `closed` is set never starts.
+ */
+function epochJournal(docKey: string, previous: Promise<void>, closed: { readonly value: boolean }): SessionJournal {
   let armedOn: string | undefined;
-  const closed = { value: false };
   const arm = async () => {
     await previous;
     const ready = await journalDocumentReady(docKey);
@@ -86,16 +89,24 @@ function open(tabId: string, doc: DocumentState, docKey: string, previous: Promi
     noteJournalDocument(docKey, armed.doc);
     return armed;
   };
-  const session = new ProvenanceSession(
-    doc.content,
-    { arm, close: (epoch) => closeEpoch(docKey, epoch, armedOn), suspended: () => isJournalDocumentUnbound(docKey) },
-    { view: `${getCurrentWindowLabel()}/${tabId}`, warn: journalWarn },
-  );
-  const unregister = registerUnsavedProvenanceSource(tabId, {
+  return { arm, close: (epoch) => closeEpoch(docKey, epoch, armedOn), suspended: () => isJournalDocumentUnbound(docKey) };
+}
+
+/** Register `session` as the tab's unsaved-provenance source; returns the unregister. */
+function registerSession(tabId: string, session: ProvenanceSession): () => void {
+  return registerUnsavedProvenanceSource(tabId, {
     freeze: (buffer) => session.freeze(buffer),
     fork: (text) => session.fork(text),
   });
-  entries.set(tabId, { session, closed, docKey, documentId: doc.documentId, unregister });
+}
+
+function open(tabId: string, doc: DocumentState, docKey: string, previous: Promise<void> = Promise.resolve()): void {
+  const closed = { value: false };
+  const session = new ProvenanceSession(doc.content, epochJournal(docKey, previous, closed), {
+    view: `${getCurrentWindowLabel()}/${tabId}`,
+    warn: journalWarn,
+  });
+  entries.set(tabId, { session, closed, docKey, documentId: doc.documentId, unregister: registerSession(tabId, session) });
 }
 
 /** Dispose the tab's session; resolves (never rejects) once its epoch is closed. */

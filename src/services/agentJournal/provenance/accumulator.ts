@@ -17,6 +17,9 @@
  *     grows, so this gives exactly what composing in full and checking once
  *     (as the Rust writer does) gives.
  *   - Breaks are sticky: nothing clears them but a new window.
+ *   - Inputs the codec and the Rust writer would reject are refused before
+ *     anything changes: a bounded break is always `uncertifiedRange`, a
+ *     whole break never is, and every length is a safe integer.
  *
  * @module services/agentJournal/provenance/accumulator
  */
@@ -84,7 +87,7 @@ export class Provenance {
   transactions = 0;
 
   constructor(lenA: number, { cap = PROVENANCE_CAP }: { cap?: number } = {}) {
-    if (!Number.isInteger(lenA) || lenA < 0) throw new Error(`malformed length ${lenA}`);
+    if (!Number.isSafeInteger(lenA) || lenA < 0) throw new Error(`malformed length ${lenA}`);
     if (!Number.isInteger(cap) || cap < MIN_PROVENANCE_CAP || cap > PROVENANCE_CAP) throw new Error(`malformed cap ${cap}`);
     this.lenA = lenA;
     this.lenB = lenA;
@@ -186,6 +189,7 @@ export class Provenance {
   /** An uncertified replacement of `[x0, x1)` by `insLen` characters: a sticky bounded barrier. */
   breakRange(x0: number, x1: number, insLen: number, reason: string, origin: string): this {
     checkReason(reason, origin);
+    if (reason !== "uncertifiedRange") throw new Error(`a bounded break cannot be ${reason}`);
     const ok = [x0, x1, insLen].every((n) => Number.isSafeInteger(n)) && x0 >= 0 && x0 <= x1 && x1 <= this.lenB && insLen >= 0;
     if (!ok) throw new Error(`malformed break range ${JSON.stringify([x0, x1, insLen])} (length ${this.lenB})`);
     const section = { fromA: x0, toA: x1, fromB: x0, toB: x0 + insLen };
@@ -206,7 +210,8 @@ export class Provenance {
   /** The whole document was replaced with no certified mapping; the first reason is kept. */
   breakWhole(lenB: number, reason: string, origin: string): this {
     checkReason(reason, origin);
-    if (!Number.isInteger(lenB) || lenB < 0) throw new Error(`malformed length ${lenB}`);
+    if (reason === "uncertifiedRange") throw new Error("a whole break cannot be uncertifiedRange");
+    if (!Number.isSafeInteger(lenB) || lenB < 0) throw new Error(`malformed length ${lenB}`);
     this.#wholeBreak(lenB, reason, origin);
     this.transactions++;
     return this;

@@ -19,6 +19,7 @@ import { startBrowserTabLifecycle } from "@/services/browser/browserTabLifecycle
 import { startRecorderWiring } from "@/services/browser/recorderWiring";
 import { startCoherenceScanOnChange } from "@/services/coherence/scanOnChange";
 import { startWindowWorkspaceSync } from "@/services/mcpBridge/windowWorkspaceSync";
+import { startWindowTabsSync } from "@/services/mcpBridge/windowTabsSync";
 import { startBrowserAiPolicySync } from "@/services/browser/browserAiPolicySync";
 import { startWorkflowEnginePolicySync } from "@/services/workflow/workflowEnginePolicySync";
 import { startConditionalMenuItemSync } from "@/services/menu/conditionalMenuItemSync";
@@ -46,6 +47,9 @@ const RUNTIME_SERVICES: ReadonlyArray<() => () => void> = [
   startRecorderWiring,
   startCoherenceScanOnChange,
   startWindowWorkspaceSync,
+  // A request naming a tab routes to the window holding it: each window's
+  // webview holds only its own tabs.
+  startWindowTabsSync,
   startBrowserAiPolicySync,
   // The Rust workflow runner starts fail-closed; without this push it refuses
   // every command even for a user who has the engine switched on.

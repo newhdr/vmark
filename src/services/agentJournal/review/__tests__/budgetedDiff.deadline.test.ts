@@ -1,10 +1,10 @@
-// WI-AL2.1a — P1-DEADLINE-OWNED-WORK on real timers: the deadline check excuses only caller stalls that delayed the settle, and charges back every millisecond the library spent in its own callbacks, settling or not; the budgeted diff settles in time at its deadline, and its own dispatch work past the due point is caught as late rather than excused.
+// WI-AL2.1a — P1-DEADLINE-OWNED-WORK on real timers: the deadline check excuses only caller stalls that delayed the settle or the caller's continuation after it, and charges back every millisecond the library spent in its own callbacks, settling or not; the budgeted diff settles in time at its deadline, and its own dispatch work past the due point is caught as late rather than excused.
 // @vitest-environment node
 // timer-isolation: intentional real timers — the real deadline timer and real elapsed time are the subject
 import { afterEach, describe, expect, it } from "vitest";
 import { BudgetedDiff } from "../budgetedDiff";
 import { COARSE_RESERVE_MS, type DiffOutcome } from "../diffBudget";
-import { busyCpu, expectInTime, isInTime, stalled, standIn, timed, WALL_MS, type StandInResult } from "./deadlineCheck";
+import { busy, busyCpu, expectInTime, isInTime, stalled, standIn, timed, WALL_MS, type StandInResult } from "./deadlineCheck";
 import { fakeFactory } from "./fakeDiffWorker";
 
 const DUE = WALL_MS - COARSE_RESERVE_MS;
@@ -25,6 +25,28 @@ describe("the deadline check itself", () => {
     await stall;
     expect(t.ms).toBeGreaterThan(WALL_MS);
     expectInTime(t, "on-time stand-in behind a caller stall");
+  });
+
+  it("excuses a caller stall between the settle and the caller's continuation", async () => {
+    // Stands in for OS preemption or a GC pause after the library settled: no sampler tick can see it.
+    const call = standIn();
+    const t = await timed(() => {
+      const p = call();
+      void p.then(() => busy(40));
+      return p;
+    }, WALL_MS, own);
+    expect(t.ms).toBeGreaterThan(WALL_MS);
+    expectInTime(t, "on-time stand-in behind a stall after its settle");
+  });
+
+  it("still fails 30 ms of library work in the settling callback when a caller stall follows it", async () => {
+    const call = standIn({ blockMs: 30 });
+    const t = await timed(() => {
+      const p = call();
+      void p.then(() => busy(10));
+      return p;
+    }, WALL_MS, own);
+    expect(isInTime(t)).toBe(false);
   });
 
   it("charges library work in a callback that does not settle the call", async () => {

@@ -103,7 +103,7 @@ export function captureWriteTarget(
   requireFocus: boolean,
   content: string,
 ): WriteTarget | { refused: AbortReason } {
-  flushLiveEditors();
+  flushLiveEditors(tab.tabId);
   const { tabId } = tab;
   const doc = useDocumentStore.getState().documents[tabId];
   const windowLabel = windowOf(tabId);
@@ -121,7 +121,7 @@ export function captureWriteTarget(
  * Flushes first.
  */
 export function recheckWriteTarget(target: WriteTarget): AbortReason | null {
-  flushLiveEditors();
+  flushLiveEditors(target.tabId);
   const doc = useDocumentStore.getState().documents[target.tabId];
   if (!doc || windowOf(target.tabId) === null) return "closed";
   if (liveDocKey(target.tabId, target.windowLabel) !== target.docKey) return "closed";

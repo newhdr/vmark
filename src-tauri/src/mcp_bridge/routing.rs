@@ -74,10 +74,11 @@ pub(super) async fn emit_to_window_or_reply<R: Runtime>(
     false
 }
 
-/// F5: resolve the target window for a frontend-routed request,
-/// snapshotting the window→workspace map. On a routing refusal (ambiguity,
-/// conflict, missing pinned window) it removes the pending entry, replies
-/// to the client with the error, and returns `None` — the caller returns.
+/// F5: resolve the target window for a frontend-routed request from a
+/// snapshot of every window's workspace and tabs (`window_routing.rs` decides:
+/// the window holding an explicit `tabId`, else workspace scoping, else
+/// focus). On a routing refusal (ambiguity) it removes the pending entry,
+/// replies to the client with the error, and returns `None` — the caller returns.
 pub(super) async fn route_target_or_reply<R: Runtime>(
     request: &McpRequest,
     app: &AppHandle<R>,
@@ -86,8 +87,25 @@ pub(super) async fn route_target_or_reply<R: Runtime>(
     client_tx: &Sender<String>,
     msg_id: &str,
 ) -> Option<String> {
-    let window_workspaces = bridge(app).lock().await.window_workspaces.clone();
-    match resolve_target_window(&request.args, app, &window_workspaces) {
+    let (workspaces, tabs) = {
+        let guard = bridge(app).lock().await;
+        (guard.window_workspaces.clone(), guard.window_tabs.clone())
+    };
+    let candidates: Vec<super::window_routing::WindowCandidate> = app
+        .webview_windows()
+        .values()
+        .map(|w| {
+            let label = w.label().to_string();
+            super::window_routing::WindowCandidate {
+                workspace: workspaces.get(&label).cloned(),
+                tabs: tabs.get(&label).cloned().unwrap_or_default(),
+                focused: w.is_focused().unwrap_or(false),
+                is_document: label == "main" || label.starts_with("doc-"),
+                label,
+            }
+        })
+        .collect();
+    match super::window_routing::pick_target_window_for(&request.args, &candidates) {
         Ok(label) => Some(label),
         Err(err) => {
             fail_pending(bridge(app), request_id, client_id, client_tx, msg_id, &err).await;
@@ -96,34 +114,6 @@ pub(super) async fn route_target_or_reply<R: Runtime>(
     }
 }
 
-/// Resolve the target document window for a bridge request.
-///
-/// Routing reads exactly ONE thing off the payload: its scoping path
-/// (`workspace_root`, else `filePath`). It used to also read `args.windowId`
-/// as an explicit pin — a field no shipped tool sends and the wire contract
-/// never declared, so the pin was unreachable. See
-/// `window_routing.rs` for why it was deleted rather than renamed.
-pub(super) fn resolve_target_window<R: Runtime>(
-    args: &serde_json::Value,
-    app: &AppHandle<R>,
-    window_workspaces: &std::collections::HashMap<String, String>,
-) -> Result<String, String> {
-    let path = super::window_routing::scoping_path(args);
-    let candidates: Vec<super::window_routing::WindowCandidate> = app
-        .webview_windows()
-        .values()
-        .map(|w| {
-            let label = w.label().to_string();
-            super::window_routing::WindowCandidate {
-                workspace: window_workspaces.get(&label).cloned(),
-                focused: w.is_focused().unwrap_or(false),
-                is_document: label == "main" || label.starts_with("doc-"),
-                label,
-            }
-        })
-        .collect();
-    super::window_routing::pick_target_window(path.as_deref(), &candidates)
-}
 /// Handle requests directly in Rust without involving the webview.
 /// Returns `Some(response)` if handled, `None` to fall through to webview.
 ///
@@ -237,7 +227,10 @@ pub(super) async fn answer_rust_side<R: Runtime>(
     client_id: u64,
 ) -> Option<McpResponse> {
     if request.request_type.starts_with("vmark.coherence.") {
-        return Some(answer_coherence_async(request, app, principal, client_id).await);
+        return Some(
+            super::coherence_dispatch::answer_coherence_async(request, app, principal, client_id)
+                .await,
+        );
     }
     let Some(_lease) = bridge(app).admit_operation(client_id).await else {
         return Some(bridge_stopped());
@@ -252,46 +245,6 @@ fn bridge_stopped() -> McpResponse {
         data: None,
         error: Some("Bridge stopped".to_string()),
     }
-}
-
-/// Async dispatch for coherence requests.
-///
-/// The two that WRITE take the bridge write lock, serializing them with
-/// document writes: `edges` (its scan reconciliation appends provenance to
-/// the ledger) and `resolve` (it appends a receipt). All of them run on a
-/// blocking thread so the WebSocket receive loop keeps serving other clients.
-async fn answer_coherence_async<R: Runtime>(
-    request: &McpRequest,
-    app: &tauri::AppHandle<R>,
-    principal: BridgePrincipal,
-    client_id: u64,
-) -> McpResponse {
-    // Mutations (resolve) serialize with document writes, like edges.
-    let _write_guard = if request.request_type == "vmark.coherence.edges"
-        || request.request_type == "vmark.coherence.resolve"
-    {
-        Some(bridge(app).write_lock().await)
-    } else {
-        None
-    };
-    // Admitted AFTER the write-lock wait, which can outlast a stop; the
-    // lease is held through the blocking work.
-    let Some(_lease) = bridge(app).admit_operation(client_id).await else {
-        return bridge_stopped();
-    };
-    let app_clone = app.clone();
-    let request_clone = request.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        handle_rust_side(&request_clone, &app_clone, &principal)
-    })
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| McpResponse {
-        success: false,
-        data: None,
-        error: Some("coherence request failed to execute".to_string()),
-    })
 }
 
 #[cfg(test)]

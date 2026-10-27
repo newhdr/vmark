@@ -7,7 +7,8 @@
  *   - Markdown offsets — Source's own, or a WYSIWYG selection mapped onto
  *     the Markdown exactly (`wysiwygSelectionMap.ts`) — are exact when they
  *     were taken against the same text. Otherwise they are searched for
- *     like an unmapped selection.
+ *     like an unmapped selection, and never exact: where the selected text
+ *     was deleted, its one remaining occurrence is another place.
  *   - A WYSIWYG selection that could not be mapped is a guess and is never
  *     sent as exact, even where its Markdown occurs once: a slice's own
  *     Markdown may occur at another place than the selection (part of a
@@ -48,26 +49,27 @@ function clampOffset(text: string, i: number): number {
   return at > 0 && at < text.length && isHigh(text.charCodeAt(at - 1)) && isLow(text.charCodeAt(at)) ? at - 1 : at;
 }
 
-function occurrences(text: string, needle: string): number[] {
-  const found: number[] = [];
-  if (needle.length === 0) return found;
-  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) found.push(i);
-  return found;
-}
-
-/** The occurrence of `selected` nearest `estimate`; `unique` is the precision a single occurrence earns. */
-function search(text: string, selected: string, estimate: number, unique: SelectionPrecision): CommentSelection {
+/**
+ * The occurrence of `selected` nearest `estimate` (the earlier on a tie),
+ * always `approximate`: a search is a guess even where it finds one match.
+ * Two native searches either side of the estimate: nothing is collected, so a
+ * selection that repeats throughout a large document costs no more.
+ */
+function search(text: string, selected: string, estimate: number): CommentSelection {
   const at = clampOffset(text, estimate);
-  const found = occurrences(text, selected);
-  if (found.length === 0) return { start: at, end: at, precision: "approximate" };
-  const nearest = found.reduce((best, i) => (Math.abs(i - at) < Math.abs(best - at) ? i : best));
-  return { start: nearest, end: nearest + selected.length, precision: found.length === 1 ? unique : "approximate" };
+  if (selected.length === 0) return { start: at, end: at, precision: "approximate" };
+  const before = text.lastIndexOf(selected, at);
+  const after = text.indexOf(selected, at);
+  if (before === -1 && after === -1) return { start: at, end: at, precision: "approximate" };
+  const nearest = after === -1 || (before !== -1 && at - before <= after - at) ? before : after;
+  return { start: nearest, end: nearest + selected.length, precision: "approximate" };
 }
 
 /** The selection a comment on `text` sends; see the header. */
 export function locateSelection(text: string, sel: EditorSelection): CommentSelection {
-  if (sel.mode === "wysiwyg") return search(text, sel.selected, sel.estimate, "approximate");
-  if (sel.text !== text) return search(text, sel.selected, sel.from, "exact");
+  if (sel.mode === "wysiwyg") return search(text, sel.selected, sel.estimate);
+  // @edge-case Read against other text: the one match a search finds may not be the selection.
+  if (sel.text !== text) return search(text, sel.selected, sel.from);
   const lo = Math.min(sel.from, sel.to);
   const hi = Math.max(sel.from, sel.to);
   const start = clampOffset(text, lo);

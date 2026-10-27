@@ -31,11 +31,28 @@ use tokio::sync::mpsc;
 
 /// Stop the MCP bridge WebSocket server.
 ///
-/// Generic over the runtime so the teardown — the loop signalled, every
-/// client's shutdown fired, every pending request answered, the admission
-/// generation bumped, every admitted Rust-side operation finished — is
+/// Generic over the runtime so the teardown — the loop signalled, the
+/// writes already emitted answered by their windows, every client's shutdown
+/// fired, every pending request answered, the admission
+/// generation bumped, every admitted Rust-side operation finished (bounded) — is
 /// pinned on a mock app (`server.test.rs`, `operation_lease.test.rs`).
 pub async fn stop_bridge<R: tauri::Runtime>(app: &AppHandle<R>) {
+    stop_bridge_with(app, InFlightWrites::Await).await;
+}
+
+/// What a stop does with writes already emitted to a window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InFlightWrites {
+    /// Wait (bounded) for their windows' answers — every stop but the exit.
+    Await,
+    /// Answer them at once, their outcome stated unknown. Only the app exit: it stops on
+    /// the main thread, which the window's answer has to cross, so waiting
+    /// there would always run to the bound — and the process is ending.
+    Abandon,
+}
+
+/// [`stop_bridge`], choosing what happens to writes already emitted.
+pub async fn stop_bridge_with<R: tauri::Runtime>(app: &AppHandle<R>, writes: InFlightWrites) {
     // Remove port file so MCP sidecar knows bridge is stopped
     remove_port_file(app);
 
@@ -44,6 +61,27 @@ pub async fn stop_bridge<R: tauri::Runtime>(app: &AppHandle<R>) {
     if let Some(tx) = bridge.shutdown_slot().await.take() {
         let _ = tx.send(());
     }
+
+    // A write already emitted to a window may still apply there: answering
+    // it "Bridge stopped" would invite a retry of a mutation that happened.
+    // Taking the write lock waits for the writes queued ahead of this stop to
+    // get their real answers; a write queued behind it is refused at
+    // registration, before it is emitted. Bounded by a routed write's own
+    // worst case, so a hung window cannot hold the stop forever — a write
+    // still unanswered by then is the one ambiguous case: it is logged, and
+    // its answer says the outcome is unknown.
+    let write_guard = match writes {
+        InFlightWrites::Await => {
+            let waited =
+                tokio::time::timeout(super::state::REQUEST_TIMEOUT_TOTAL, bridge.write_lock())
+                    .await;
+            if waited.is_err() {
+                log::warn!("[MCP Bridge] Stopping with a write still unanswered by its window");
+            }
+            waited.ok()
+        }
+        InFlightWrites::Abandon => None,
+    };
 
     // Close all client connections
     let mut guard = bridge.lock().await;
@@ -63,18 +101,38 @@ pub async fn stop_bridge<R: tauri::Runtime>(app: &AppHandle<R>) {
         closed.push(client.connection_id);
     }
 
-    // Reject all pending requests
+    // Reject all pending requests. Holding the write lock, none of them is a
+    // write; without it, one may be a write its window applied or will, so
+    // the answer says so rather than inviting a blind retry.
+    let stopped = if write_guard.is_some() {
+        "Bridge stopped"
+    } else {
+        "Bridge stopped before the window answered; if this was a write, its outcome is unknown — read the current state before retrying"
+    };
     for (_, pending) in guard.pending.drain() {
         let _ = pending.response_tx.send(McpResponse {
             success: false,
             data: None,
-            error: Some("Bridge stopped".to_string()),
+            error: Some(stopped.to_string()),
         });
     }
     drop(guard);
+    // Writes queued behind the stop now find their client drained.
+    drop(write_guard);
     // Rust-answered operations admitted before the drain finish first; none
-    // can be admitted after it (`McpBridgeState::admit_operation`).
-    bridge.await_operations().await;
+    // can be admitted after it (`McpBridgeState::admit_operation`). Bounded
+    // like the write wait: a coherence run outliving its own bound cannot be
+    // abandoned, and an unbounded wait here would hang this stop and every
+    // restart serialized behind it. Such a run still holds the write lock,
+    // so a restarted bridge's writes queue behind it.
+    let finished = tokio::time::timeout(
+        super::state::REQUEST_TIMEOUT_TOTAL,
+        bridge.await_operations(),
+    )
+    .await;
+    if finished.is_err() {
+        log::warn!("[MCP Bridge] Stopping with a Rust-side operation still running");
+    }
     for connection_id in closed {
         announce_connection_closed(app, connection_id);
     }
@@ -184,11 +242,11 @@ pub(super) async fn handle_message<R: tauri::Runtime>(
     };
 
     // Debug (dev only): a mutation's argument SIZE, never a value — the prefix
-    // this replaces carried the inserted text itself.
+    // this replaces carried the inserted text itself. "Mutation" is whatever
+    // the read/write classifier does not call read-only, so the diagnostic
+    // follows the operation set instead of a list of names.
     #[cfg(debug_assertions)]
-    if request.request_type.starts_with("document.insert")
-        || request.request_type == "selection.replace"
-    {
+    if !super::state::is_read_only_operation(&request.request_type) {
         let bytes = serde_json::to_string(&request.args).map_or(0, |s| s.len());
         log::debug!(
             "[MCP Bridge DEBUG] {} args: {bytes} bytes",

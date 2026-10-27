@@ -363,8 +363,11 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 | 參數 | 型別 | 必填 |
 |------|------|------|
 | `tabId` | string | 否 |
+| `cursor` | string | 否 |
 
-回傳 `{doc, generation, threads}`。每個討論串帶有它的 `id`、`state`（`open`、`addressed`、`resolved` 或 `reopened`）、`commentGen`、所錨定的引用文字，以及它的回覆。
+回傳 `{doc, generation, threads, nextCursor?}`，最早的討論串在前。每個討論串帶有它的 `comment` id、`state`（`open`、`addressed`、`resolved` 或 `reopened`）、`commentGen`、所錨定的引用文字，以及它的回覆。
+
+較長的清單會分頁回傳，每頁都小到能完整送達。只要存在 `nextCursor`，就把 `cursor` 設為它再呼叫一次 `list`。跨頁拆分的討論串帶有 `repliesFrom` 和 `repliesTotal`；它後續的部分只帶 `comment`、`state`、`commentGen`、`continued: true` 和接下來的回覆。內文作為 JSON 文字長到任何一頁都放不下時（只有大量跳脫的文字才會如此），會以 `bodyBase64` 取代 `body` 送達，內容是其 UTF-8 位元組的 base64 編碼。如果游標指向的討論串已被刪除，或游標是為另一份文件簽發的，請求會以 `STALE_COMMENT` 被拒絕：請不帶游標重新列出。
 
 ### `reply`
 
@@ -387,7 +390,7 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 
 將討論串標記為已處理。是否解決仍由使用者決定。
 
-`comments.reply` 與 `comments.mark_addressed` 都要提供 `list` 回傳的討論串 `commentGen`。以下情況會被拒絕且不做任何變更：討論串此後已變動時回傳 `STALE_COMMENT`（重新 list），評論 id 格式錯誤或不指向本文件的評論時回傳 `INVALID_COMMENT`，討論串已解決或已刪除時回傳 `COMMENT_NOT_ALLOWED`，回覆過多或內文過長時回傳 `COMMENT_LIMIT`，以及日誌拒絕 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE` 與 `INVALID_TEXT`。
+`comments.reply` 與 `comments.mark_addressed` 都要提供 `list` 回傳的討論串 `commentGen`。以下情況會被拒絕且不做任何變更：討論串此後已變動或已刪除時回傳 `STALE_COMMENT`（重新 list），評論 id 格式錯誤或不指向本文件的評論時回傳 `INVALID_COMMENT`，討論串已解決時回傳 `COMMENT_NOT_ALLOWED`，回覆過多、內文過長或討論串無法再變更時回傳 `COMMENT_LIMIT`，以及日誌拒絕 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE` 與 `INVALID_TEXT`。
 
 要表明一次編輯回應了某些評論，請把它們的 id 作為 `addresses` 傳給 `document.write`、`document.transform`、`workflow.apply_patch` 或 `selection.set`。這個關聯會隨修訂一起記錄，並顯示在文件歷史中（之後被刪除的評論會顯示為已刪除的評論）；它不會改變任何討論串的狀態。超過 64 個 id、重複的 id，或未知、已刪除、已解決或屬於其他文件的 id，會以 `INVALID_ADDRESSES` 被拒絕，不做任何變更。
 
@@ -629,6 +632,8 @@ AI 用戶端的每一次儲存——無論是透過 `write`、`workspace.save` �
 | `APPROVAL_REQUIRED` | 結構化封包 | 在**自動核准儲存至新位置與精靈結果**關閉時，`save_as` 至新位置；`save_as` 至已有其他檔案（非該分頁本身檔案）的路徑；或 `open_workspace` 正在等待使用者核准，或等待使用者在 VMark 的資料夾選擇器中選擇該資料夾 |
 | `BUSY` | 結構化封包 | `open_workspace` 無法繼續：另一個資料夾對話框已開啟，或該視窗中正在切換工作區；核准仍保留——請重試。或是 `document.write`、`document.transform` 或 `selection.set` 在使用者以輸入法組字時送達；未做任何變更——請稍後再試 |
 | `JOURNAL_BUSY` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` 在同一文件的另一次寫入正在記錄時送達；未做任何變更——請稍後再試 |
+| `WRITE_BUSY` | 字串 | 寫入類呼叫（`document.write` / `document.transform`、`selection.set`、`workflow.apply_patch`、`comments.reply` / `mark_addressed`、`coherence_resolve` 等）在另一次寫入之後等待了 3 秒仍未輪到；未被套用——請重試 |
+| `TIMEOUT` | 字串 | `coherence` 或 `coherence_resolve` 呼叫未在 20 秒內完成。若是寫入（`edges`、`resolve`），它仍在執行，結果未知：重試前請先讀取目前狀態 |
 | `STALE_PARENT` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：另一個視窗在本分頁上次寫入之後寫過該文件；未做任何變更——請重新讀取後再試 |
 | `JOURNAL_DEGRADED` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：該文件較早的一筆日誌記錄仍在等待儲存；未做任何變更——請幾秒後再試 |
 | `JOURNAL_UNAVAILABLE` | 結構化封包 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：代理程式編輯日誌未執行或無法記錄；未做任何變更 |

@@ -34,7 +34,11 @@
  *   - Save semantics are unchanged: see `document.ts`. A save that ran
  *     reports `journaled` (whether the journal recorded the saved text).
  *     It goes to the path the tab holds when the save starts, so a Save As
- *     that landed during the commit is followed, never undone.
+ *     that landed during the commit is followed, never undone; a tab closed
+ *     (or reopened under the same id) meanwhile is not saved.
+ *   - The client's reads are detached at admission (`admittedReads.ts`)
+ *     and handed to the save, so a read made while the write is in flight
+ *     is the next write's input.
  *
  * @coordinates-with journaledEdit.ts — the protocol run, refusal and abort answers
  * @coordinates-with writeContent.ts — the apply
@@ -50,12 +54,15 @@ import { wrapHandler } from "./wrapHandler";
 import { saveTabForBridge } from "./bridgeSave";
 import { liveCompositionRefusal, recoverLiveWysiwyg } from "./liveEditor";
 import { readOperationArgsChecked } from "./readOperationArgs";
-import { requireAddresses } from "./writeAddresses";
+import { requireWriteArgs } from "./writeAddresses";
 import { requireCurrentRevision, requireTab, resolveKind, structuredError } from "./tabGuard";
 import { writeContent } from "./writeContent";
 import { invalidTextError } from "./journalV2Error";
 import { runJournaledEdit } from "./journaledEdit";
+import { withAdmittedReads } from "./admittedReads";
 import type { Journaled } from "@/services/agentJournal/journalClient";
+import type { McpReadBatch } from "@/services/coherence/mcpCapture";
+import { isJournalTabLive } from "@/services/agentJournal/documentIdentity";
 
 type SaveResult = {
   saved: boolean;
@@ -73,6 +80,8 @@ async function saveAfterWrite(
   buffer: string,
   shouldSave: boolean,
   context: McpWriteContext,
+  reads: McpReadBatch,
+  life: number,
 ): Promise<SaveResult> {
   if (!shouldSave) return { saved: false, save_skipped: "opt_out" };
   // The path the tab holds now: a Save As during the journal round trips
@@ -80,13 +89,14 @@ async function saveAfterWrite(
   const live = useDocumentStore.getState().documents[tab.tabId];
   // @edge-case: the tab closed during those round trips — the path it held
   // then names no open document, and writing there could clobber a file the
-  // user has since moved on from.
-  if (!live) return { saved: false, save_error: "The tab was closed before its write could be saved" };
+  // user has since moved on from. Reopened under the same id, it holds
+  // another document, whose file this buffer must not overwrite.
+  if (!live || !isJournalTabLive(tab.tabId, life)) return { saved: false, save_error: "The tab was closed before its write could be saved" };
   const filePath = live.filePath;
   if (!filePath) return { saved: false, save_skipped: "untitled" };
   // Sampled and submitted with no await between: the save is queued (and the
   // document claimed) before the path guard's round trip.
-  const outcome = await saveTabForBridge(tab.tabId, filePath, buffer, "document.write", context);
+  const outcome = await saveTabForBridge(tab.tabId, filePath, buffer, "document.write", context, { reads });
   return outcome.saved
     ? { saved: true, journaled: outcome.journaled }
     : { saved: false, save_error: outcome.message };
@@ -114,10 +124,10 @@ export async function handleDocumentWrite(
   args: Record<string, unknown>,
   context: McpWriteContext,
 ): Promise<void> {
-  return wrapHandler(id, async () => {
+  return wrapHandler(id, () => withAdmittedReads(context, async (reads) => {
     const checked = readOperationArgsChecked("vmark.document.write", args);
     const { wire } = checked;
-    const addressed = await requireAddresses(id, checked);
+    const addressed = await requireWriteArgs(id, checked);
     if (!addressed) return;
     if (wire.content === undefined) {
       await structuredError(id, { error: "INTERNAL", message: "content must be a string" });
@@ -150,6 +160,7 @@ export async function handleDocumentWrite(
       target: content,
       ...addressed,
       context,
+      reads,
       apply: () => {
         const result = writeContent(tab.tabId, content, writeKind);
         if ("error" in result) return { refused: result.error === "INVALID_TAB" ? ("closed" as const) : ("composing" as const) };
@@ -163,11 +174,11 @@ export async function handleDocumentWrite(
     if (!outcome) return;
 
     const { revision, buffer } = outcome.value;
-    const save = await saveAfterWrite(tab, buffer, shouldSave, context);
+    const save = await saveAfterWrite(tab, buffer, shouldSave, context, reads.batch, outcome.life);
     await respond({
       id,
       success: true,
       data: { revision, applied: true, durable: outcome.durable, ...save },
     });
-  });
+  }));
 }

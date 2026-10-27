@@ -3,18 +3,18 @@
  *   only structural mutators that survive the MCP prune.
  *
  *   `apply_patch` accepts an array of IRPatch objects (the existing
- *   discriminated union from `lib/ghaWorkflow/save/mutators.ts`) and
- *   applies them through the CST-safe path so YAML comments, anchors,
- *   and key order are preserved. `validate` runs actionlint and
- *   forwards diagnostics.
+ *   discriminated union from `lib/ghaWorkflow/save/mutators.ts`), compiles
+ *   them against the tab's text (`workflowPatch.ts`) and writes the result
+ *   through the journal. `validate` runs actionlint and forwards diagnostics.
  *
  * Origin: MCP pruning plan (retired) ADR-5.
  *
  * Key decisions:
- *   - `IRPatch` is a public contract once exposed via MCP. We accept
- *     the existing shape verbatim; future breaking changes bump to
- *     `apply_patch_v2`. Validate the discriminator client-side and
- *     return INVALID_PATCH when the shape is wrong.
+ *   - `IRPatch` is accepted verbatim; future breaking changes bump to
+ *     `apply_patch_v2`.
+ *   - `apply_patch` refuses in a fixed order, the first that applies:
+ *     addresses, patch shape, tab, tab kind, revision, patch application.
+ *     Nothing before the journaled write touches the buffer.
  *   - `validate` uses the same actionlint wrapper the live editor
  *     uses, so diagnostics surface identically across UI and MCP.
  *   - Only `yaml-workflow` tabs accept `apply_patch`. Markdown tabs
@@ -27,8 +27,7 @@
  * @coordinates-with tabGuard.ts — tab resolution, the flush, INVALID_TAB and STALE
  * @coordinates-with journaledEdit.ts — the journal protocol `apply_patch` runs (a whole-document barrier)
  * @coordinates-with writeAddresses.ts — the `addresses` shape check; the journal checks the set
- * @coordinates-with lib/ghaWorkflow/save/cstParser.ts — parseAsCst / stringifyCst
- * @coordinates-with lib/ghaWorkflow/save/mutators.ts — applyPatch + IRPatch types
+ * @coordinates-with workflowPatch.ts — the shape check and the pure compilation of a batch
  * @coordinates-with lib/ghaWorkflow/lint/actionlint.ts — lintWithActionlint
  * @coordinates-with stores/documentStore/revision.ts — the revision token
  * @module services/mcpBridge/v2/workflow
@@ -36,69 +35,21 @@
 
 import type { McpWriteContext } from "@/services/mcpBridge/writeContext";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
-import {
-  parseAsCst,
-  stringifyCst,
-} from "@/lib/ghaWorkflow/save/cstParser";
-import { applyPatch, type IRPatch } from "@/lib/ghaWorkflow/save/mutators";
 import { lintWithActionlint } from "@/lib/ghaWorkflow/lint/actionlint";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { respond } from "@/services/mcpBridge/utils";
 import { wrapHandler } from "./wrapHandler";
 import { readOperationArgs, readOperationArgsChecked } from "./readOperationArgs";
-import { requireAddresses } from "./writeAddresses";
+import { requireWriteArgs } from "./writeAddresses";
 import {
   requireCurrentRevision,
   requireTab,
   structuredError,
   type GuardedTab,
 } from "./tabGuard";
-import type { V2Error } from "./types";
 import { runJournaledEdit } from "./journaledEdit";
-import { invalidTextError } from "./journalV2Error";
-import { isWellFormedText } from "@/services/agentJournal/wellFormedText";
-import { errorMessage } from "@/utils/errorMessage";
-
-const VALID_PATCH_KINDS: ReadonlySet<string> = new Set([
-  "workflow.set",
-  "job.set",
-  "step.set",
-  "with.set",
-  "with.remove",
-  "needs.add",
-  "needs.remove",
-  "trigger.setFilters",
-]);
-
-/**
- * Validate that `value` looks like an `IRPatch[]` we can dispatch.
- * The shape check is structural — runtime YAML clients can't import
- * the TypeScript type so we duck-type the discriminator.
- */
-function validatePatches(value: unknown): IRPatch[] | V2Error {
-  if (!Array.isArray(value)) {
-    return {
-      error: "INVALID_PATCH",
-      message: "patches must be an array",
-    };
-  }
-  for (const [i, p] of value.entries()) {
-    if (!p || typeof p !== "object") {
-      return {
-        error: "INVALID_PATCH",
-        message: `patches[${i}] must be an object`,
-      };
-    }
-    const kind = (p as { kind?: unknown }).kind;
-    if (typeof kind !== "string" || !VALID_PATCH_KINDS.has(kind)) {
-      return {
-        error: "INVALID_PATCH",
-        message: `patches[${i}].kind is missing or invalid: ${String(kind)}`,
-      };
-    }
-  }
-  return value as IRPatch[];
-}
+import { withAdmittedReads, type AdmittedReads } from "./admittedReads";
+import { compileWorkflowPatch, validatePatches } from "./workflowPatch";
 
 /**
  * Resolve the request's tab and require it to be a workflow, or answer the
@@ -121,6 +72,46 @@ async function requireWorkflowTab(
   return tab;
 }
 
+/** What the journaled write of a patched workflow carries besides its text. */
+interface PatchedWrite {
+  requireFocus: boolean;
+  addressed: { addresses?: string[] };
+  context: McpWriteContext;
+  reads: AdmittedReads;
+}
+
+/**
+ * Write `text` over the tab through the edit journal's controlled-mutation
+ * protocol (`journaledEdit.ts`), bumping the revision last, and answer
+ * `applied` + `durable`; a refusal is answered by the journal.
+ */
+async function writePatchedText(id: string, tab: GuardedTab, text: string, w: PatchedWrite): Promise<void> {
+  const revisionStore = useRevisionStore.getState();
+  const outcome = await runJournaledEdit(id, {
+    tab,
+    preimage: tab.content,
+    requireFocus: w.requireFocus,
+    tool: "workflow.apply_patch",
+    target: text,
+    ...w.addressed,
+    context: w.context,
+    reads: w.reads,
+    apply: () => {
+      useDocumentStore.getState().setEditorContent(tab.tabId, text);
+      // Bumped here, last, so the token returned is the document's newest.
+      const revisionAfter = revisionStore.updateRevision(tab.tabId);
+      const postimage = useDocumentStore.getState().documents[tab.tabId]?.content ?? text;
+      return { postimage, value: revisionAfter };
+    },
+  });
+  if (!outcome) return;
+  await respond({
+    id,
+    success: true,
+    data: { revision: outcome.value, applied: true, durable: outcome.durable },
+  });
+}
+
 /**
  * Handle `vmark.workflow.apply_patch`.
  *
@@ -135,78 +126,34 @@ export async function handleWorkflowApplyPatch(
   args: Record<string, unknown>,
   context: McpWriteContext,
 ): Promise<void> {
-  return wrapHandler(id, async () => {
+  return wrapHandler(id, () => withAdmittedReads(context, async (reads) => {
     const checked = readOperationArgsChecked("vmark.workflow.apply_patch", args);
     const { wire } = checked;
-    const addressed = await requireAddresses(id, checked);
+    const addressed = await requireWriteArgs(id, checked);
     if (!addressed) return;
 
-    const patchesOrError = validatePatches(wire.patches);
-    if (!Array.isArray(patchesOrError)) {
-      await structuredError(id, patchesOrError);
+    const patches = validatePatches(wire.patches);
+    if (!Array.isArray(patches)) {
+      await structuredError(id, patches);
       return;
     }
-    const patches = patchesOrError;
 
     const tab = await requireWorkflowTab(id, wire.tabId);
     if (!tab) return;
     if (!(await requireCurrentRevision(id, tab.tabId, wire.expected_revision))) return;
 
-    let nextContent: string;
-    try {
-      const cst = parseAsCst(tab.content);
-      for (const patch of patches) {
-        applyPatch(cst, patch);
-      }
-      nextContent = stringifyCst(cst);
-    } catch (e) {
-      await structuredError(id, {
-        error: "INVALID_PATCH",
-        message: `Patch application failed: ${
-          errorMessage(e)
-        }`,
-      });
+    const compiled = compileWorkflowPatch(tab.content, patches);
+    if (compiled.status === "refused") {
+      await structuredError(id, compiled.error);
       return;
     }
-
-    const revisionStore = useRevisionStore.getState();
-    const revisionBefore = revisionStore.getRevision(tab.tabId);
-    if (nextContent === tab.content) {
+    if (compiled.status === "unchanged") {
       // No-op patch batch — don't bump revision.
-      await respond({ id, success: true, data: { revision: revisionBefore } });
+      await respond({ id, success: true, data: { revision: useRevisionStore.getState().getRevision(tab.tabId) } });
       return;
     }
-
-    if (!isWellFormedText(nextContent)) {
-      await structuredError(id, invalidTextError());
-      return;
-    }
-
-    const outcome = await runJournaledEdit(id, {
-      tab,
-      preimage: tab.content,
-      requireFocus: !wire.tabId,
-      tool: "workflow.apply_patch",
-      target: nextContent,
-      ...addressed,
-      context,
-      apply: () => {
-        useDocumentStore.getState().setEditorContent(tab.tabId, nextContent);
-        // Bumped here, last, so the token returned is the document's newest.
-        const revisionAfter = revisionStore.updateRevision(tab.tabId);
-        const postimage = useDocumentStore.getState().documents[tab.tabId]?.content ?? nextContent;
-        return { postimage, value: revisionAfter };
-      },
-    });
-    if (!outcome) return;
-    const revisionAfter = outcome.value;
-
-    await respond({
-      id,
-      success: true,
-      data: { revision: revisionAfter, applied: true, durable: outcome.durable },
-    });
-  });
+    await writePatchedText(id, tab, compiled.text, { requireFocus: !wire.tabId, addressed, context, reads });
+  }));
 }
 
 /**

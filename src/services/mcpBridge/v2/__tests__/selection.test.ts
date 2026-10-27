@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
+import { markContentApplied } from "@/services/editor/contentApplied";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorState as CMState } from "@codemirror/state";
 import { EditorView as CMView } from "@codemirror/view";
@@ -68,6 +69,7 @@ function makeTiptap(
     extensions: [StarterKit],
     content: initialContent,
   });
+  markContentApplied(tiptapEditor); // its initial load has run
   tiptapEditor.commands.setTextSelection({ from, to });
   useEditorStore
     .getState()

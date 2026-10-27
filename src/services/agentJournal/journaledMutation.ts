@@ -70,6 +70,7 @@
  * @coordinates-with services/agentJournal/unsavedProvenance.ts — the freeze and fork
  * @coordinates-with services/agentJournal/documentIdentity.ts — the basis
  * @coordinates-with services/agentJournal/expectedHead.ts — the parent and observedParent
+ * @coordinates-with services/agentJournal/mutationSettlement.ts — basis, freeze and fork settlement
  * @module services/agentJournal/journaledMutation
  */
 
@@ -78,11 +79,12 @@ import type { AbortReason, CommitExtras, DecidedReply, JournalBaseRef, PreparedT
 import { expectedHead, observedParentFor } from "./expectedHead";
 import { runPreparedWrite } from "./controlledMutation";
 import { JournalRefusal } from "./journalRefusal";
-import { JOURNAL_PREAPPLY_BUDGET_MS, journalTimeout, settleWithin, startJournalBudget } from "./journalDeadline";
-import { forkUnsavedProvenance, freezeUnsavedProvenance, type JournalProvenancePayload } from "./unsavedProvenance";
-import type { ProvenanceFork, ProvenanceFreeze } from "./provenance/session";
+import { JOURNAL_PREAPPLY_BUDGET_MS, journalTimeout, settleWithin, startJournalBudget, type JournalBudget } from "./journalDeadline";
+import { freezeUnsavedProvenance, type JournalProvenancePayload } from "./unsavedProvenance";
+import type { NamedPayload, ProvenanceFreeze } from "./provenance/session";
 import type { CaptureId } from "./provenance/captureId";
-import { forgetJournalBasis, isJournalBasisEvicted, isJournalTabLive, outstandingSaveBase, rememberJournalBasis } from "./documentIdentity";
+import { forgetJournalBasis, isJournalBasisEvicted, outstandingSaveBase } from "./documentIdentity";
+import { basisSettler, MutationProvenance, settleControlledOutcome, type JournaledOutcome } from "./mutationSettlement";
 
 /** How long the effects hook may take before the commit goes ahead without it. */
 export const EFFECTS_DEADLINE_MS = 5000;
@@ -101,15 +103,7 @@ interface MutationBaseline {
   capture?: CaptureId;
 }
 
-/** The settled result the outcome mapper turns into the caller's answer. */
-export type JournaledOutcome<T> =
-  | { status: "refused"; refusal: JournalRefusal }
-  | { status: "aborted"; reason: AbortReason }
-  | { status: "applied"; value: T; durable: boolean }
-  /** The apply threw after changing the buffer, or the effects hook failed; the applied text was committed. */
-  | { status: "appliedWithError"; error: unknown; durable: boolean }
-  /** The apply threw and the tab could not be read back; the journal keeps the transaction open. */
-  | { status: "recoveryRequired"; error: unknown };
+export type { JournaledOutcome } from "./mutationSettlement";
 
 interface MutationAdapters<T, P extends PreparedTxn, O, D> {
   tabId: string;
@@ -157,6 +151,38 @@ function withinEffectsDeadline(run: () => Promise<CommitExtras>): Promise<Commit
   return Promise.race([running, expired]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * The prepare the coordinator sends, and the parent it stated: read once the
+ * prepare is built (see the header). The baseline payload rides only with the
+ * predecessor it names.
+ */
+function preparer<T, P extends PreparedTxn, O, D>(
+  m: JournaledMutation<T, P, O, D>,
+  budget: JournalBudget,
+  inFlightSave: ReturnType<typeof outstandingSaveBase>,
+  freeze: ProvenanceFreeze | null,
+  named: NamedPayload | null,
+): { prepare: () => Promise<PrepareSpec<P | DecidedReply<D>>>; parent: () => string | null } {
+  const { tabId, docKey, preimage } = m;
+  let parent: string | null = null;
+  const prepare = async (): Promise<PrepareSpec<P | DecidedReply<D>>> => {
+    const expected = await expectedHead(tabId, docKey, budget, inFlightSave);
+    if ("refusal" in expected) throw expected.refusal;
+    parent = expected.parent;
+    const observedParent = named ? observedParentFor(tabId, docKey, parent, named.basis) : null;
+    return m.prepare({
+      docKey,
+      parent,
+      preimage,
+      baselineProvenance: observedParent && named ? named.payload : null,
+      ...(observedParent && { observedParent }),
+      baselineTouched: freeze?.touched ?? false,
+      ...(freeze && { capture: freeze.capture }),
+    });
+  };
+  return { prepare, parent: () => parent };
+}
+
 /** Run one journaled mutation of `m.tabId`; the outcome mapper's answer. Rethrows an apply that threw with nothing changed. */
 export async function runJournaledMutation<T, P extends PreparedTxn, O, D = never>(m: JournaledMutation<T, P, O, D>): Promise<O> {
   const { tabId, docKey, preimage } = m;
@@ -168,54 +194,21 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O, D = neve
   }
   const inFlightSave = outstandingSaveBase(tabId, docKey);
   const freeze = m.freeze ? m.freeze(preimage) : freezeUnsavedProvenance(tabId, preimage);
-  const forks: ProvenanceFork[] = [];
-  const fork = (postimage: string): void => {
-    const f = forkUnsavedProvenance(tabId, postimage);
-    if (f) forks.push(f);
-  };
-  /** Record what the journal answered, unless the tab closed since. */
-  const settleBasis = (basis: string | null): void => {
-    if (!isJournalTabLive(tabId, m.life)) return;
-    if (basis === null) forgetJournalBasis(tabId, docKey);
-    else rememberJournalBasis(tabId, docKey, basis);
-  };
+  const provenance = new MutationProvenance(tabId, freeze);
   const { effects } = m;
-  // The freeze's settlement this coordinator chose; the `finally` invalidates only an unsettled one.
-  let freezeSettled = false;
-  const releaseFreeze = (): void => {
-    freezeSettled = true;
-    freeze?.release();
-  };
   try {
     const frozen = freeze ? await settleWithin(freeze.payload(null), budget.remaining()) : { value: null };
     if (frozen === null) {
       // Nothing was sent: a client-side refusal releases.
-      releaseFreeze();
+      provenance.release();
       return await m.outcome({ status: "refused", refusal: journalTimeout("the provenance freeze", JOURNAL_PREAPPLY_BUDGET_MS) });
     }
-    const named = frozen.value;
     // The payload awaited: the tab may have changed under it.
     const changed = freeze ? (m.recheck?.() ?? null) : null;
     if (changed) return await m.outcome({ status: "aborted", reason: changed });
-    // Stated once the prepare is built (see the header).
-    let parent: string | null = null;
-    const prepare = async (): Promise<PrepareSpec<P | DecidedReply<D>>> => {
-      const expected = await expectedHead(tabId, docKey, budget, inFlightSave);
-      if ("refusal" in expected) throw expected.refusal;
-      parent = expected.parent;
-      const observedParent = named ? observedParentFor(tabId, docKey, parent, named.basis) : null;
-      return m.prepare({
-        docKey,
-        parent,
-        preimage,
-        baselineProvenance: observedParent && named ? named.payload : null,
-        ...(observedParent && { observedParent }),
-        baselineTouched: freeze?.touched ?? false,
-        ...(freeze && { capture: freeze.capture }),
-      });
-    };
+    const { prepare, parent } = preparer(m, budget, inFlightSave, freeze, frozen.value);
     const outcome = await runPreparedWrite({
-      parent: () => parent,
+      parent,
       preimage,
       docKey,
       prepare,
@@ -223,7 +216,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O, D = neve
       verify: m.verify,
       apply: (prepared) => {
         const applied = m.apply(prepared);
-        if ("postimage" in applied) fork(applied.postimage);
+        if ("postimage" in applied) provenance.fork(applied.postimage);
         return applied;
       },
       recover: () => {
@@ -232,7 +225,7 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O, D = neve
           // The store may have thrown before its own revision bump: a client
           // holding the old revision token must not overwrite the mutation.
           useRevisionStore.getState().updateRevision(tabId);
-          fork(postimage);
+          provenance.fork(postimage);
         }
         return postimage;
       },
@@ -240,43 +233,15 @@ export async function runJournaledMutation<T, P extends PreparedTxn, O, D = neve
       ...(effects && { effects: (postimage: string) => withinEffectsDeadline(() => effects(preimage, postimage)) }),
     });
 
-    if (outcome.status === "refused") {
-      if (outcome.disposition === "release") releaseFreeze();
-      if (outcome.refusal.journalCode === "STALE_PARENT") settleBasis(null);
-      return await m.outcome({ status: "refused", refusal: outcome.refusal });
-    }
-    if (outcome.status === "decided") {
-      settleBasis(outcome.head);
-      if (outcome.head !== null) {
-        freezeSettled = true;
-        freeze?.recorded(outcome.head);
-      }
-      // The type requires the adapter of every prepare that can answer a decision; fail loud on a caller that slipped past it.
-      const { decided } = m as Partial<DecidedAdapter<D, O>>;
-      if (!decided) throw new Error("the journal recorded a decision, and this mutation has no decided adapter");
-      return await decided(outcome.decision);
-    }
-    if (outcome.status === "recoveryRequired") {
-      settleBasis(null);
-      return await m.outcome({ status: "recoveryRequired", error: outcome.error });
-    }
-    settleBasis(outcome.basis);
-    if (outcome.status === "aborted") {
-      if (outcome.basis !== null) {
-        freezeSettled = true;
-        freeze?.recorded(outcome.basis);
-      }
-      if (outcome.thrown) throw outcome.thrown.error;
-      return await m.outcome({ status: "aborted", reason: outcome.reason });
-    }
-    if (outcome.basis === outcome.revision) for (const f of forks) f.recorded(outcome.revision);
-    if (outcome.status === "appliedWithError") {
-      return await m.outcome({ status: "appliedWithError", error: outcome.error, durable: outcome.durable });
-    }
-    return await m.outcome({ status: "applied", value: outcome.value, durable: outcome.durable });
+    const settled = settleControlledOutcome(outcome, provenance, basisSettler(tabId, docKey, m.life));
+    if (settled.next === "rethrow") throw settled.error;
+    if (settled.next === "answer") return await m.outcome(settled.outcome);
+    // The type requires the adapter of every prepare that can answer a decision; fail loud on a caller that slipped past it.
+    const { decided } = m as Partial<DecidedAdapter<D, O>>;
+    if (!decided) throw new Error("the journal recorded a decision, and this mutation has no decided adapter");
+    return await decided(settled.decision);
   } finally {
     // The first settlement wins, so this only reaches what nothing recorded.
-    for (const f of forks) f.invalidate();
-    if (!freezeSettled) freeze?.invalidate();
+    provenance.invalidateUnsettled();
   }
 }

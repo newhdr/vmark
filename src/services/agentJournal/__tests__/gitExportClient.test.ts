@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL4.1 — the Git export client (`agent_journal_git_export`): the payload carries the document key and the absolute repository folder as JSON (Windows backslash paths, spaces and CJK kept verbatim); the report is checked before it is trusted; a refusal's exportCode (GIT_MISSING, NOT_A_REPOSITORY, EXPORT_CONFLICT, UNRELATED_BRANCH, BRANCH_CHECKED_OUT, …) is read back, and an unknown or absent code is null rather than guessed
+// WI-AL4.1 — the Git export client (`agent_journal_git_export`): the payload carries the document key and the absolute repository folder as JSON (Windows backslash paths, spaces and CJK kept verbatim); the report is checked before it is trusted (counts are safe integers); a refusal's exportCode (GIT_MISSING, NOT_A_REPOSITORY, EXPORT_CONFLICT, UNRELATED_BRANCH, BRANCH_CHECKED_OUT, …) is read back, and an unknown or absent code is null rather than guessed
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
@@ -35,6 +35,7 @@ describe("exportDocumentToGit", () => {
     ["missing branch", { ...report, branch: "" }],
     ["a negative count", { ...report, commitsCreated: -1 }],
     ["a fractional count", { ...report, syntheticCreated: 0.5 }],
+    ["a count past the safe integer range", { ...report, commitsCreated: 2 ** 53, syntheticCreated: 0 }],
     ["more synthetic than created", { ...report, commitsCreated: 1, syntheticCreated: 2 }],
     ["a non-string head", { ...report, head: 7 }],
     ["no head but commits created", { ...report, head: null, commitsCreated: 2, syntheticCreated: 0 }],

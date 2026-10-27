@@ -44,7 +44,7 @@ export interface GitExportReport {
   syntheticCreated: number;
 }
 
-const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
 function parseReport(reply: unknown): GitExportReport {
   const r = reply as Partial<Record<keyof GitExportReport, unknown>> | null;

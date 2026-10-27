@@ -89,7 +89,8 @@ pub(super) async fn run<R: tauri::Runtime>(
     let is_read = is_read_only_operation(&request.request_type);
 
     // For write operations, acquire the write lock: writes go one at a time
-    // while reads run together.
+    // while reads run together. The wait is bounded; a write that cannot get
+    // the lock in time is refused before it is registered or emitted.
     let write_guard = if is_read {
         None
     } else {
@@ -98,7 +99,15 @@ pub(super) async fn run<R: tauri::Runtime>(
             client_id,
             crate::peer_text::peer_text(&request.request_type)
         );
-        Some(bridge.write_lock().await)
+        match bridge.write_lock_for_request().await {
+            Ok(guard) => Some(guard),
+            Err(err) => {
+                log::warn!("[MCP Bridge] Client {client_id} write refused: {err}");
+                super::delivery::send_error_response(bridge, client_id, client_tx, &msg_id, &err)
+                    .await;
+                return Ok(());
+            }
+        }
     };
 
     let (response_tx, response_rx) = oneshot::channel();

@@ -143,7 +143,7 @@ reports missing tools:
 | `portResolver` | *(none)* | Called on each connect attempt to resolve the port. |
 | `authTokenResolver` | *(none)* | Called on each connect attempt for the handshake token. |
 | `timeout` | `10000` | **Connect and auth-handshake** timeout in ms — not the request timeout. |
-| `requestTimeout` | `25000` | Per-request timeout in ms. Must exceed the Rust bridge's 20 s wake-and-retry worst case, or a recovered write is reported to the client as a timeout. That 20 s bounds the two window-response waits, not time queued behind another write: a timeout does not cancel a mutation, which may already have succeeded or may succeed later. Re-read before retrying; an immediate re-read does not establish that queued work has finished. |
+| `requestTimeout` | `25000` | Per-request timeout in ms. Must exceed the Rust bridge's 23 s worst case — 3 s waiting behind another write, then the 20 s wake-and-retry — or a recovered write is reported to the client as a timeout. A write that waits longer than 3 s behind another is refused `WRITE_BUSY` and not applied: retry it. A coherence request whose run outlasts the 20 s is answered `TIMEOUT`; for a coherence write that means its outcome is unknown. |
 | `autoReconnect` | `true` | Reconnect on disconnect. |
 | `maxReconnectAttempts` | `10` | Attempt budget; a `send()` arriving on a fully idle loop resets it. |
 | `reconnectDelay` | `1000` | Base backoff in ms. |
@@ -184,7 +184,8 @@ every stderr line with `[MCP Server Error]`.
 **10 tools**, **44 actions**. Each tool takes an `action` discriminator that
 routes to its sub-operation. Tabs are addressed by `tabId` and windows by
 `windowLabel`, both learned from `session.get_state`; an explicitly supplied
-identifier may never be blank (omit it to target the focused tab/window).
+identifier may never be blank (omit it to target the focused tab/window). A
+request naming a `tabId` goes to the window that holds that tab, focused or not.
 
 `pnpm lint:mcp-docs` joins the totals above, every table below and the
 `--health-check` sample to the tools the sidecar registers, in both directions,
@@ -304,15 +305,25 @@ meant to touch.
 
 | Action | Purpose |
 |---|---|
-| `list` | A tab's review threads: `{doc, generation, threads}`. Each thread carries its `id`, `state`, `commentGen`, quoted anchor and replies. |
+| `list` | A tab's review threads, oldest first: `{doc, generation, threads, nextCursor?}`. Each thread carries its `comment` id, `state`, `commentGen`, quoted anchor and replies. Paged to fit the output bound: pass `cursor: nextCursor` for the next page. |
 | `reply` | Reply to a thread. Args `{tabId?, commentId, body, expectedCommentGen}`. |
 | `mark_addressed` | Mark a thread addressed. Args `{tabId?, commentId, expectedCommentGen}`. |
 
 Resolve, reopen and delete are the user's: the tool has no such action. The
 bridge operations are `comments.list`, `comments.reply` and
-`comments.mark_addressed`. A change names the `commentGen` it read; a thread that moved since is refused
+`comments.mark_addressed`. A change names the `commentGen` it read; a thread that moved or was deleted since is refused
 `STALE_COMMENT`. Other refusals: `INVALID_COMMENT` (a malformed or unknown
-comment id), `COMMENT_NOT_ALLOWED` (resolved or deleted), `COMMENT_LIMIT`.
+comment id), `COMMENT_NOT_ALLOWED` (resolved), `COMMENT_LIMIT` (too many replies, too
+long a body, or a thread that can change no more).
+
+`list` pages in the sidecar, over the app's whole list, so every page fits the
+output bound whole. The cursor names a thread and a reply index; a thread split
+across pages carries `repliesFrom` and `repliesTotal`, and its later parts carry
+only `comment`, `state`, `commentGen`, `continued: true` and the next replies. A
+body too long for any page as JSON text (only heavily escaped text) comes as
+`bodyBase64`, its UTF-8 bytes in base64, in place of `body`.
+A cursor whose thread was deleted, or one issued for another document, is
+refused `STALE_COMMENT`: list again without one.
 
 `document.write`, `document.transform`, `selection.set` and
 `workflow.apply_patch` take an optional `addresses: [commentId]`: the comments

@@ -2,7 +2,8 @@
  * Test helper — a typed MCP request attribution taken from the Rust-generated
  * envelope fixture, so tests that build bridge events never hand-write one,
  * and the write context a test passes when it calls a document mutator
- * directly instead of through the router.
+ * directly instead of through the router (and, for `runJournaledEdit`, its
+ * admitted reads).
  *
  * The value goes through the production validator; if Rust and the validator
  * ever disagree, every test that imports this fails at load.
@@ -15,6 +16,7 @@ import fixture from "@/test/fixtures/mcpRequestEnvelope.json";
 import { parseMcpAttribution } from "@/services/mcpBridge/attribution";
 import { createMcpWriteContext, type McpWriteContext } from "@/services/mcpBridge/writeContext";
 import type { McpAttribution, McpRequestEvent } from "@/services/mcpBridge/types";
+import type { AdmittedReads } from "@/services/mcpBridge/v2/admittedReads";
 
 function fromFixture(raw: unknown): McpAttribution {
   const parsed = parseMcpAttribution(raw);
@@ -53,4 +55,9 @@ export function onConnection(attribution: McpAttribution, connectionId: string):
 /** The write context of one request made under `attribution`. */
 export function contextFor(attribution: McpAttribution, type = "vmark.document.write"): McpWriteContext {
   return createMcpWriteContext({ id: `test-${attribution.connectionId}`, type, args: {}, attribution });
+}
+
+/** The admitted reads of a request that calls `runJournaledEdit` directly: an empty batch, not yet consumed. */
+export function testAdmittedReads(): AdmittedReads {
+  return { batch: { connectionId: TEST_ATTRIBUTION.connectionId, lifetime: { closed: false }, reads: [] }, consumed: false };
 }

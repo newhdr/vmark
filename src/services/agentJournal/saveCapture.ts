@@ -37,7 +37,7 @@ import {
   type Journaled,
   type JournalObservedRef,
 } from "./journalClient";
-import { toJournalRefusal, type JournalCode } from "./journalRefusal";
+import { toJournalRefusal, type JournalCode, type JournalRefusal } from "./journalRefusal";
 import { noteJournalDocument } from "./documentBinding";
 import { commitSaveBasis, isJournalTabLive } from "./documentIdentity";
 import type { ProvenanceFreeze } from "./provenance/session";
@@ -94,6 +94,61 @@ async function send(input: Omit<CaptureInput, "provenance">, freeze: ProvenanceF
 }
 
 /**
+ * What a capture's answer means for the save, decided before anything is
+ * settled: nothing sent; answered, but past the deadline; answered in time;
+ * refused in time. `next` is the base the save behind this one chains on.
+ */
+export type CaptureTransition =
+  | { kind: "unsent" }
+  | { kind: "late"; next: JournalObservedRef | null }
+  | { kind: "answered"; out: CapturedSave; next: JournalObservedRef | null }
+  | { kind: "refused"; refusal: JournalRefusal };
+
+/** The base a journal answer leaves: its revision, else its pending observation, else none. */
+function answeredBase(out: CapturedSave): JournalObservedRef | null {
+  if (out.revision !== null) return { ref: "revision", revision: out.revision };
+  if (out.observation !== null) return { ref: "pending", observation: out.observation };
+  return null;
+}
+
+/** Classify a send's answer (`null`: nothing was sent); `live` is read as it arrived. */
+export function replyTransition(out: CapturedSave | null, live: boolean): CaptureTransition {
+  if (out === null) return { kind: "unsent" };
+  // @edge-case A late answer is reported timed out and commits nothing, but
+  // the save behind it chains on what it recorded, not on the local basis.
+  if (!live) return { kind: "late", next: answeredBase(out) };
+  return { kind: "answered", out, next: answeredBase(out) };
+}
+
+/** Classify a send that threw; `live` is read as it failed. A late refusal leaves no base. */
+export function failureTransition(error: unknown, live: boolean): CaptureTransition {
+  if (!live) return { kind: "late", next: null };
+  return { kind: "refused", refusal: toJournalRefusal(error) };
+}
+
+/** Settle the window and the tab's basis as `t` says; `commit` records the basis (see `capture`). */
+function settleCapture(t: CaptureTransition, freeze: ProvenanceFreeze | null, commit: (next: JournalObservedRef | null) => void): CaptureResult {
+  switch (t.kind) {
+    case "unsent":
+      return { outcome: expired(freeze), next: undefined };
+    case "late":
+      return { outcome: expired(freeze), next: t.next };
+    case "answered": {
+      const id = t.out.revision ?? t.out.observation;
+      if (t.out.journaled !== "no" && id !== null) freeze?.recorded(id);
+      else freeze?.invalidate();
+      commit(t.next);
+      return { outcome: { journaled: t.out.journaled, revision: t.out.revision, reason: null }, next: t.next };
+    }
+    case "refused":
+      freeze?.invalidate();
+      commit(null);
+      journalWarn("save not recorded in the agent edit journal:", t.refusal.journalCode, t.refusal.message);
+      return { outcome: { journaled: "no", revision: null, reason: t.refusal.journalCode }, next: null };
+  }
+}
+
+/**
  * Capture, then commit the result to the window and the tab's basis only
  * while the save is `live()`: once its deadline has passed the caller has
  * reported it timed out and invalidated the window, so a late answer, or a
@@ -115,27 +170,11 @@ export async function capture(
   };
   try {
     const out = await send(input, freeze, live);
-    if (out === null) return { outcome: expired(freeze), next: undefined };
-    noteJournalDocument(docKey, out.doc);
-    const next: JournalObservedRef | null =
-      out.revision !== null ? { ref: "revision", revision: out.revision }
-      : out.observation !== null ? { ref: "pending", observation: out.observation }
-      : null;
-    // @edge-case A late answer is reported timed out and commits nothing, but
-    // the save behind it chains on what it recorded, not on the local basis.
-    if (!live()) return { outcome: expired(freeze), next };
-    const id = out.revision ?? out.observation;
-    if (out.journaled !== "no" && id !== null) freeze?.recorded(id);
-    else freeze?.invalidate();
-    commit(next);
-    return { outcome: { journaled: out.journaled, revision: out.revision, reason: null }, next };
+    if (out !== null) noteJournalDocument(docKey, out.doc);
+    // Settled inside the `try`: a throw while settling an answer is settled as a refusal.
+    return settleCapture(replyTransition(out, live()), freeze, commit);
   } catch (error) {
-    if (!live()) return { outcome: expired(freeze), next: null };
-    freeze?.invalidate();
-    const refusal = toJournalRefusal(error);
-    commit(null);
-    journalWarn("save not recorded in the agent edit journal:", refusal.journalCode, refusal.message);
-    return { outcome: { journaled: "no", revision: null, reason: refusal.journalCode }, next: null };
+    return settleCapture(failureTransition(error, live()), freeze, commit);
   }
 }
 

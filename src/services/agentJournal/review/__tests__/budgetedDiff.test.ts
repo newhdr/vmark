@@ -288,3 +288,39 @@ describe("lifecycle", () => {
     expect(Number.isFinite(out.value?.ownMs)).toBe(true);
   });
 });
+
+describe("the deadline is hard", () => {
+  it("charges validation to the call: equal texts report the time it took", async () => {
+    let clock = 0;
+    const timed = new BudgetedDiff({ factory: f.factory, warn, now: () => (clock += 7) });
+    // Reads: the call, one per scanned chunk of each text, and the end of validation.
+    await expect(timed.diff("same", "same")).resolves.toMatchObject({ mode: "exact", changes: [], elapsedMs: 21 });
+    timed.close();
+  });
+
+  it("a call whose validation ran past the settle point goes coarse without dispatching", async () => {
+    const reads = [0];
+    const late = new BudgetedDiff({ factory: f.factory, warn, now: () => reads.shift() ?? SETTLE_AT + 1 });
+    f.onSpawn = (w) => queueMicrotask(() => w.ready());
+    const out = track(late.diff("ab", "aX"));
+    await flush();
+    expect(out.value).toMatchObject({ mode: "tooComplex", reason: "deadline", dispatched: false });
+    expect(f.workers.flatMap((w) => w.posted)).toHaveLength(0);
+    late.close();
+  });
+
+  it("a result that arrives past the settle point, before the timer runs, is expired, not accepted", async () => {
+    let clock = 0;
+    const lagging = new BudgetedDiff({ factory: f.factory, warn, now: () => clock });
+    f.onSpawn = (w) => queueMicrotask(() => w.ready());
+    const out = track(lagging.diff("ab12cd", "aX12Yd"));
+    await flush();
+    clock = SETTLE_AT;
+    f.workers[0].answer();
+    expect(out.value).toBeNull();
+    await flush();
+    expect(out.value).toMatchObject({ mode: "tooComplex", reason: "deadline" });
+    expect(f.workers[0].terminated).toBe(true);
+    lagging.close();
+  });
+});

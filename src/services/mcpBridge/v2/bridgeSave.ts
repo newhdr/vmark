@@ -47,6 +47,7 @@ import { saveToPathForMcp } from "@/services/persistence/saveToPath";
 import type { McpWriteContext } from "@/services/mcpBridge/writeContext";
 import type { SaveFailure } from "@/services/persistence/saveOutcome";
 import type { SaveTargetReservation } from "@/services/persistence/saveTargetClaim";
+import type { McpReadBatch } from "@/services/coherence/mcpCapture";
 import type { Journaled } from "@/services/agentJournal/journalClient";
 import { commandErrorMessage } from "@/services/commands/commandError";
 import { getFileName } from "@/utils/paths";
@@ -123,7 +124,8 @@ function describeFailure(failure: SaveFailure): string {
  * re-applies the file's own convention on the way out. `admission.reservation`
  * is the place the handler reserved at admission, when it awaited anything
  * before calling; `admission.noReplace` makes the write refuse (`target-exists`)
- * rather than replace a file already at `path` when it publishes.
+ * rather than replace a file already at `path` when it publishes;
+ * `admission.reads` the read batch the request detached at admission.
  */
 export async function saveTabForBridge(
   tabId: string,
@@ -131,7 +133,7 @@ export async function saveTabForBridge(
   content: string,
   toolName: string,
   context: McpWriteContext,
-  admission: { reservation?: SaveTargetReservation; noReplace?: boolean } = {},
+  admission: { reservation?: SaveTargetReservation; noReplace?: boolean; reads?: McpReadBatch } = {},
 ): Promise<BridgeSaveResult> {
   const admit = async (): Promise<SaveFailure | null> => {
     const decision = await checkBridgePath(path);

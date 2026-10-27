@@ -367,8 +367,11 @@ GitHub Actions 워크플로우 YAML을 위한 `actionlint` 검증과 **CST 안�
 | 매개변수 | 타입 | 필수 |
 |---------|------|------|
 | `tabId` | string | 아니오 |
+| `cursor` | string | 아니오 |
 
-`{doc, generation, threads}`를 반환합니다. 각 스레드는 `id`, `state`(`open`, `addressed`, `resolved`, `reopened` 중 하나), `commentGen`, 고정된 인용 텍스트, 그리고 답글을 담습니다.
+`{doc, generation, threads, nextCursor?}`를 반환하며, 가장 오래된 스레드가 먼저 옵니다. 각 스레드는 `comment` id, `state`(`open`, `addressed`, `resolved`, `reopened` 중 하나), `commentGen`, 고정된 인용 텍스트, 답글을 담습니다.
+
+긴 목록은 페이지로 나뉘어 오며, 각 페이지는 잘리지 않고 도착할 만큼 작습니다. `nextCursor`가 있는 동안에는 `cursor`를 그 값으로 지정해 `list`를 다시 호출하세요. 여러 페이지에 걸쳐 나뉜 스레드는 `repliesFrom`과 `repliesTotal`을 담고, 이후 부분은 `comment`, `state`, `commentGen`, `continued: true`와 이어지는 답글만 담습니다. JSON 텍스트로는 어느 페이지에도 들어가지 않는 본문(이스케이프가 아주 많은 텍스트뿐입니다)은 `body` 대신 `bodyBase64`로, UTF-8 바이트를 base64로 인코딩해 전달됩니다. 커서가 가리키는 스레드가 삭제되었거나 다른 문서용으로 발급된 커서이면 `STALE_COMMENT`로 거부됩니다. 커서 없이 다시 목록을 요청하세요.
 
 ### `reply`
 
@@ -391,7 +394,7 @@ GitHub Actions 워크플로우 YAML을 위한 `actionlint` 검증과 **CST 안�
 
 스레드를 처리됨으로 표시합니다. 해결할지는 여전히 사용자가 정합니다.
 
-`comments.reply`와 `comments.mark_addressed` 모두 `list`가 반환한 스레드의 `commentGen`을 지정합니다. 다음 경우 아무것도 바꾸지 않고 거부됩니다: 그 뒤 스레드가 바뀌었으면 `STALE_COMMENT`(다시 list 하세요), 댓글 ID가 잘못되었거나 이 문서의 댓글을 가리키지 않으면 `INVALID_COMMENT`, 스레드가 해결되었거나 삭제되었으면 `COMMENT_NOT_ALLOWED`, 답글이 너무 많거나 본문이 너무 길면 `COMMENT_LIMIT`, 그리고 저널 거부 `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`.
+`comments.reply`와 `comments.mark_addressed` 모두 `list`가 반환한 스레드의 `commentGen`을 지정합니다. 다음 경우 아무것도 바꾸지 않고 거부됩니다: 그 뒤 스레드가 바뀌었거나 삭제되었으면 `STALE_COMMENT`(다시 list 하세요), 댓글 ID가 잘못되었거나 이 문서의 댓글을 가리키지 않으면 `INVALID_COMMENT`, 스레드가 해결되었으면 `COMMENT_NOT_ALLOWED`, 답글이 너무 많거나 본문이 너무 길거나 스레드를 더 이상 변경할 수 없으면 `COMMENT_LIMIT`, 그리고 저널 거부 `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE`, `INVALID_TEXT`.
 
 편집이 댓글에 답한다는 것을 나타내려면, 그 ID들을 `addresses`로 `document.write`, `document.transform`, `workflow.apply_patch` 또는 `selection.set`에 전달하세요. 이 연결은 리비전과 함께 기록되어 문서 기록에 표시되며(나중에 삭제된 댓글은 삭제된 댓글로 표시됩니다), 어떤 스레드의 상태도 바꾸지 않습니다. 64개를 넘는 ID, 중복된 ID, 또는 알 수 없거나 삭제되었거나 해결되었거나 다른 문서의 ID는 `INVALID_ADDRESSES`로 거부되며 아무것도 바뀌지 않습니다.
 
@@ -805,6 +808,8 @@ VMark로 되돌아가는 **메시징 채널이 열리지 않습니다** (무브�
 | `APPROVAL_REQUIRED` | 봉투 | **새 위치로 저장 및 지니 결과 자동 승인** 이 꺼진 상태에서 `save_as`로 새 위치에 저장, 탭 자신의 파일이 아닌 파일이 이미 있는 경로로 `save_as`, 또는 `open_workspace`가 사용자의 승인이나 VMark 폴더 선택기에서의 폴더 선택을 기다리는 중 |
 | `BUSY` | 봉투 | `open_workspace`를 진행할 수 없음: 다른 폴더 대화상자가 열려 있거나 해당 창에서 작업 공간 전환이 진행 중. 승인은 유지됨 — 다시 시도. 또는 사용자가 입력기로 텍스트를 조합하는 중에 `document.write`, `document.transform`, `selection.set`이 도착함. 아무것도 바뀌지 않음 — 잠시 후 다시 시도 |
 | `JOURNAL_BUSY` | 봉투 | 같은 문서에 대한 다른 쓰기를 기록하는 중에 `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`가 도착함. 아무것도 바뀌지 않음 — 잠시 후 다시 시도 |
+| `WRITE_BUSY` | 문자열 | 쓰기 계열 호출(`document.write` / `document.transform`, `selection.set`, `workflow.apply_patch`, `comments.reply` / `mark_addressed`, `coherence_resolve` 등)이 다른 쓰기 뒤에서 3초를 기다렸지만 차례가 오지 않음. 적용되지 않음 — 다시 시도 |
+| `TIMEOUT` | 문자열 | `coherence` 또는 `coherence_resolve` 호출이 20초 안에 끝나지 않았습니다. 쓰기(`edges`, `resolve`)라면 아직 실행 중이며 결과를 알 수 없습니다. 다시 시도하기 전에 현재 상태를 읽으세요 |
 | `STALE_PARENT` | 봉투 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: 이 탭이 마지막으로 쓴 뒤 다른 창이 문서를 씀. 아무것도 바뀌지 않음 — 다시 읽고 다시 시도 |
 | `JOURNAL_DEGRADED` | 봉투 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: 이 문서의 이전 저널 기록이 아직 저장을 기다리는 중. 아무것도 바뀌지 않음 — 몇 초 뒤 다시 시도 |
 | `JOURNAL_UNAVAILABLE` | 봉투 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: 에이전트 편집 저널이 실행 중이 아니거나 기록할 수 없음. 아무것도 바뀌지 않음 |

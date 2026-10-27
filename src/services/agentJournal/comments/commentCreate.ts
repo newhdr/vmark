@@ -55,10 +55,11 @@ export type CommentCreateOutcome =
  * The focused editor's selection in the tab `tabId`, or `null` when no
  * editor of the tab can say (none registered, or still mounting). A WYSIWYG
  * selection is mapped onto the Markdown exactly where the round-trip proves
- * it; otherwise it is sent as a guess (see `commentSelection.ts`).
+ * it; otherwise it is sent as a guess (see `commentSelection.ts`). Throws
+ * when the tab's editor cannot hand its pending edits to the store.
  */
 export function readCommentSelection(tabId: string): EditorSelection | null {
-  flushLiveEditors();
+  flushLiveEditors(tabId);
   const surface = resolveSelectionSurface(tabId);
   if ("error" in surface || surface.mounting()) return null;
   const { from, to } = surface.range();
@@ -80,7 +81,7 @@ const contentOf = (tabId: string): string | undefined => useDocumentStore.getSta
 
 /** Open a thread in `tabId` on `selection` with `body`. */
 export async function createComment(tabId: string, selection: EditorSelection, body: string): Promise<CommentCreateOutcome> {
-  flushLiveEditors();
+  flushLiveEditors(tabId);
   const doc = useDocumentStore.getState().documents[tabId];
   if (!doc) return { status: "aborted", reason: "closed" };
   const life = journalTabLife(tabId);

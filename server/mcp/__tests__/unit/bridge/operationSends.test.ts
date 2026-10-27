@@ -117,6 +117,9 @@ function answer(request: BridgeRequest): BridgeResponse {
   if (request.type === 'vmark.browser.screenshot') {
     return { success: true, data: { url: 'https://e.test', image: 'aGk=' } };
   }
+  if (request.type === 'vmark.comments.list') {
+    return { success: true, data: { doc: null, generation: '0', threads: [] } };
+  }
   return { success: true, data: {} };
 }
 

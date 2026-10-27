@@ -22,6 +22,7 @@ vi.mock("@/services/browser/browserTabLifecycle", () => ({ startBrowserTabLifecy
 vi.mock("@/services/browser/recorderWiring", () => ({ startRecorderWiring: service("recorder") }));
 vi.mock("@/services/coherence/scanOnChange", () => ({ startCoherenceScanOnChange: service("coherence") }));
 vi.mock("@/services/mcpBridge/windowWorkspaceSync", () => ({ startWindowWorkspaceSync: service("workspace") }));
+vi.mock("@/services/mcpBridge/windowTabsSync", () => ({ startWindowTabsSync: service("windowTabs") }));
 vi.mock("@/services/browser/browserAiPolicySync", () => ({ startBrowserAiPolicySync: service("aiPolicy") }));
 vi.mock("@/services/workflow/workflowEnginePolicySync", () => ({ startWorkflowEnginePolicySync: service("engine") }));
 vi.mock("@/services/menu/conditionalMenuItemSync", () => ({
@@ -49,12 +50,12 @@ describe("startRuntimeServices", () => {
     order.length = 0;
     const stop = startRuntimeServices();
     const starts = order.filter((e) => e.startsWith("start:"));
-    expect(starts).toHaveLength(13);
-    expect(new Set(starts).size).toBe(13);
+    expect(starts).toHaveLength(14);
+    expect(new Set(starts).size).toBe(14);
     expect(starts[0]).toBe("start:grants");
     stop();
     const stops = order.filter((e) => e.startsWith("stop:"));
-    expect(stops).toHaveLength(13);
+    expect(stops).toHaveLength(14);
     expect(stops[0]).toBe("stop:tabCleanup");
     expect(stops.at(-1)).toBe("stop:grants");
   });
@@ -80,6 +81,16 @@ describe("startRuntimeServices", () => {
     expect(order).toContain("start:recordingLifetimes");
     stop();
     expect(order).toContain("stop:recordingLifetimes");
+  });
+
+  // A request naming a tab routes to the window holding it only while each
+  // window publishes its tabs to the bridge.
+  it("publishes the window's tabs to the bridge for its lifetime", () => {
+    order.length = 0;
+    const stop = startRuntimeServices();
+    expect(order).toContain("start:windowTabs");
+    stop();
+    expect(order).toContain("stop:windowTabs");
   });
 
   it("starts the tab-state cleanup with the window", () => {
@@ -125,7 +136,7 @@ describe("startRuntimeServices", () => {
     const stop = startRuntimeServices();
     expect(() => stop()).not.toThrow();
     const stops = order.filter((e) => e.startsWith("stop:"));
-    expect(stops).toHaveLength(13);
+    expect(stops).toHaveLength(14);
     expect(stops.at(-1)).toBe("stop:grants");
     expect(vi.mocked(appError)).toHaveBeenCalled();
   });

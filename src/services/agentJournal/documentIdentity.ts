@@ -61,7 +61,7 @@ const windows = new Map<string, string>();
 /** Every key with state, least recently used first. */
 const live = new Map<string, true>();
 const tombstones = new Set<string>();
-/** Tab-and-document entries a move carried elsewhere: old → current, never chained (bounded). */
+/** Entries a move carried elsewhere: old → current, never chained; bounded, sparing one a held save reports through. */
 const moved = new Map<string, string>();
 /** The last basis write by anything but a save's own commit, per entry: a stamp from `stamps`, never reused. */
 const foreign = new Map<string, number>();
@@ -188,11 +188,11 @@ export function isJournalBasisEvicted(tabId: string, docKey: string): boolean {
   return tombstones.has(basisKey(tabId, docKey));
 }
 
-/** The journal window name this tab saves `docKey` under; minted once, never reused. */
-export function windowNameFor(tabId: string, docKey: string, windowLabel: string): string {
+/** The journal window name this tab saves `docKey` under; minted once, never reused; `null` when none can be minted. */
+export function windowNameFor(tabId: string, docKey: string, windowLabel: string): string | null {
   const key = basisKey(tabId, docKey);
-  let name = windows.get(key);
-  if (name === undefined) windows.set(key, (name = mintJournalWindowName(windowLabel, tabId)));
+  const name = windows.get(key) ?? mintJournalWindowName(windowLabel, tabId);
+  if (name !== null) windows.set(key, name);
   touch(key);
   return name;
 }
@@ -278,7 +278,7 @@ export function carryJournalBasis(tabId: string, from: string, to: string): void
   moved.delete(dst);
   for (const [old, now] of moved) if (now === src) moved.set(old, dst);
   moved.set(src, dst);
-  if (moved.size > JOURNAL_IDENTITY_BUDGET) moved.delete(moved.keys().next().value as string);
+  for (const [old, now] of moved) if (moved.size > JOURNAL_IDENTITY_BUDGET && !held(now)) moved.delete(old);
   // A save submitted on `from` commits on `to`: the stamp it took moves too.
   const stamp = foreign.get(src);
   if (stamp === undefined) foreign.delete(dst);

@@ -54,7 +54,7 @@ describe("window names", () => {
   it("are stable per tab and document, distinct across tabs, documents and releases", () => {
     const a = windowNameFor("t1", "path:/a.md", "main");
     expect(windowNameFor("t1", "path:/a.md", "main")).toBe(a);
-    expect(a.startsWith("main/t1@")).toBe(true);
+    expect(a?.startsWith("main/t1@")).toBe(true);
     expect(windowNameFor("t2", "path:/a.md", "main")).not.toBe(a);
     expect(windowNameFor("t1", "path:/b.md", "main")).not.toBe(a);
     releaseTabJournal("t1");
@@ -63,7 +63,8 @@ describe("window names", () => {
 
   it("fit the journal's 512-byte limit for long CJK labels", () => {
     const name = windowNameFor("标签".repeat(40), docKeyFor({ tabId: "x", filePath: "/读书.md" }, "w"), "窗口".repeat(40));
-    expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(512);
+    expect(name).not.toBeNull();
+    expect(new TextEncoder().encode(name ?? "").length).toBeLessThanOrEqual(512);
   });
 });
 

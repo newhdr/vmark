@@ -15,7 +15,7 @@ import { useDocumentStore } from "@/stores/documentStore";
 import { resetJournalBases } from "@/services/agentJournal/documentIdentity";
 import { selectionCertificate, type SelectionCertificate } from "@/services/agentJournal/selectionCertificate";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
-import { TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
+import { TEST_WRITE_CONTEXT, testAdmittedReads } from "@/test/mcpAttributionFixture";
 import { journalWarn } from "@/utils/debug";
 import { runJournaledEdit, type JournaledEdit } from "../journaledEdit";
 import { resolveTab, type GuardedTab } from "../tabGuard";
@@ -44,6 +44,7 @@ function run(certify?: JournaledEdit<number>["certify"]) {
     requireFocus: false,
     tool: "selection.set",
     context: TEST_WRITE_CONTEXT,
+    reads: testAdmittedReads(),
     apply: () => {
       useDocumentStore.getState().setEditorContent(TAB, POST);
       return { postimage: POST, value: 1 };
@@ -67,7 +68,7 @@ describe("runJournaledEdit — post-apply certificate", () => {
   it("rides on the commit, not the prepare, with the applied texts", async () => {
     const cert: SelectionCertificate = await selectionCertificate(PRE, { from: 6, to: 8, insert: "世界" });
     const certify = vi.fn(async () => cert);
-    expect(await run(certify)).toEqual({ value: 1, durable: true });
+    expect(await run(certify)).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(certify).toHaveBeenCalledWith(PRE, POST);
     expect(prepared().certificate ?? null).toBeNull();
     expect(committed()[1]).toBe(POST);
@@ -78,7 +79,7 @@ describe("runJournaledEdit — post-apply certificate", () => {
     ["throws", async () => Promise.reject(new Error("boom"))],
     ["answers null", async () => null],
   ])("a certify that %s leaves the commit a barrier, still applied and durable", async (name, certify) => {
-    expect(await run(certify)).toEqual({ value: 1, durable: true });
+    expect(await run(certify)).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(fake.commitControlledWrite).toHaveBeenCalledTimes(1);
     expect(committed()[2]?.certificate ?? null).toBeNull();
     expect(useDocumentStore.getState().documents[TAB].content).toBe(POST);
@@ -86,7 +87,7 @@ describe("runJournaledEdit — post-apply certificate", () => {
   });
 
   it("an edit with no certify sends no commit extras", async () => {
-    expect(await run()).toEqual({ value: 1, durable: true });
+    expect(await run()).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(committed()[2]).toBeUndefined();
   });
 });

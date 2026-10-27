@@ -24,7 +24,9 @@
  *   - `pagehide` bumps the page's lifetime, which a write in flight
  *     re-checks before it applies. A page that is not kept (non-persisted)
  *     never registers again; one kept in the back-forward cache registers a
- *     fresh identity replacing its old pair on its next write.
+ *     fresh identity replacing its old pair on its next write — including a
+ *     pair whose registration answered only after the `pagehide`, which the
+ *     page refuses to use but must not leave registered.
  *
  * @coordinates-with src-tauri/src/agent_journal/commands.rs — `agent_journal_register_page`
  * @coordinates-with services/agentJournal/journalRequest.ts — acquires the page per request
@@ -34,6 +36,7 @@
 import { callJournal, isDecimal, isObject, malformed, parseBound } from "./journalIpc";
 import { JOURNAL_DEADLINE_MS, withJournalDeadline } from "./journalDeadline";
 import { JournalRefusal } from "./journalRefusal";
+import { randomHex } from "./randomHex";
 import { journalWarn } from "@/utils/debug";
 
 /** The pair a commit or abort names. */
@@ -53,13 +56,9 @@ const isHex32 = (v: unknown): v is string => typeof v === "string" && HEX32.test
 
 /** 16 random bytes as 32 lowercase hex, or `null` when no random source works. */
 function mintIdentity(): string | null {
-  try {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  } catch (error) {
-    journalWarn("the page identity could not be minted; agent edits are not journaled in this page:", error);
-    return null;
-  }
+  const identity = randomHex(16);
+  if (identity === null) journalWarn("the page identity could not be minted; agent edits are not journaled in this page");
+  return identity;
 }
 
 interface State {
@@ -120,6 +119,8 @@ function register(identity: string): Promise<RegisteredPage> {
   const shared = run.then(
     (page) => {
       if (state !== at || at.identity !== identity || at.lifetime !== lifetime) {
+        // The journal holds this pair now: the next registration replaces it.
+        if (state === at) at.replaces = { pageIdentity: page.pageIdentity, webviewGeneration: page.webviewGeneration };
         throw unavailable("the page changed while it registered");
       }
       at.registered = page;

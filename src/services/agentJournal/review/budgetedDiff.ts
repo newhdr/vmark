@@ -4,10 +4,18 @@
  * split" change when it cannot finish in time.
  *
  * Key decisions:
- *   - The deadline counts from the CALL: a wait for a ready worker, or
- *     behind an earlier job, is charged to it. A timer at `deadlineMs −
- *     COARSE_RESERVE_MS` settles the job, leaving the reserve for the
- *     linear trimmed fallback on this thread.
+ *   - The deadline counts from the CALL: validation, a wait for a ready
+ *     worker, or behind an earlier job, is charged to it. A timer at
+ *     `deadlineMs − COARSE_RESERVE_MS` settles the job, leaving the reserve
+ *     for the coarse fallback (`coarseDiff`), which trims only within it. A
+ *     reply handled at or past that point is expired, never accepted.
+ *   - This module's own linear checks (input well-formedness, a result's
+ *     canonical form) run on the caller's thread, inside the budget: they
+ *     read the clock every `CHECK_CHUNK` units and stop at the settle point.
+ *     An input scan cut short settles coarse, equal texts included, without
+ *     proving the texts well-formed (a coarse change is offsets only; only a
+ *     COMPLETED scan's lone surrogate is INVALID_TEXT). A result check cut
+ *     short settles coarse and keeps the worker, which has answered.
  *   - At the deadline a dispatched worker is terminated (nothing else stops
  *     a running diff) and the warm spare promoted; its replacement spawns
  *     after the caller has its result. A merely warming worker is kept.
@@ -19,9 +27,8 @@
  *     module load failure surfaces), worker failures and invalid results
  *     are logged with `journalWarn` and counted in `status()`; the call
  *     still gets the coarse change. A later call retries the spawn.
- *   - `ownMs` is the time spent in this module's own callbacks for a job
- *     after the call returned (dispatch, result checks, the deadline), so a
- *     deadline check can charge it rather than mistake it for a caller stall.
+ *   - `ownMs`: time in this module's own callbacks for a job after the call
+ *     returned, so a deadline check charges it rather than blame the caller.
  *
  * @coordinates-with ./diffBudget.ts — its constants, worker factory and result types
  * @coordinates-with ./diffWorker.ts — the worker entry
@@ -30,9 +37,9 @@
  */
 
 import { journalWarn } from "@/utils/debug/warn";
-import { trimmedCanonicalDiff } from "./canonicalDiff";
+import { coarseDiff } from "./coarseDiff";
 import { parseDiffReply, type DiffRequest } from "./diffProtocol";
-import { assertCanonical, assertWellFormed, type TextChange } from "./textChanges";
+import { OverBudget, assertCanonical, assertWellFormed, type TextChange } from "./textChanges";
 import {
   COARSE_RESERVE_MS,
   DIFF_DEADLINE_MS,
@@ -42,30 +49,10 @@ import {
   type DiffStatus,
   type DiffWorkerFactory,
   type DiffWorkerLike,
+  type Job,
+  type Slot,
   type TooComplexReason,
-  type WorkerListener,
 } from "./diffBudget";
-
-interface Slot {
-  readonly worker: DiffWorkerLike;
-  ready: boolean;
-  retired: boolean;
-  readonly onMessage: WorkerListener;
-  readonly onError: WorkerListener;
-}
-
-interface Job {
-  readonly id: number;
-  readonly a: string;
-  readonly b: string;
-  readonly t0: number;
-  readonly settleAt: number;
-  readonly resolve: (outcome: DiffOutcome) => void;
-  timer: ReturnType<typeof setTimeout> | undefined;
-  readyWaitMs: number | null;
-  slot: Slot | null;
-  ownMs: number;
-}
 
 export class BudgetedDiff {
   readonly #factory: DiffWorkerFactory;
@@ -93,16 +80,21 @@ export class BudgetedDiff {
       throw new RangeError(`deadlineMs must be a finite number above ${COARSE_RESERVE_MS}, got ${deadlineMs}`);
     }
     if (this.#closed) return Promise.reject(new Error("budgeted diff is closed"));
-    try {
-      assertWellFormed(a, b);
-    } catch (e) {
-      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
-    }
-    if (a === b) return Promise.resolve({ mode: "exact", changes: [], elapsedMs: 0, readyWaitMs: 0, dispatched: false, ownMs: 0 });
     const t0 = this.#now();
+    const settleAt = t0 + deadlineMs - COARSE_RESERVE_MS;
+    let scanned = true;
+    try {
+      assertWellFormed(a, b, { until: settleAt, now: this.#now });
+    } catch (e) {
+      if (!(e instanceof OverBudget)) return Promise.reject(e instanceof Error ? e : new Error(String(e)));
+      scanned = false; // past the settle point: the job below expires at once
+    }
+    const checked = this.#now();
+    if (scanned && a === b) return Promise.resolve({ mode: "exact", changes: [], elapsedMs: checked - t0, readyWaitMs: 0, dispatched: false, ownMs: 0 });
     return new Promise((resolve) => {
-      const job: Job = { id: ++this.#seq, a, b, t0, settleAt: t0 + deadlineMs - COARSE_RESERVE_MS, resolve, timer: undefined, readyWaitMs: null, slot: null, ownMs: 0 };
-      job.timer = setTimeout(() => this.#expire(job, this.#now()), deadlineMs - COARSE_RESERVE_MS);
+      const job: Job = { id: ++this.#seq, a, b, t0, settleAt, resolve, timer: undefined, readyWaitMs: null, slot: null, ownMs: 0 };
+      job.timer = setTimeout(() => this.#expire(job, this.#now()), Math.max(0, Math.ceil(job.settleAt - checked)));
+      if (checked >= job.settleAt) return this.#expire(job, checked);
       this.#queue.push(job);
       this.#pump();
     });
@@ -221,6 +213,7 @@ export class BudgetedDiff {
       return;
     }
     if (!job || reply.id !== job.id) return;
+    if (start >= job.settleAt) return this.#expire(job, start);
     if (reply.type === "failed") {
       this.#counts.workerFailures++;
       this.#warn("diff worker failed a diff:", reply.message);
@@ -228,8 +221,14 @@ export class BudgetedDiff {
       return;
     }
     try {
-      assertCanonical(job.a, job.b, reply.changes);
+      assertCanonical(job.a, job.b, reply.changes, { until: job.settleAt, now: this.#now });
     } catch (e) {
+      if (e instanceof OverBudget) {
+        // The worker answered and stays warm; only the check ran out of time.
+        this.#counts.timeouts++;
+        this.#finish(() => this.#coarse(job, "deadline", start));
+        return;
+      }
       this.#counts.invalidResults++;
       this.#warn("diff worker returned an invalid result:", e instanceof Error ? e.message : String(e));
       this.#finish(() => this.#coarse(job, "invalidResult", start));
@@ -285,7 +284,8 @@ export class BudgetedDiff {
   }
 
   #coarse(job: Job, reason: TooComplexReason, start: number): void {
-    this.#settle(job, { mode: "tooComplex", reason, changes: trimmedCanonicalDiff(job.a, job.b) }, start);
+    // Half the reserve trims; the rest settles.
+    this.#settle(job, { mode: "tooComplex", reason, changes: coarseDiff(job.a, job.b, job.settleAt + COARSE_RESERVE_MS / 2, this.#now) }, start);
   }
 
   #settle(job: Job, result: { mode: "exact"; changes: TextChange[] } | { mode: "tooComplex"; reason: TooComplexReason; changes: TextChange[] }, start: number): void {

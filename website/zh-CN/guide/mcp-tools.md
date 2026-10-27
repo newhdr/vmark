@@ -363,8 +363,11 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 | 参数 | 类型 | 必填 |
 |------|------|------|
 | `tabId` | string | 否 |
+| `cursor` | string | 否 |
 
-返回 `{doc, generation, threads}`。每个线程带有它的 `id`、`state`（`open`、`addressed`、`resolved` 或 `reopened`）、`commentGen`、所锚定的引用文本，以及它的回复。
+返回 `{doc, generation, threads, nextCursor?}`，最早的线程在前。每个线程带有它的 `comment` id、`state`（`open`、`addressed`、`resolved` 或 `reopened`）、`commentGen`、所锚定的引用文本，以及它的回复。
+
+较长的列表分页返回，每页都小到能完整送达。只要存在 `nextCursor`，就把 `cursor` 设为它再调用一次 `list`。跨页拆分的线程带有 `repliesFrom` 和 `repliesTotal`；它后续的部分只带 `comment`、`state`、`commentGen`、`continued: true` 和接下来的回复。正文作为 JSON 文本长到任何一页都放不下时（只有大量转义的文本才会如此），会以 `bodyBase64` 代替 `body` 送达，内容是其 UTF-8 字节的 base64 编码。如果游标指向的线程已被删除，或游标是为另一个文档签发的，请求会以 `STALE_COMMENT` 被拒绝：请不带游标重新列出。
 
 ### `reply`
 
@@ -387,7 +390,7 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 
 把线程标记为已处理。是否解决仍由用户决定。
 
-`comments.reply` 和 `comments.mark_addressed` 都要给出 `list` 返回的线程 `commentGen`。以下情况会被拒绝且不做任何改动：线程此后已变化时返回 `STALE_COMMENT`（重新 list），评论 id 格式错误或不指向本文档的评论时返回 `INVALID_COMMENT`，线程已解决或已删除时返回 `COMMENT_NOT_ALLOWED`，回复过多或正文过长时返回 `COMMENT_LIMIT`，以及日志拒绝 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE` 和 `INVALID_TEXT`。
+`comments.reply` 和 `comments.mark_addressed` 都要给出 `list` 返回的线程 `commentGen`。以下情况会被拒绝且不做任何改动：线程此后已变化或已删除时返回 `STALE_COMMENT`（重新 list），评论 id 格式错误或不指向本文档的评论时返回 `INVALID_COMMENT`，线程已解决时返回 `COMMENT_NOT_ALLOWED`，回复过多、正文过长或线程无法再更改时返回 `COMMENT_LIMIT`，以及日志拒绝 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE` 和 `INVALID_TEXT`。
 
 要表明一次编辑回应了某些评论，把它们的 id 作为 `addresses` 传给 `document.write`、`document.transform`、`workflow.apply_patch` 或 `selection.set`。这一关联随修订一起记录，并显示在文档历史中（之后被删除的评论显示为已删除的评论）；它不改变任何线程的状态。超过 64 个 id、重复的 id，或者未知、已删除、已解决或属于其他文档的 id，会以 `INVALID_ADDRESSES` 被拒绝，不做任何改动。
 
@@ -629,6 +632,8 @@ AI 客户端的每一次保存——无论通过 `write`、`workspace.save` 还�
 | `APPROVAL_REQUIRED` | 信封 | 在**自动批准保存到新位置和精灵结果**关闭时用 `save_as` 保存到新位置；用 `save_as` 保存到已有其他文件（非该标签页自身文件）的路径；或 `open_workspace` 正在等待用户批准，或等待用户在 VMark 的文件夹选择器中选择该文件夹 |
 | `BUSY` | 信封 | `open_workspace` 无法继续：另一个文件夹对话框已打开，或该窗口中正在切换工作区；批准仍保留——请重试。或者 `document.write`、`document.transform` 或 `selection.set` 在用户用输入法组字时到达；未做任何改动——请稍后重试 |
 | `JOURNAL_BUSY` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` 在同一文档的另一次写入正在记录时到达；未做任何改动——请稍后重试 |
+| `WRITE_BUSY` | 字符串 | 写入类调用（`document.write` / `document.transform`、`selection.set`、`workflow.apply_patch`、`comments.reply` / `mark_addressed`、`coherence_resolve` 等）在另一次写入之后等待了 3 秒仍未轮到；未被应用——请重试 |
+| `TIMEOUT` | 字符串 | `coherence` 或 `coherence_resolve` 调用未在 20 秒内完成。若是写入（`edges`、`resolve`），它仍在运行，结果未知：重试前请先读取当前状态 |
 | `STALE_PARENT` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：另一个窗口在本标签页上次写入之后写过该文档；未做任何改动——请重新读取后重试 |
 | `JOURNAL_DEGRADED` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：该文档较早的一条日志记录仍在等待保存；未做任何改动——请几秒后重试 |
 | `JOURNAL_UNAVAILABLE` | 信封 | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：智能体编辑日志未运行或无法记录；未做任何改动 |

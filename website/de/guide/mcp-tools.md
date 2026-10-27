@@ -369,8 +369,11 @@ Liest die Review-Kommentare des Nutzers zu einem Dokument und beantwortet sie. E
 | Parameter | Typ | Erforderlich |
 |-----------|-----|--------------|
 | `tabId` | string | Nein |
+| `cursor` | string | Nein |
 
-Gibt `{doc, generation, threads}` zurück. Jeder Thread trägt seine `id`, seinen `state` (`open`, `addressed`, `resolved` oder `reopened`), seine `commentGen`, den zitierten Text, an dem er verankert ist, und seine Antworten.
+Gibt `{doc, generation, threads, nextCursor?}` zurück, den ältesten Thread zuerst. Jeder Thread enthält seine `comment`-ID, seinen `state` (`open`, `addressed`, `resolved` oder `reopened`), seine `commentGen`, den zitierten Text, an dem er verankert ist, und seine Antworten.
+
+Eine lange Liste wird seitenweise geliefert, jede Seite klein genug, um vollständig anzukommen. Solange `nextCursor` vorhanden ist, rufen Sie `list` erneut auf und setzen Sie `cursor` auf diesen Wert. Ein über mehrere Seiten geteilter Thread trägt `repliesFrom` und `repliesTotal`; seine späteren Teile tragen nur `comment`, `state`, `commentGen`, `continued: true` und die nächsten Antworten. Ein Text, der als JSON-Text auf keine Seite passt (nur stark maskierter Text), kommt als `bodyBase64`, seine UTF-8-Bytes in Base64, anstelle von `body`. Ein Cursor, dessen Thread gelöscht wurde oder der für ein anderes Dokument ausgegeben wurde, wird mit `STALE_COMMENT` abgelehnt: Listen Sie ohne Cursor erneut auf.
 
 ### `reply`
 
@@ -393,7 +396,7 @@ Fügt dem Thread eine Antwort hinzu. VMark vergibt die Antwort-ID selbst, daher 
 
 Markiert den Thread als bearbeitet. Ob er aufgelöst wird, bleibt dem Nutzer überlassen.
 
-`comments.reply` und `comments.mark_addressed` nennen beide die `commentGen` des Threads, wie `list` sie geliefert hat. Sie werden abgewiesen, ohne etwas zu ändern: mit `STALE_COMMENT`, wenn sich der Thread seitdem geändert hat (erneut auflisten), mit `INVALID_COMMENT`, wenn die Kommentar-ID fehlerhaft ist oder keinen Kommentar dieses Dokuments bezeichnet, mit `COMMENT_NOT_ALLOWED`, wenn der Thread aufgelöst oder gelöscht ist, mit `COMMENT_LIMIT`, wenn der Thread zu viele Antworten hat oder der Text zu lang ist, sowie mit den Journal-Abweisungen `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` und `INVALID_TEXT`.
+`comments.reply` und `comments.mark_addressed` nennen beide die `commentGen` des Threads, wie `list` sie geliefert hat. Sie werden abgewiesen, ohne etwas zu ändern: mit `STALE_COMMENT`, wenn sich der Thread seitdem geändert hat oder gelöscht wurde (erneut auflisten), mit `INVALID_COMMENT`, wenn die Kommentar-ID fehlerhaft ist oder keinen Kommentar dieses Dokuments bezeichnet, mit `COMMENT_NOT_ALLOWED`, wenn der Thread aufgelöst ist, mit `COMMENT_LIMIT`, wenn der Thread zu viele Antworten hat, der Text zu lang ist oder der Thread sich nicht mehr ändern kann, sowie mit den Journal-Abweisungen `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` und `INVALID_TEXT`.
 
 Um anzugeben, dass eine Bearbeitung Kommentare beantwortet, übergib ihre IDs als `addresses` an `document.write`, `document.transform`, `workflow.apply_patch` oder `selection.set`. Die Verknüpfung wird mit der Revision gespeichert und im Verlauf des Dokuments angezeigt (ein später gelöschter Kommentar erscheint als gelöschter Kommentar); sie verändert keinen Thread. Mehr als 64 IDs, eine doppelte ID oder eine unbekannte, gelöschte, aufgelöste oder zu einem anderen Dokument gehörende ID wird mit `INVALID_ADDRESSES` abgewiesen, und nichts ändert sich.
 
@@ -636,6 +639,8 @@ Es treten zwei Fehlerformen auf:
 | `APPROVAL_REQUIRED` | Hülle | `save_as` an einen neuen Ort, während **Speichern an neuem Ort und Genie-Ergebnisse automatisch genehmigen** aus ist; `save_as` an einen Pfad, an dem bereits eine andere Datei als die des Tabs liegt; oder `open_workspace` wartet auf die Bestätigung des Benutzers oder darauf, dass er den Ordner im Ordnerdialog von VMark auswählt |
 | `BUSY` | Hülle | `open_workspace` konnte nicht fortfahren: Ein anderer Ordnerdialog ist offen oder in diesem Fenster läuft ein Arbeitsbereichswechsel; die Bestätigung bleibt erhalten — erneut versuchen. Oder `document.write`, `document.transform` bzw. `selection.set` kam an, während der Benutzer mit einer Eingabemethode Text komponierte; nichts wurde geändert — kurz darauf erneut versuchen |
 | `JOURNAL_BUSY` | Hülle | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` kam an, während ein anderer Schreibvorgang in dasselbe Dokument festgehalten wurde; nichts wurde geändert — kurz darauf erneut versuchen |
+| `WRITE_BUSY` | Zeichenkette | Ein schreibender Aufruf (`document.write` / `document.transform`, `selection.set`, `workflow.apply_patch`, `comments.reply` / `mark_addressed`, `coherence_resolve`, …) wartete 3 s hinter einem anderen Schreibvorgang, ohne an die Reihe zu kommen; er wurde nicht ausgeführt — erneut versuchen |
+| `TIMEOUT` | Zeichenkette | Ein Aufruf von `coherence` oder `coherence_resolve` wurde nicht innerhalb von 20 s fertig. Bei einem Schreibvorgang (`edges`, `resolve`) läuft er noch, und sein Ergebnis ist unbekannt — lesen Sie den aktuellen Stand, bevor Sie es erneut versuchen |
 | `STALE_PARENT` | Hülle | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: Ein anderes Fenster hat das Dokument nach dem letzten Schreibvorgang dieses Tabs geschrieben; nichts wurde geändert — neu lesen und erneut versuchen |
 | `JOURNAL_DEGRADED` | Hülle | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: Ein früherer Journaleintrag für dieses Dokument wartet noch auf das Speichern; nichts wurde geändert — in ein paar Sekunden erneut versuchen |
 | `JOURNAL_UNAVAILABLE` | Hülle | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: Das Agenten-Bearbeitungsjournal läuft nicht oder kann nichts festhalten; nichts wurde geändert |

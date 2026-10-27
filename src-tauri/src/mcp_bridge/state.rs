@@ -41,6 +41,18 @@ pub(super) const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::fro
 pub(super) const REQUEST_TIMEOUT_TOTAL: std::time::Duration =
     REQUEST_TIMEOUT.saturating_add(REQUEST_TIMEOUT);
 
+/// How long a write waits for the write lock before it is refused.
+///
+/// The wait was unbounded: a write queued behind another write that hung on
+/// its window could wait out that write's 20 s and then spend its own 20 s,
+/// past the sidecar's request timeout, so the client reported a failure for a
+/// write VMark went on to apply. Bounded, a queued write is refused WRITE_BUSY
+/// before it is registered or emitted — definitely not applied — and every
+/// answer lands within this wait plus [`REQUEST_TIMEOUT_TOTAL`], the worst
+/// case the sidecar's request timeout must exceed (`BRIDGE_WORST_CASE_MS`
+/// restates the sum).
+pub(crate) const WRITE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Connected client information.
 pub(crate) struct ClientConnection {
     pub tx: mpsc::Sender<String>,
@@ -77,6 +89,10 @@ pub(crate) struct BridgeState {
     /// send workspace-scoped requests to the owning window, not just the
     /// focused one.
     pub window_workspaces: HashMap<String, String>,
+    /// Window label → the tab ids that window holds. Each window's webview
+    /// publishes its own (`mcp_bridge_set_window_tabs`), so a request naming a
+    /// tab routes to the window that can answer it.
+    pub window_tabs: HashMap<String, Vec<String>>,
 }
 
 impl Default for BridgeState {
@@ -89,6 +105,7 @@ impl Default for BridgeState {
             pending: HashMap::new(),
             next_client_id: 1,
             window_workspaces: HashMap::new(),
+            window_tabs: HashMap::new(),
         }
     }
 }
@@ -219,8 +236,8 @@ pub(crate) fn generate_auth_token() -> String {
 
 /// Check if an operation is read-only.
 ///
-/// ONLY current `vmark.*` operations are classified (the pruned 5-tool
-/// surface; wire types in server/mcp/src/bridge/core-types.ts). Everything
+/// ONLY current `vmark.*` operations are classified (the operations the
+/// sidecar's tools send; wire types in server/mcp/src/bridge/core-types.ts). Everything
 /// else — including the pre-pruning legacy names (`document.getContent`,
 /// `tabs.list`, …) — falls through to write-class (fail closed): the
 /// frontend dispatcher only accepts `vmark.*` and rejects the rest as

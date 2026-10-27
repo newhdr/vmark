@@ -18,7 +18,7 @@ import { bindJournalDocument } from "@/services/agentJournal/documentBinding";
 import { registerUnsavedProvenanceSource, resetUnsavedProvenanceSources } from "@/services/agentJournal/unsavedProvenance";
 import type { NamedPayload } from "@/services/agentJournal/provenance/session";
 import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
-import { TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
+import { TEST_WRITE_CONTEXT, testAdmittedReads } from "@/test/mcpAttributionFixture";
 import { runJournaledEdit } from "../journaledEdit";
 import { resolveTab, type GuardedTab } from "../tabGuard";
 
@@ -134,6 +134,7 @@ describe("runJournaledEdit answers within the bridge's total", () => {
       requireFocus: false,
       tool: "document.write",
       context: TEST_WRITE_CONTEXT,
+      reads: testAdmittedReads(),
       apply: () => {
         useDocumentStore.getState().setEditorContent(TAB, "applied");
         return { postimage: "applied", value: 1 };

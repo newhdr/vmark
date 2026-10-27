@@ -32,12 +32,23 @@
 import type { Mark, Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 
-/** Two private-use code points that do not occur in `text`, or `null` when none are free. */
+const PUA_FIRST = 0xe000;
+const PUA_LAST = 0xf8ff;
+
+/**
+ * Two private-use code points that do not occur in `text`, or `null` when
+ * none are free. One pass marks the ones taken: a search per candidate would
+ * scan the whole document thousands of times.
+ */
 function pickSentinels(text: string): [string, string] | null {
+  const taken = new Uint8Array(PUA_LAST - PUA_FIRST + 1);
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c >= PUA_FIRST && c <= PUA_LAST) taken[c - PUA_FIRST] = 1;
+  }
   const free: string[] = [];
-  for (let c = 0xe000; c <= 0xf8ff && free.length < 2; c++) {
-    const ch = String.fromCharCode(c);
-    if (!text.includes(ch)) free.push(ch);
+  for (let c = 0; c < taken.length && free.length < 2; c++) {
+    if (taken[c] === 0) free.push(String.fromCharCode(PUA_FIRST + c));
   }
   return free.length === 2 ? [free[0], free[1]] : null;
 }

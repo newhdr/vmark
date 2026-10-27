@@ -25,7 +25,11 @@
  *     doc-level revision catches keystrokes; pure cursor movement is
  *     not arbitrated by the server.
  *   - `set` refuses BUSY, changing nothing, while the user is composing with
- *     an input method in the focused editor; `get` is never refused.
+ *     an input method in the focused editor; `get` is not refused for it.
+ *   - Both refuse BUSY while the focused editor is still mounting
+ *     (`SelectionSurface.mounting`): its selection is a placeholder, not one
+ *     the user placed. One that starts mounting during a set's prepare moves
+ *     the write target's selection key, so the apply aborts (selection).
  *   - After an edit the mounted editor is flushed at once, and the revision
  *     is bumped last, so the revision returned is still the document's
  *     current one after the editor settles (`liveEditor.ts`).
@@ -62,15 +66,24 @@ import type { McpWriteContext } from "@/services/mcpBridge/writeContext";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
 import { respond } from "@/services/mcpBridge/utils";
 import { wrapHandler } from "./wrapHandler";
+import { flushAllWysiwygNow } from "@/utils/wysiwygFlush";
 import { flushLiveEditors } from "./liveEditor";
 import { readOperationArgs, readOperationArgsChecked } from "./readOperationArgs";
-import { requireAddresses } from "./writeAddresses";
+import { requireWriteArgs } from "./writeAddresses";
 import { resolveSelectionSurface, type SelectionSurface } from "./selectionSurface";
 import { requireCurrentRevision, requireTab, structuredError, type GuardedTab } from "./tabGuard";
 import { runJournaledEdit } from "./journaledEdit";
+import { withAdmittedReads } from "./admittedReads";
 import { invalidTextError } from "./journalV2Error";
+import type { V2Error } from "./types";
 import { isWellFormedText } from "@/services/agentJournal/wellFormedText";
 import { wysiwygApplyCertificate, type WysiwygApplyCapture } from "@/services/agentJournal/collectors/wysiwyg/wysiwygCertificate";
+
+/**
+ * The refusal while the focused editor is still mounting: its selection is a
+ * placeholder the user never placed. Transient, so BUSY.
+ */
+const MOUNTING: V2Error = { error: "BUSY", message: "The editor is still loading this document; retry shortly" };
 
 /**
  * Handle `vmark.selection.get`. Args: `{tabId?: string}`.
@@ -86,6 +99,10 @@ export async function handleSelectionGet(
     const surface = resolveSelectionSurface(tab.tabId);
     if ("error" in surface) {
       await structuredError(id, surface);
+      return;
+    }
+    if (surface.mounting()) {
+      await structuredError(id, MOUNTING);
       return;
     }
 
@@ -122,8 +139,9 @@ function applySelectionEdit(tabId: string, content: string, seen: (capture: Wysi
     surface.replaceSelection(content);
     // Flush the mounted editor NOW: the store then holds its serialization
     // and the editor knows it, so its content sync does not parse and load
-    // the same document again.
-    flushLiveEditors();
+    // the same document again. Best-effort: the mirror below brings the store
+    // to the editor's text even when this flush fails.
+    flushAllWysiwygNow();
   });
   seen(capture);
   // Mirror the editor into the store. After a flush this is the same text;
@@ -166,7 +184,7 @@ interface PreparedSelectionSet {
 async function prepareSelectionSet(id: string, args: Record<string, unknown>): Promise<PreparedSelectionSet | null> {
   const checked = readOperationArgsChecked("vmark.selection.set", args);
   const { wire } = checked;
-  const addressed = await requireAddresses(id, checked);
+  const addressed = await requireWriteArgs(id, checked);
   if (!addressed) return null;
   if (wire.content === undefined) {
     await structuredError(id, { error: "INTERNAL", message: "content must be a string" });
@@ -182,7 +200,7 @@ async function prepareSelectionSet(id: string, args: Record<string, unknown>): P
   if (!(await requireCurrentRevision(id, tab.tabId, wire.expected_revision))) return null;
   // Asked after the last await, so nothing can start a composition between
   // the answer and the replacement.
-  const refusal = surface.writeRefusal() ?? (isWellFormedText(wire.content) ? null : invalidTextError());
+  const refusal = (surface.mounting() ? MOUNTING : surface.writeRefusal()) ?? (isWellFormedText(wire.content) ? null : invalidTextError());
   if (refusal) {
     await structuredError(id, refusal);
     return null;
@@ -205,7 +223,7 @@ export async function handleSelectionSet(
   args: Record<string, unknown>,
   context: McpWriteContext,
 ): Promise<void> {
-  return wrapHandler(id, async () => {
+  return wrapHandler(id, () => withAdmittedReads(context, async (reads) => {
     const prepared = await prepareSelectionSet(id, args);
     if (!prepared) return;
     const { tab, surface, content, addressed } = prepared;
@@ -219,7 +237,7 @@ export async function handleSelectionSet(
     }
     const contentBefore = surface.documentText();
     // The journal's preimage is the store's buffer, flushed from the editor.
-    flushLiveEditors();
+    flushLiveEditors(tab.tabId);
     const preimage = useDocumentStore.getState().documents[tab.tabId]?.content ?? contentBefore;
     // Source offsets name preimage positions only when the editor holds the preimage.
     const change = contentBefore === preimage ? surface.exactChange(content) : null;
@@ -241,6 +259,7 @@ export async function handleSelectionSet(
       ...(change ? { change } : {}),
       ...(certify ? { certify } : {}),
       context,
+      reads,
       apply: () => applySelectionEdit(tab.tabId, content, (seen) => (capture = seen)),
       recover: () => recoverSelectionEdit(tab.tabId),
     });
@@ -250,5 +269,5 @@ export async function handleSelectionSet(
       success: true,
       data: { revision: outcome.value, replaced_chars: selectedText.length, applied: true, durable: outcome.durable },
     });
-  });
+  }));
 }

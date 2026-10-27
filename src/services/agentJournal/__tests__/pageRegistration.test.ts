@@ -1,4 +1,4 @@
-// WI-AL2.2g — page registration is lazy, contained and identity-checked: no journal call or timer at import; a mint failure disables the journal with zero invokes and a working bootstrap; the register reply's echo and bind are checked and a mismatch caches nothing; a timed-out or transport-failed register keeps the same identity; a stale answer naming the current pair drains every holder, then registers a fresh identity with replaces = that pair; a non-persisted pagehide closes registration; a persisted one bumps the lifetime and re-registers fresh with replaces
+// WI-AL2.2g — page registration is lazy, contained and identity-checked: no journal call or timer at import; a mint failure disables the journal with zero invokes and a working bootstrap; the register reply's echo and bind are checked and a mismatch caches nothing; a timed-out or transport-failed register keeps the same identity; a stale answer naming the current pair drains every holder, then registers a fresh identity with replaces = that pair; a non-persisted pagehide closes registration; a persisted one bumps the lifetime and re-registers fresh with replaces, including the pair of a registration that answered only after the pagehide (never orphaned on the journal)
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -191,6 +191,25 @@ describe("page registration — stale answers and page lifecycle", () => {
     expect(wire.argsOf(REGISTER).at(-1)).toEqual({
       pageIdentity: fresh.pageIdentity,
       replaces: { pageIdentity: old.pageIdentity, webviewGeneration: old.webviewGeneration },
+    });
+  });
+
+  it("a registration answered after a persisted pagehide is replaced, not orphaned", async () => {
+    const wire = scriptWire();
+    let answer!: () => void;
+    wire.on(REGISTER, (args) => new Promise((resolve) => (answer = () => resolve(registered(args.pageIdentity, "7")))));
+    const first = acquirePage(yes);
+    await vi.waitFor(() => expect(wire.argsOf(REGISTER)).toHaveLength(1));
+    const late = wire.argsOf(REGISTER)[0].pageIdentity;
+    pagehide(true);
+    answer();
+    await expect(first).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });
+    wire.on(REGISTER, (args) => registered(args.pageIdentity, "8"));
+    const fresh = await acquirePage(yes);
+    expect(fresh.pageIdentity).not.toBe(late);
+    expect(wire.argsOf(REGISTER).at(-1)).toEqual({
+      pageIdentity: fresh.pageIdentity,
+      replaces: { pageIdentity: late, webviewGeneration: "7" },
     });
   });
 });

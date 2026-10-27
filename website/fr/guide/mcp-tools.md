@@ -392,8 +392,11 @@ Lit les commentaires de relecture de l'utilisateur sur un document et y répond.
 | Paramètre | Type | Requis |
 |-----------|------|--------|
 | `tabId` | string | Non |
+| `cursor` | string | Non |
 
-Renvoie `{doc, generation, threads}`. Chaque fil porte son `id`, son `state` (`open`, `addressed`, `resolved` ou `reopened`), son `commentGen`, le texte cité auquel il est ancré et ses réponses.
+Renvoie `{doc, generation, threads, nextCursor?}`, le fil le plus ancien en premier. Chaque fil porte son identifiant `comment`, son `state` (`open`, `addressed`, `resolved` ou `reopened`), son `commentGen`, le texte cité auquel il est ancré et ses réponses.
+
+Une longue liste arrive par pages, chacune assez petite pour arriver entière. Tant que `nextCursor` est présent, rappelez `list` avec `cursor` égal à cette valeur. Un fil réparti sur plusieurs pages porte `repliesFrom` et `repliesTotal` ; ses parties suivantes ne portent que `comment`, `state`, `commentGen`, `continued: true` et les réponses suivantes. Un corps trop long pour toute page en texte JSON (seulement un texte très échappé) arrive en `bodyBase64`, ses octets UTF-8 en base64, à la place de `body`. Un curseur dont le fil a été supprimé, ou un curseur émis pour un autre document, est refusé avec `STALE_COMMENT` : relancez la liste sans curseur.
 
 ### `reply`
 
@@ -416,7 +419,7 @@ Ajoute une réponse au fil. VMark attribue lui-même l'identifiant de la répons
 
 Marque le fil comme traité. Le résoudre reste la décision de l'utilisateur.
 
-`comments.reply` et `comments.mark_addressed` indiquent tous deux le `commentGen` du fil tel que `list` l'a renvoyé. Elles sont refusées, sans rien changer, avec `STALE_COMMENT` quand le fil a changé depuis (relistez), `INVALID_COMMENT` quand l'identifiant est mal formé ou ne désigne aucun commentaire de ce document, `COMMENT_NOT_ALLOWED` quand le fil est résolu ou supprimé, `COMMENT_LIMIT` quand le fil a trop de réponses ou que le texte est trop long, et avec les refus du journal `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` et `INVALID_TEXT`.
+`comments.reply` et `comments.mark_addressed` indiquent tous deux le `commentGen` du fil tel que `list` l'a renvoyé. Elles sont refusées, sans rien changer, avec `STALE_COMMENT` quand le fil a changé ou a été supprimé depuis (relistez), `INVALID_COMMENT` quand l'identifiant est mal formé ou ne désigne aucun commentaire de ce document, `COMMENT_NOT_ALLOWED` quand le fil est résolu, `COMMENT_LIMIT` quand le fil a trop de réponses, que le texte est trop long ou que le fil ne peut plus changer, et avec les refus du journal `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` et `INVALID_TEXT`.
 
 Pour indiquer qu'une modification répond à des commentaires, passez leurs identifiants dans `addresses` à `document.write`, `document.transform`, `workflow.apply_patch` ou `selection.set`. Le lien est enregistré avec la révision et affiché dans l'historique du document (un commentaire supprimé plus tard apparaît comme commentaire supprimé)&nbsp;; il ne fait avancer aucun fil. Plus de 64 identifiants, un identifiant répété, ou un identifiant inconnu, supprimé, résolu ou d'un autre document est refusé avec `INVALID_ADDRESSES`, et rien ne change.
 
@@ -891,6 +894,8 @@ Deux formes d'erreurs apparaissent&nbsp;:
 | `APPROVAL_REQUIRED` | enveloppe | `save_as` vers un nouvel emplacement alors que **Approuver automatiquement les enregistrements vers un nouvel emplacement et les résultats des génies** est désactivé ; `save_as` vers un chemin qui contient déjà un autre fichier que celui de l'onglet ; ou `open_workspace` attend l'approbation de l'utilisateur, ou qu'il choisisse le dossier dans le sélecteur de dossiers de VMark |
 | `BUSY` | enveloppe | `open_workspace` n'a pas pu continuer : une autre boîte de dialogue de dossier est ouverte, ou un changement d'espace de travail est en cours dans cette fenêtre ; l'approbation est conservée — réessayez. Ou bien `document.write`, `document.transform` ou `selection.set` est arrivé pendant que l'utilisateur composait du texte avec une méthode de saisie ; rien n'a été modifié — réessayez peu après |
 | `JOURNAL_BUSY` | enveloppe | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` est arrivé pendant qu'une autre écriture dans le même document était consignée ; rien n'a été modifié — réessayez peu après |
+| `WRITE_BUSY` | chaîne | Un appel d'écriture (`document.write` / `document.transform`, `selection.set`, `workflow.apply_patch`, `comments.reply` / `mark_addressed`, `coherence_resolve`, …) a attendu 3 s derrière une autre écriture sans obtenir son tour ; il n'a pas été appliqué — réessayez |
+| `TIMEOUT` | chaîne | Un appel à `coherence` ou `coherence_resolve` ne s'est pas terminé en 20 s. Pour une écriture (`edges`, `resolve`), il est toujours en cours et son résultat est inconnu — lisez l'état actuel avant de réessayer |
 | `STALE_PARENT` | enveloppe | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` : une autre fenêtre a écrit le document après la dernière écriture de cet onglet ; rien n'a été modifié — relisez puis réessayez |
 | `JOURNAL_DEGRADED` | enveloppe | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` : une entrée de journal antérieure pour ce document attend encore d'être enregistrée ; rien n'a été modifié — réessayez dans quelques secondes |
 | `JOURNAL_UNAVAILABLE` | enveloppe | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` : le journal des modifications d'agents ne fonctionne pas ou ne peut rien consigner ; rien n'a été modifié |

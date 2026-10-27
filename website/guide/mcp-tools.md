@@ -391,8 +391,11 @@ Read and answer the user's review comments on a document. Resolving, reopening a
 | Parameter | Type | Required |
 |-----------|------|----------|
 | `tabId` | string | No |
+| `cursor` | string | No |
 
-Returns `{doc, generation, threads}`. Each thread carries its `id`, its `state` (`open`, `addressed`, `resolved` or `reopened`), its `commentGen`, the quoted text it is anchored to, and its replies.
+Returns `{doc, generation, threads, nextCursor?}`, oldest thread first. Each thread carries its `comment` id, its `state` (`open`, `addressed`, `resolved` or `reopened`), its `commentGen`, the quoted text it is anchored to, and its replies.
+
+A long list comes in pages, each small enough to arrive whole. While `nextCursor` is present, call `list` again with `cursor` set to it. A thread split across pages carries `repliesFrom` and `repliesTotal`; its later parts carry only `comment`, `state`, `commentGen`, `continued: true` and the next replies. A body too long for any page as JSON text (only heavily escaped text) comes as `bodyBase64`, its UTF-8 bytes in base64, in place of `body`. A cursor whose thread was deleted, or one issued for another document, is refused with `STALE_COMMENT`: list again without one.
 
 ### `reply`
 
@@ -415,7 +418,7 @@ Adds a reply to the thread. VMark mints the reply id itself, so a retried call i
 
 Marks the thread addressed. Whether to resolve it stays with the user.
 
-`comments.reply` and `comments.mark_addressed` both name the thread's `commentGen` as `list` returned it. They are refused, changing nothing, with `STALE_COMMENT` when the thread changed since (list again), `INVALID_COMMENT` when the comment id is malformed or names no comment of this document, `COMMENT_NOT_ALLOWED` when the thread is resolved or deleted, `COMMENT_LIMIT` when the thread has too many replies or the body is too long, and the journal refusals `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` and `INVALID_TEXT`.
+`comments.reply` and `comments.mark_addressed` both name the thread's `commentGen` as `list` returned it. They are refused, changing nothing, with `STALE_COMMENT` when the thread changed or was deleted since (list again), `INVALID_COMMENT` when the comment id is malformed or names no comment of this document, `COMMENT_NOT_ALLOWED` when the thread is resolved, `COMMENT_LIMIT` when the thread has too many replies, the body is too long or the thread can change no more, and the journal refusals `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` and `INVALID_TEXT`.
 
 To say an edit answers comments, pass their ids as `addresses` to `document.write`, `document.transform`, `workflow.apply_patch` or `selection.set`. The link is recorded with the revision and shown in the document's history (a comment deleted later shows as a deleted comment); it moves no thread. More than 64 ids, a repeated id, or an id that is unknown, deleted, resolved or of another document is refused with `INVALID_ADDRESSES`, and nothing changes.
 
@@ -849,6 +852,8 @@ Two error shapes appear:
 | `APPROVAL_REQUIRED` | envelope | `save_as` to a new location while **Auto-approve saves to a new location and genie results** is off; `save_as` to a path that already holds a file other than the tab's own; or `open_workspace` waiting for the user's approval, or for them to choose the folder in VMark's folder dialog |
 | `BUSY` | envelope | `open_workspace` could not proceed: another folder dialog is open, or a workspace switch is running in that window; the approval is kept — retry. Or `document.write`, `document.transform` or `selection.set` arrived while the user was composing text with an input method; nothing was changed — retry shortly |
 | `JOURNAL_BUSY` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` arrived while another write to the same document was being recorded; nothing was changed — retry shortly |
+| `WRITE_BUSY` | string | A write-class call (`document.write` / `document.transform`, `selection.set`, `workflow.apply_patch`, `comments.reply` / `mark_addressed`, `coherence_resolve`, …) waited 3 s behind another write without its turn; it was not applied — retry |
+| `TIMEOUT` | string | A `coherence` or `coherence_resolve` call did not finish within 20 s. For a write (`edges`, `resolve`) it is still running and its outcome is unknown — read the current state before retrying |
 | `STALE_PARENT` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: another window wrote the document after this tab last did; nothing was changed — re-read and retry |
 | `JOURNAL_DEGRADED` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: an earlier journal record for this document is still waiting to be stored; nothing was changed — retry in a few seconds |
 | `JOURNAL_UNAVAILABLE` | envelope | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: the agent edit journal is not running or cannot record; nothing was changed |

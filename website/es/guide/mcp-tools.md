@@ -386,8 +386,11 @@ Lee y responde los comentarios de revisión del usuario sobre un documento. Reso
 | Parámetro | Tipo | Requerido |
 |-----------|------|-----------|
 | `tabId` | string | No |
+| `cursor` | string | No |
 
-Devuelve `{doc, generation, threads}`. Cada hilo lleva su `id`, su `state` (`open`, `addressed`, `resolved` o `reopened`), su `commentGen`, el texto citado al que está anclado y sus respuestas.
+Devuelve `{doc, generation, threads, nextCursor?}`, con el hilo más antiguo primero. Cada hilo lleva su id `comment`, su `state` (`open`, `addressed`, `resolved` o `reopened`), su `commentGen`, el texto citado al que está anclado y sus respuestas.
+
+Una lista larga llega en páginas, cada una lo bastante pequeña para llegar completa. Mientras exista `nextCursor`, vuelve a llamar a `list` con `cursor` igual a ese valor. Un hilo dividido entre páginas lleva `repliesFrom` y `repliesTotal`; sus partes posteriores solo llevan `comment`, `state`, `commentGen`, `continued: true` y las siguientes respuestas. Un cuerpo demasiado largo para cualquier página como texto JSON (solo un texto con muchos escapes) llega como `bodyBase64`, sus bytes UTF-8 en base64, en lugar de `body`. Un cursor cuyo hilo se eliminó, o uno emitido para otro documento, se rechaza con `STALE_COMMENT`: vuelve a listar sin cursor.
 
 ### `reply`
 
@@ -410,7 +413,7 @@ Añade una respuesta al hilo. VMark genera el id de la respuesta, así que una l
 
 Marca el hilo como atendido. Resolverlo sigue siendo decisión del usuario.
 
-`comments.reply` y `comments.mark_addressed` indican ambos el `commentGen` del hilo tal como lo devolvió `list`. Se rechazan sin cambiar nada con `STALE_COMMENT` cuando el hilo cambió desde entonces (vuelve a listar), `INVALID_COMMENT` cuando el id del comentario está mal formado o no corresponde a ningún comentario de este documento, `COMMENT_NOT_ALLOWED` cuando el hilo está resuelto o eliminado, `COMMENT_LIMIT` cuando el hilo tiene demasiadas respuestas o el texto es demasiado largo, y con los rechazos del diario `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` e `INVALID_TEXT`.
+`comments.reply` y `comments.mark_addressed` indican ambos el `commentGen` del hilo tal como lo devolvió `list`. Se rechazan sin cambiar nada con `STALE_COMMENT` cuando el hilo cambió o se eliminó desde entonces (vuelve a listar), `INVALID_COMMENT` cuando el id del comentario está mal formado o no corresponde a ningún comentario de este documento, `COMMENT_NOT_ALLOWED` cuando el hilo está resuelto, `COMMENT_LIMIT` cuando el hilo tiene demasiadas respuestas, el texto es demasiado largo o el hilo ya no puede cambiar más, y con los rechazos del diario `JOURNAL_BUSY`, `JOURNAL_DEGRADED`, `JOURNAL_UNAVAILABLE` e `INVALID_TEXT`.
 
 Para indicar que una edición responde a comentarios, pasa sus ids como `addresses` a `document.write`, `document.transform`, `workflow.apply_patch` o `selection.set`. El vínculo se guarda con la revisión y se muestra en el historial del documento (un comentario eliminado después aparece como comentario eliminado); no mueve ningún hilo. Más de 64 ids, un id repetido o un id desconocido, eliminado, resuelto o de otro documento se rechaza con `INVALID_ADDRESSES`, y nada cambia.
 
@@ -848,6 +851,8 @@ Aparecen dos formas de error:
 | `APPROVAL_REQUIRED` | sobre | `save_as` a una ubicación nueva mientras **Aprobar automáticamente guardados en una ubicación nueva y resultados de genios** está desactivado; `save_as` a una ruta que ya contiene un archivo distinto del de la pestaña; o `open_workspace` espera la aprobación del usuario, o que elija la carpeta en el diálogo de carpetas de VMark |
 | `BUSY` | sobre | `open_workspace` no pudo continuar: hay otro diálogo de carpetas abierto o un cambio de espacio de trabajo en curso en esa ventana; la aprobación se conserva — reintenta. O bien `document.write`, `document.transform` o `selection.set` llegó mientras el usuario componía texto con un método de entrada; no se cambió nada — reintenta en breve |
 | `JOURNAL_BUSY` | sobre | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` llegó mientras se registraba otra escritura en el mismo documento; no se cambió nada — reintenta en breve |
+| `WRITE_BUSY` | cadena | Una llamada de escritura (`document.write` / `document.transform`, `selection.set`, `workflow.apply_patch`, `comments.reply` / `mark_addressed`, `coherence_resolve`, …) esperó 3 s detrás de otra escritura sin que le llegara el turno; no se aplicó — reintenta |
+| `TIMEOUT` | cadena | Una llamada a `coherence` o `coherence_resolve` no terminó en 20 s. Si es una escritura (`edges`, `resolve`), sigue en curso y su resultado es desconocido — lee el estado actual antes de reintentar |
 | `STALE_PARENT` | sobre | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: otra ventana escribió el documento después de la última escritura de esta pestaña; no se cambió nada — vuelve a leer y reintenta |
 | `JOURNAL_DEGRADED` | sobre | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: un registro anterior del diario para este documento aún espera guardarse; no se cambió nada — reintenta en unos segundos |
 | `JOURNAL_UNAVAILABLE` | sobre | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`: el diario de ediciones de agentes no está en marcha o no puede registrar; no se cambió nada |

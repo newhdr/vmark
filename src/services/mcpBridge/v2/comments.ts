@@ -8,12 +8,12 @@
  *     record names the agent; there is no resolve, reopen or delete, which
  *     are the person's.
  *   - The document is the tab's journal key (`docKeyFor`), as the comment
- *     panel keys it; the list anchors the threads in the tab's flushed text.
+ *     panel keys it — an untitled tab by the window that holds it; the list anchors the threads in the tab's flushed text.
  *   - A malformed comment id or `expectedCommentGen` is refused
  *     INVALID_COMMENT before any journal call, as is the journal's own
  *     INVALID_REQUEST (an unknown comment, or one of another document).
  *     STALE_COMMENT, COMMENT_NOT_ALLOWED and COMMENT_LIMIT keep their token;
- *     a full comment store reads as COMMENT_LIMIT. Anything else is answered
+ *     a full comment store or an exhausted thread reads as COMMENT_LIMIT. Anything else is answered
  *     as a journaled write's refusal is (`journalV2Error.ts`).
  *
  * @coordinates-with services/agentJournal/comments/agentCommentClient.ts — the commands
@@ -22,7 +22,6 @@
  */
 
 import { respond } from "@/services/mcpBridge/utils";
-import { getCurrentWindowLabel } from "@/services/persistence/workspaceStorage";
 import { docKeyFor } from "@/services/agentJournal/documentIdentity";
 import { isDecimal } from "@/services/agentJournal/journalIpc";
 import { JournalRefusal } from "@/services/agentJournal/journalRefusal";
@@ -42,12 +41,14 @@ import type { V2Error } from "./types";
 function commentRefusalError(refusal: JournalRefusal): V2Error {
   const code = refusal.journalCode;
   if (code === "STALE_COMMENT" || code === "COMMENT_NOT_ALLOWED" || code === "COMMENT_LIMIT") return { error: code, message: refusal.message };
-  if (code === "COMMENT_STORAGE_FULL") return { error: "COMMENT_LIMIT", message: refusal.message };
+  // A full comment store and a thread whose change counter is used up are
+  // limits too, and permanent: retrying the same change cannot succeed.
+  if (code === "COMMENT_STORAGE_FULL" || code === "COMMENT_STATE_EXHAUSTED") return { error: "COMMENT_LIMIT", message: refusal.message };
   if (code === "INVALID_REQUEST") return { error: "INVALID_COMMENT", message: refusal.message };
   return journalRefusalError(refusal);
 }
 
-const docKeyOf = (tab: GuardedTab) => docKeyFor(tab, getCurrentWindowLabel());
+const docKeyOf = (tab: GuardedTab) => docKeyFor(tab, tab.windowLabel);
 
 /** Run `call`, answering its result or its journal refusal. */
 async function answer(id: string, call: () => Promise<unknown>): Promise<void> {

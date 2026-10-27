@@ -1,4 +1,4 @@
-// WI-AL3.3 — the agent's comment tools on the bridge: vmark.comments.list, reply and mark_addressed reach only the comment_agent_ commands for the tab's document key (no resolve, reopen or delete is routed), a refusal keeps its token and a malformed comment id is refused before any journal call; document.write, document.transform, selection.set and workflow.apply_patch forward `addresses` to the prepare, send none when absent, refuse a malformed set as INVALID_ADDRESSES before any prepare, and answer the journal's addresses refusal as INVALID_ADDRESSES with nothing changed
+// WI-AL3.3 — the agent's comment tools on the bridge: vmark.comments.list, reply and mark_addressed reach only the comment_agent_ commands for the tab's document key — an untitled tab keyed by the window that holds it, not the focused one (no resolve, reopen or delete is routed), a refusal keeps its token and a malformed comment id is refused before any journal call; document.write, document.transform, selection.set and workflow.apply_patch forward `addresses` to the prepare, send none when absent, refuse a malformed set as INVALID_ADDRESSES before any prepare, and answer the journal's addresses refusal as INVALID_ADDRESSES with nothing changed
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { EditorState as CMState } from "@codemirror/state";
 import { EditorView as CMView } from "@codemirror/view";
@@ -134,10 +134,27 @@ describe("vmark.comments.*", () => {
     expect(payloadOf("comment_agent_mark_addressed")).toEqual({ docKey: "tab:main/t1", comment: "c3", expectedCommentGen: "2" });
   });
 
+  it("an explicit untitled tab in another window is keyed by its own window, for list, reply and mark_addressed", async () => {
+    const tab = (id: string): DocumentTab => ({ kind: "document", id, filePath: null, title: id, isPinned: false, formatId: "markdown" });
+    useTabStore.setState({ tabs: { main: [tab("t1")], w2: [tab("t2")] }, activeTabId: { main: "t1", w2: "t2" }, untitledCounter: 0 });
+    useDocumentStore.getState().initDocument("t1", "focused\n", null);
+    useDocumentStore.getState().initDocument("t2", "other window\n", null);
+    answerComment("comment_agent_list", async () => ({ doc: null, generation: "0", threads: [] }));
+    await handleCommentsList("l2", { tabId: "t2" });
+    expect(payloadOf("comment_agent_list")).toEqual({ docKey: "tab:w2/t2", text: "other window\n" });
+    answerComment("comment_agent_reply", (args) => answerPrepare(args, async () => ({})));
+    await handleCommentsReply("r3", { tabId: "t2", commentId: "c3", body: "ok", expectedCommentGen: "2" });
+    expect(payloadOf("comment_agent_reply")).toMatchObject({ docKey: "tab:w2/t2" });
+    answerComment("comment_agent_mark_addressed", async () => ({}));
+    await handleCommentsMarkAddressed("m4", { tabId: "t2", commentId: "c3", expectedCommentGen: "2" });
+    expect(payloadOf("comment_agent_mark_addressed")).toMatchObject({ docKey: "tab:w2/t2" });
+  });
+
   it.each([
     ["STALE_COMMENT", "STALE_COMMENT"],
     ["COMMENT_NOT_ALLOWED", "COMMENT_NOT_ALLOWED"],
     ["COMMENT_STORAGE_FULL", "COMMENT_LIMIT"],
+    ["COMMENT_STATE_EXHAUSTED", "COMMENT_LIMIT"],
     ["INVALID_REQUEST", "INVALID_COMMENT"],
     ["JOURNAL_BUSY", "JOURNAL_BUSY"],
   ] as const)("a %s refusal answers %s", async (code, error) => {

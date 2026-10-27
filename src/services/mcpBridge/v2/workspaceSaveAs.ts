@@ -4,10 +4,9 @@
  * Kept separate from `workspace.ts` because save-as carries the bridge's
  * approval, path-boundary and overwrite policy.
  *
- * Key decision: `autoApproveEdits` authorises saving to a NEW location, never
- * destroying an existing one. The allowed roots include the parent directory
- * of every open document, so without that split an auto-approved save_as
- * could silently overwrite any sibling of any open file.
+ * Key decision: the destination is judged by `saveAsDestination.ts` — path
+ * guard, approval, overwrite probe, in that order — and the handler only
+ * sequences admission, that policy, the live recapture and the answer.
  *
  * Key decision: overwrite protection does not rest on the `exists` probe
  * alone. A save to a destination other than the tab's own path is written
@@ -32,6 +31,7 @@
  * saved text ("yes" | "pending" | "no"); "no" is still a saved file.
  *
  * @coordinates-with tabGuard.ts — tab resolution, the flush, INVALID_TAB
+ * @coordinates-with saveAsDestination.ts — the destination policy and the toast each refusal owes
  * @coordinates-with bridgeSave.ts — the path guard and the save pipeline
  * @coordinates-with services/persistence/saveTargetClaim.ts — the place reserved at admission, activated once written
  * @coordinates-with liveEditor.ts — flushes pending keystrokes into the buffer first
@@ -42,18 +42,23 @@
 import { exists } from "@tauri-apps/plugin-fs";
 import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { getFileName, normalizePath } from "@/utils/paths";
+import { getRuntimePlatform } from "@/utils/platform";
 import { checkBridgePath } from "@/services/mcpBridge/bridgePathGuard";
-import { isSameDocument, reserveSaveTarget } from "@/services/persistence/saveTargetClaim";
+import {
+  isSameDocument,
+  reserveSaveTarget,
+  type SaveTargetReservation,
+} from "@/services/persistence/saveTargetClaim";
 import type { McpWriteContext } from "@/services/mcpBridge/writeContext";
 import { imeToast } from "@/services/ime/imeToast";
 import i18n from "@/i18n";
 import { respond } from "@/services/mcpBridge/utils";
 import { wrapHandler } from "./wrapHandler";
-import { overwriteRefusal, respondSaveFailed, saveTabForBridge } from "./bridgeSave";
+import { respondSaveFailed, saveTabForBridge, type BridgeSaveResult } from "./bridgeSave";
 import { flushLiveEditors } from "./liveEditor";
 import { readOperationArgs } from "./readOperationArgs";
 import { requireTab, structuredError } from "./tabGuard";
+import { resolveSaveAsDestination, type SaveAsDestination, type SaveAsProbes } from "./saveAsDestination";
 
 /** Tell the user an AI client's Save As to `name` needs their approval. */
 function warnApprovalRequired(name: string): void {
@@ -64,6 +69,47 @@ function warnApprovalRequired(name: string): void {
  *  no setting allows it, so the toast names the remedies that do. */
 function warnOverwriteRefused(name: string): void {
   imeToast.warning(i18n.t("dialog:toast.mcpOverwriteRefused", { filename: name }));
+}
+
+/** The app's own path guard, filesystem, setting and platform. */
+function liveProbes(): SaveAsProbes {
+  return {
+    checkPath: checkBridgePath,
+    exists,
+    autoApprove: () => useSettingsStore.getState().advanced.mcpServer.autoApproveEdits,
+    platform: getRuntimePlatform(),
+  };
+}
+
+/** Warn the user with the toast a refused destination owes, if any. */
+function warnRefused(refused: Extract<SaveAsDestination, { ok: false }>): void {
+  if (refused.toast === "approval") warnApprovalRequired(refused.name);
+  else if (refused.toast === "overwrite") warnOverwriteRefused(refused.name);
+}
+
+/**
+ * The buffer to write, read NOW after flushing pending keystrokes into it:
+ * the destination checks awaited, and the user may have kept typing — or
+ * closed the tab, in which case there is nothing left to save (`null`) and a
+ * copy resolved earlier must not be written out in its place.
+ * @edge-case A tab closed and its id reopened meanwhile holds ANOTHER
+ * document: the reservation's incarnation tells them apart, the id cannot.
+ */
+function recaptureLiveContent(tabId: string, reservation: SaveTargetReservation): string | null {
+  flushLiveEditors(tabId);
+  const live = useDocumentStore.getState().documents[tabId];
+  return live && isSameDocument(reservation.reserved) ? live.content : null;
+}
+
+/** Answer the client with the save's outcome; a refused no-replace write owes the overwrite toast. */
+async function answerSaveAs(id: string, tabId: string, name: string, outcome: BridgeSaveResult): Promise<void> {
+  if (!outcome.saved) {
+    if (outcome.reason === "target-exists") warnOverwriteRefused(name);
+    await respondSaveFailed(id, outcome);
+    return;
+  }
+  const revision = useRevisionStore.getState().getRevision(tabId);
+  await respond({ id, success: true, data: { revision, journaled: outcome.journaled } });
 }
 
 /**
@@ -99,67 +145,22 @@ export async function handleWorkspaceSaveAs(
     const { tabId } = tab;
     const reservation = reserveSaveTarget(tabId);
 
-    const decision = await checkBridgePath(filePath);
-    if (!decision.allowed) {
-      await structuredError(id, {
-        error: "INVALID_PATH",
-        message: decision.reason,
-      });
+    const destination = await resolveSaveAsDestination(filePath, tab.filePath, liveProbes());
+    if (!destination.ok) {
+      warnRefused(destination);
+      await structuredError(id, destination.error);
       return;
     }
 
-    const autoApprove =
-      useSettingsStore.getState().advanced.mcpServer.autoApproveEdits;
-    const sameOpenPath =
-      tab.filePath != null &&
-      normalizePath(tab.filePath) === normalizePath(filePath);
-    if (!autoApprove && !sameOpenPath) {
-      warnApprovalRequired(getFileName(filePath) || filePath);
-      await structuredError(id, {
-        error: "APPROVAL_REQUIRED",
-        message:
-          "Saving to a new location requires user approval (autoApproveEdits is off)",
-      });
-      return;
-    }
-
-    // `autoApproveEdits` authorises saving to a NEW location — it does
-    // not authorise destroying an existing one. The bridge's allowed roots
-    // include the parent directory of every open document, so without this an
-    // auto-approved save_as could silently overwrite any sibling of any open
-    // file. Saving over the tab's own path is a save, not a clobber.
-    // The probe is the fast path; the write below is the guarantee. A file
-    // created after the probe is met by the no-replace publication and
-    // refused the same way.
-    const name = getFileName(filePath) || filePath;
-    if (!sameOpenPath && (await exists(filePath))) {
-      warnOverwriteRefused(name);
-      await structuredError(id, { error: "APPROVAL_REQUIRED", message: overwriteRefusal(name) });
-      return;
-    }
-
-    // Read the buffer NOW, after flushing pending keystrokes into it: the
-    // approval checks above awaited, and the user may have kept typing — or
-    // closed the tab, in which case there is nothing left to save and the
-    // copy resolved earlier must not be written out in its place.
-    // @edge-case A tab closed and its id reopened meanwhile holds ANOTHER
-    // document: the reservation's incarnation tells them apart, the id cannot.
-    flushLiveEditors();
-    const live = useDocumentStore.getState().documents[tabId];
-    if (!live || !isSameDocument(reservation.reserved)) {
+    const content = recaptureLiveContent(tabId, reservation);
+    if (content === null) {
       await structuredError(id, { error: "INVALID_TAB", message: "No document for tab" });
       return;
     }
-    const outcome = await saveTabForBridge(tabId, filePath, live.content, "workspace.save_as", context, {
+    const outcome = await saveTabForBridge(tabId, filePath, content, "workspace.save_as", context, {
       reservation,
-      noReplace: !sameOpenPath,
+      noReplace: !destination.sameOpenPath,
     });
-    if (!outcome.saved) {
-      if (outcome.reason === "target-exists") warnOverwriteRefused(name);
-      await respondSaveFailed(id, outcome);
-      return;
-    }
-    const revision = useRevisionStore.getState().getRevision(tabId);
-    await respond({ id, success: true, data: { revision, journaled: outcome.journaled } });
+    await answerSaveAs(id, tabId, destination.name, outcome);
   });
 }

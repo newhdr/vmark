@@ -34,7 +34,7 @@ const capture: CaptureInput = {
   provenance: null,
 };
 
-const STATUS = { phase: "ready", generation: "9", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", uncertifiedFallbacks: 0 };
+const STATUS = { phase: "ready", generation: "9", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", uncertifiedFallbacks: 0, registrationCapRefusals: 0, cleanupWorkerFailures: 0 };
 
 /** Each call-bound command: a client call and a reply its parser accepts. */
 const CASES: Array<[string, () => Promise<unknown>, unknown]> = [

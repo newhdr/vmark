@@ -11,12 +11,18 @@
  *   - Every change names the `commentGen` the agent read; a thread that moved
  *     since is refused STALE_COMMENT and the agent lists again.
  *
+ *   - `list` is paged here, over the app's whole list (`commentsPage.ts`): a
+ *     document's threads can far exceed the output bound, and a list cut by
+ *     the bound left its tail unreachable.
+ *
  * @coordinates-with src/services/mcpBridge/v2/comments.ts (repo root) — the handlers
+ * @coordinates-with tools/commentsPage.ts — the pages and their cursor
  * @coordinates-with tools/toolArgs.ts — `addresses` on the journaled writes
  */
 
 import { z } from 'zod';
 import { VMarkMcpServer } from '../server.js';
+import { type CommentList, commentsPage } from './commentsPage.js';
 import { bridgeErrorResult } from './staleError.js';
 import { optionalIdSchema, readOptionalId, readRequiredId } from './toolArgs.js';
 
@@ -39,11 +45,12 @@ export function registerCommentsTool(server: VMarkMcpServer): void {
       description:
         "Read and answer the user's review comments on a document. Resolve, reopen and delete are the user's: this tool cannot do them.\n\n" +
         'Actions:\n' +
-        '- list: Return {doc, generation, threads} for a tab (omit `tabId` for the focused tab). Each thread carries its `id`, `state` (open/addressed/resolved/reopened), `commentGen`, quoted anchor and replies.\n' +
+'- list: Return {doc, generation, threads, nextCursor?} for a tab (omit `tabId` for the focused tab), oldest thread first. Each thread carries its `comment` id, `state` (open/addressed/resolved/reopened), `commentGen`, quoted anchor and replies. ' +
+        'A long list comes in pages: while `nextCursor` is present, call list again with `cursor` set to it. A thread split across pages carries `repliesFrom` and `repliesTotal`; its later parts carry only `comment`, `state`, `commentGen`, `continued: true` and the next replies. A body too long for any page as JSON text (heavily escaped) comes as `bodyBase64`, its UTF-8 bytes in base64, in place of `body`. A cursor whose thread was deleted, or one from another document, is refused STALE_COMMENT — list again without one.\n' +
         '- reply: Add a reply to a thread. Args: {tabId?, commentId, body, expectedCommentGen}.\n' +
         '- mark_addressed: Mark a thread addressed. Args: {tabId?, commentId, expectedCommentGen}.\n\n' +
         'To say a write answers comments, pass `addresses: [commentId]` to document.write, document.transform, selection.set or workflow.apply_patch; that records the link on the revision and moves no thread. ' +
-        'Refusals that change nothing: STALE_COMMENT (the thread changed since you read its `commentGen` — list again), INVALID_COMMENT (no such comment on this document), COMMENT_NOT_ALLOWED (the thread is resolved or deleted), COMMENT_LIMIT (too many replies or too long a body), and the journal refusals JOURNAL_BUSY, JOURNAL_DEGRADED, JOURNAL_UNAVAILABLE and INVALID_TEXT.',
+        'Refusals that change nothing: STALE_COMMENT (the thread changed or was deleted since you read its `commentGen` — list again), INVALID_COMMENT (no such comment on this document), COMMENT_NOT_ALLOWED (the thread is resolved), COMMENT_LIMIT (too many replies, too long a body, or a thread that can change no more), and the journal refusals JOURNAL_BUSY, JOURNAL_DEGRADED, JOURNAL_UNAVAILABLE and INVALID_TEXT.',
       inputSchema: {
         action: z.enum(COMMENTS_ACTIONS).describe('The action to perform'),
         tabId: optionalIdSchema('Target tab id (from session.get_state). Omit to use the focused tab.'),
@@ -52,6 +59,7 @@ export function registerCommentsTool(server: VMarkMcpServer): void {
         expectedCommentGen: optionalIdSchema(
           'The thread\'s `commentGen` from list (reply, mark_addressed).',
         ),
+        cursor: z.string().optional().describe('The `nextCursor` of the previous list page (list only).'),
       },
     },
     async (args) => {
@@ -64,10 +72,15 @@ export function registerCommentsTool(server: VMarkMcpServer): void {
           `Invalid action: ${String(action)}. Expected: ${COMMENTS_ACTIONS.join(', ')}`,
         );
       }
+      if (args.cursor !== undefined && (action !== 'list' || typeof args.cursor !== 'string')) {
+        return VMarkMcpServer.errorResult('cursor is a string, and only for list');
+      }
       try {
         if (action === 'list') {
-          const data = await server.sendBridgeRequest({ type: 'vmark.comments.list', tabId });
-          return VMarkMcpServer.successJsonResult(data);
+          const data = await server.sendBridgeRequest<CommentList>({ type: 'vmark.comments.list', tabId });
+          const paged = commentsPage(data, args.cursor);
+          if (!paged.ok) return VMarkMcpServer.errorResult(paged.error);
+          return VMarkMcpServer.successJsonResult(paged.page);
         }
         const commentId = readRequiredId(args.commentId, 'commentId');
         if (!commentId.ok) return VMarkMcpServer.errorResult(commentId.error);

@@ -1,6 +1,6 @@
 /**
- * Diff budget — the constants, worker factory and result types of the
- * budgeted diff: how long a diff may take, how the worker is loaded, and
+ * Diff budget — the constants, worker factory, result and bookkeeping types
+ * of the budgeted diff: how long a diff may take, how the worker is loaded, and
  * what a caller gets back.
  *
  * @coordinates-with ./budgetedDiff.ts — the class these describe
@@ -14,7 +14,7 @@ export const DIFF_DEADLINE_MS = 200;
 /** Time reserved after the settle point for the coarse fallback and promise resolution. */
 export const COARSE_RESERVE_MS = 20;
 
-export type WorkerListener = (event: { data?: unknown; message?: string }) => void;
+type WorkerListener = (event: { data?: unknown; message?: string }) => void;
 
 /** The slice of a `Worker` the budgeted diff uses. */
 export interface DiffWorkerLike {
@@ -63,4 +63,27 @@ export interface BudgetedDiffOptions {
   readonly factory?: DiffWorkerFactory;
   readonly warn?: (...args: unknown[]) => void;
   readonly now?: () => number;
+}
+
+/** A worker the budgeted diff holds, and its listeners. */
+export interface Slot {
+  readonly worker: DiffWorkerLike;
+  ready: boolean;
+  retired: boolean;
+  readonly onMessage: WorkerListener;
+  readonly onError: WorkerListener;
+}
+
+/** One diff call, from the call until it settles. */
+export interface Job {
+  readonly id: number;
+  readonly a: string;
+  readonly b: string;
+  readonly t0: number;
+  readonly settleAt: number;
+  readonly resolve: (outcome: DiffOutcome) => void;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  readyWaitMs: number | null;
+  slot: Slot | null;
+  ownMs: number;
 }

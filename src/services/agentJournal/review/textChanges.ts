@@ -39,10 +39,64 @@ export class InvalidTextError extends Error {
   }
 }
 
-/** Throw `InvalidTextError` unless both texts are well-formed. */
-export function assertWellFormed(a: string, b: string): void {
-  if (!isWellFormedText(a)) throw new InvalidTextError("base");
-  if (!isWellFormedText(b)) throw new InvalidTextError("target");
+/** A check reached its budget before it finished: nothing about the text is decided. */
+export class OverBudget extends Error {
+  constructor() {
+    super("check stopped at its budget");
+    this.name = "OverBudget";
+  }
+}
+
+/** A clock and the instant past which a check stops with `OverBudget`. */
+export interface CheckBudget {
+  readonly until: number;
+  readonly now: () => number;
+}
+
+const UNBOUNDED: CheckBudget = { until: Number.POSITIVE_INFINITY, now: () => 0 };
+
+/** Code units a check works through between clock reads. */
+export const CHECK_CHUNK = 1 << 16;
+
+function checkBudget(budget: CheckBudget): void {
+  if (budget.now() >= budget.until) throw new OverBudget();
+}
+
+/** Counts work and reads the clock once per `CHECK_CHUNK` units of it. */
+function meter(budget: CheckBudget) {
+  let units = 0;
+  const check = () => checkBudget(budget);
+  return {
+    check,
+    charge(n: number): void {
+      units += n;
+      if (units < CHECK_CHUNK) return;
+      units = 0;
+      check();
+    },
+  };
+}
+
+/** Whether `x` is well-formed, scanned a chunk at a time; a chunk never ends on a high surrogate. */
+function wellFormedWithin(x: string, budget: CheckBudget): boolean {
+  for (let i = 0; i < x.length; ) {
+    let j = Math.min(x.length, i + CHECK_CHUNK);
+    if (j < x.length && j - 1 > i && isHigh(x.charCodeAt(j - 1))) j--;
+    if (!isWellFormedText(x.slice(i, j))) return false;
+    i = j;
+    checkBudget(budget);
+  }
+  return true;
+}
+
+/**
+ * Throw `InvalidTextError` unless both texts are well-formed, or `OverBudget`
+ * once `budget` runs out first (between chunks, so a lone surrogate in a
+ * chunk already scanned is still reported).
+ */
+export function assertWellFormed(a: string, b: string, budget: CheckBudget = UNBOUNDED): void {
+  if (!wellFormedWithin(a, budget)) throw new InvalidTextError("base");
+  if (!wellFormedWithin(b, budget)) throw new InvalidTextError("target");
 }
 
 const isHigh = (c: number) => c >= 0xd800 && c <= 0xdbff;
@@ -105,8 +159,24 @@ function fail(why: string, c?: TextChange): never {
   throw new Error(`diff not canonical: ${why}${c ? ` ${JSON.stringify(c)}` : ""}`);
 }
 
-/** Fail loud unless `changes` is a canonical change list from `a` to `b`. */
-export function assertCanonical(a: string, b: string, changes: readonly TextChange[]): void {
+/** Whether `a` from `fromA` and `b` from `fromB` agree for `length` units, compared a chunk at a time. */
+function sameRun(a: string, fromA: number, b: string, fromB: number, length: number, m: ReturnType<typeof meter>): boolean {
+  for (let k = 0; k < length; k += CHECK_CHUNK) {
+    const n = Math.min(CHECK_CHUNK, length - k);
+    if (a.slice(fromA + k, fromA + k + n) !== b.slice(fromB + k, fromB + k + n)) return false;
+    m.charge(n);
+  }
+  return true;
+}
+
+/**
+ * Fail loud unless `changes` is a canonical change list from `a` to `b`, or
+ * throw `OverBudget` once `budget` runs out first. The list reproduces `b`
+ * exactly when every unchanged gap reads the same on both sides, so the
+ * gaps are compared in place rather than `b` rebuilt.
+ */
+export function assertCanonical(a: string, b: string, changes: readonly TextChange[], budget: CheckBudget = UNBOUNDED): void {
+  const m = meter(budget);
   let prevA = 0;
   let prevB = 0;
   changes.forEach((c, i) => {
@@ -119,10 +189,13 @@ export function assertCanonical(a: string, b: string, changes: readonly TextChan
     if (midPair(a, c.fromA) || midPair(a, c.toA) || midPair(b, c.fromB) || midPair(b, c.toB)) {
       fail("boundary inside a surrogate pair", c);
     }
+    if (!sameRun(a, prevA, b, prevB, c.fromA - prevA, m)) fail("changes do not reconstruct the target");
+    m.charge(1);
     prevA = c.toA;
     prevB = c.toB;
   });
-  if (a.length - prevA !== b.length - prevB || applyChanges(a, b, changes) !== b) {
+  if (a.length - prevA !== b.length - prevB || !sameRun(a, prevA, b, prevB, a.length - prevA, m)) {
     fail("changes do not reconstruct the target");
   }
+  m.check();
 }

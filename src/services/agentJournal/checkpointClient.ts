@@ -9,8 +9,12 @@
  *   - The journal opens on a background thread, and the panel hydrates at
  *     startup: every call first waits for `agent_journal_status` to leave
  *     `starting`, polling every `START_POLL_MS`, at most
- *     `JOURNAL_START_WAIT_MS`. A journal that failed or never finished is
- *     refused (`JOURNAL_UNAVAILABLE`), and the next call asks again.
+ *     `JOURNAL_START_WAIT_MS` by the monotonic clock; no sleep outlasts
+ *     what is left of that wait. Each status call runs
+ *     under the journal deadline, capped by what is left of that wait, so a
+ *     hung call cannot hold it open. A journal that failed or never
+ *     finished is refused (`JOURNAL_UNAVAILABLE`), and the next call asks
+ *     again.
  *   - Same wire rules as the other journal clients (`journalIpc.ts`): one
  *     JSON string payload, every reply checked before it is trusted.
  *
@@ -21,6 +25,7 @@
  */
 
 import { callJournalBound, isEpochMillis, isNullableString, isObject, isString, malformed } from "./journalIpc";
+import { JOURNAL_DEADLINE_MS, startJournalBudget, withJournalDeadline } from "./journalDeadline";
 import { JournalRefusal } from "./journalRefusal";
 
 /** Longest wait for the journal to finish starting. */
@@ -58,19 +63,26 @@ let ready: Promise<void> | null = null;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+const stillStarting = () => new JournalRefusal("JOURNAL_UNAVAILABLE", "the agent edit journal is still starting");
+
 async function waitForStart(): Promise<void> {
-  const deadline = Date.now() + JOURNAL_START_WAIT_MS;
+  const budget = startJournalBudget(JOURNAL_START_WAIT_MS);
   for (;;) {
-    const s = await callJournalBound("agent_journal_status", {});
+    const left = Math.min(JOURNAL_DEADLINE_MS, budget.remaining());
+    if (left <= 0) throw stillStarting();
+    const s = await withJournalDeadline("its status", () => callJournalBound("agent_journal_status", {}), left).catch(
+      (error: unknown) => {
+        if (error instanceof JournalRefusal && error.journalCode === "JOURNAL_TIMEOUT") throw stillStarting();
+        throw error;
+      },
+    );
     const phase = isObject(s) ? s.phase : undefined;
     if (phase === "ready") return;
     if (phase !== "starting") {
       throw new JournalRefusal("JOURNAL_UNAVAILABLE", `the agent edit journal did not start (${String(phase)})`);
     }
-    if (Date.now() >= deadline) {
-      throw new JournalRefusal("JOURNAL_UNAVAILABLE", "the agent edit journal is still starting");
-    }
-    await sleep(START_POLL_MS);
+    if (budget.remaining() <= 0) throw stillStarting();
+    await sleep(Math.min(START_POLL_MS, budget.remaining()));
   }
 }
 

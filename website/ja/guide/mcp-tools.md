@@ -368,8 +368,11 @@ GitHub Actions ワークフロー YAML 用の `actionlint` 検証と **CST セ�
 | パラメーター | タイプ | 必須 |
 |-----------|------|------|
 | `tabId` | string | いいえ |
+| `cursor` | string | いいえ |
 
-`{doc, generation, threads}` を返します。各スレッドは `id`、`state`（`open`、`addressed`、`resolved`、`reopened` のいずれか）、`commentGen`、アンカーとなる引用テキスト、そして返信を持ちます。
+`{doc, generation, threads, nextCursor?}` を返します。スレッドは古い順です。各スレッドは `comment` id、`state`（`open`、`addressed`、`resolved`、`reopened` のいずれか）、`commentGen`、アンカーされた引用テキスト、返信を持ちます。
+
+長いリストはページに分けて返され、各ページは欠けずに届く大きさに収まります。`nextCursor` がある間は、`cursor` にその値を設定して `list` を再度呼び出してください。ページをまたいで分割されたスレッドは `repliesFrom` と `repliesTotal` を持ち、後続の部分は `comment`、`state`、`commentGen`、`continued: true` と続きの返信だけを持ちます。JSON テキストとしてどのページにも収まらない本文（大量のエスケープを含むテキストに限られます）は、`body` の代わりに `bodyBase64` として、UTF-8 バイト列を base64 にしたもので届きます。カーソルが指すスレッドが削除されている場合や、別のドキュメント向けに発行されたカーソルの場合は `STALE_COMMENT` で拒否されます。カーソルを指定せずに、もう一度 `list` を呼び出してください。
 
 ### `reply`
 
@@ -392,7 +395,7 @@ GitHub Actions ワークフロー YAML 用の `actionlint` 検証と **CST セ�
 
 スレッドを対応済みにします。解決するかどうかはユーザーが決めます。
 
-`comments.reply` と `comments.mark_addressed` はどちらも、`list` が返したスレッドの `commentGen` を指定します。次の場合は何も変更せずに拒否されます：その後スレッドが変わった場合は `STALE_COMMENT`（もう一度 list してください）、コメント ID が不正またはこのドキュメントのコメントを指していない場合は `INVALID_COMMENT`、スレッドが解決済みまたは削除済みの場合は `COMMENT_NOT_ALLOWED`、返信が多すぎるか本文が長すぎる場合は `COMMENT_LIMIT`、そしてジャーナルの拒否 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`。
+`comments.reply` と `comments.mark_addressed` はどちらも、`list` が返したスレッドの `commentGen` を指定します。次の場合は何も変更せずに拒否されます：その後スレッドが変わったか削除された場合は `STALE_COMMENT`（もう一度 list してください）、コメント ID が不正またはこのドキュメントのコメントを指していない場合は `INVALID_COMMENT`、スレッドが解決済みの場合は `COMMENT_NOT_ALLOWED`、返信が多すぎる、本文が長すぎる、またはスレッドがこれ以上変更できない場合は `COMMENT_LIMIT`、そしてジャーナルの拒否 `JOURNAL_BUSY`、`JOURNAL_DEGRADED`、`JOURNAL_UNAVAILABLE`、`INVALID_TEXT`。
 
 編集がコメントへの対応であることを示すには、それらの ID を `addresses` として `document.write`、`document.transform`、`workflow.apply_patch`、`selection.set` に渡します。このリンクはリビジョンとともに記録され、ドキュメントの履歴に表示されます（後で削除されたコメントは削除済みコメントとして表示されます）。スレッドの状態は変わりません。64 個を超える ID、重複した ID、未知・削除済み・解決済み・別ドキュメントの ID は `INVALID_ADDRESSES` で拒否され、何も変更されません。
 
@@ -634,6 +637,8 @@ Shared のポスチャは、一致する `navigate` の付与が存在しない�
 | `APPROVAL_REQUIRED` | エンベロープ | **新しい場所への保存とジーニーの結果を自動承認** がオフの状態で、新しい場所への `save_as`。タブ自身のもの以外のファイルがすでにあるパスへの `save_as`。または `open_workspace` がユーザーの承認、もしくは VMark のフォルダー選択ダイアログでのフォルダー選択を待っている |
 | `BUSY` | エンベロープ | `open_workspace` を続行できなかった：別のフォルダーダイアログが開いているか、そのウィンドウでワークスペースの切り替えが進行中。承認は保持される——再試行する。または、ユーザーが入力メソッドで変換している間に `document.write`、`document.transform`、`selection.set` が届いた。何も変更されていない——少し待って再試行する |
 | `JOURNAL_BUSY` | エンベロープ | 同じ文書への別の書き込みを記録している間に `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch` が届いた。何も変更されていない——少し待って再試行する |
+| `WRITE_BUSY` | 文字列 | 書き込み系の呼び出し（`document.write` / `document.transform`、`selection.set`、`workflow.apply_patch`、`comments.reply` / `mark_addressed`、`coherence_resolve` など）が別の書き込みの後ろで 3 秒待っても順番が来なかった。適用されていない——再試行する |
+| `TIMEOUT` | 文字列 | `coherence` または `coherence_resolve` の呼び出しが 20 秒以内に終わりませんでした。書き込み（`edges`、`resolve`）の場合はまだ実行中で、結果は不明です。再試行する前に現在の状態を読み取ってください |
 | `STALE_PARENT` | エンベロープ | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：このタブが最後に書き込んだ後に別のウィンドウがその文書に書き込んだ。何も変更されていない——読み直して再試行する |
 | `JOURNAL_DEGRADED` | エンベロープ | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：この文書の以前のジャーナル記録がまだ保存待ち。何も変更されていない——数秒後に再試行する |
 | `JOURNAL_UNAVAILABLE` | エンベロープ | `document.write` / `document.transform` / `selection.set` / `workflow.apply_patch`：エージェント編集ジャーナルが動作していないか記録できない。何も変更されていない |

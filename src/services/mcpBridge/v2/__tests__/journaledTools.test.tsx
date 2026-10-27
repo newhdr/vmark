@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
+import { markContentApplied } from "@/services/editor/contentApplied";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorState as CMState } from "@codemirror/state";
 import { EditorView as CMView } from "@codemirror/view";
@@ -54,6 +55,7 @@ function mountSource(tabId: string, text: string, from: number, to: number): CMV
 
 function mountWysiwyg(tabId: string, html: string, from: number, to: number): Editor {
   tiptap = new Editor({ extensions: [StarterKit], content: html });
+  markContentApplied(tiptap); // its initial load has run
   tiptap.commands.setTextSelection({ from, to });
   useEditorStore.getState().setTiptapEditor(tiptap);
   useEditorStore.getState().setActiveWysiwygEditor(tiptap, tabId);

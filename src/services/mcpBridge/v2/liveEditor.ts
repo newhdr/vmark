@@ -14,6 +14,8 @@
  *     the store (bumping the revision as an edit does), so a read returns what
  *     the user sees, a save writes it, and a write based on an older read is
  *     refused as stale instead of silently replacing typing it never saw.
+ *     A flush that fails for the tab a handler targets is not read past: the
+ *     handler is refused, since the store no longer holds what the user sees.
  *   - A replaced document is a LOAD, not typing. The transaction carries
  *     `preventUpdate`, the mark the editor's own content loads use, so the
  *     editor does not schedule a flush that would write its re-serialization
@@ -75,9 +77,18 @@ import type { V2Error } from "./types";
 /**
  * Bring the document store up to date with every mounted WYSIWYG editor.
  * Call before a handler reads a tab's content, dirty flag or revision.
+ *
+ * Throws when the editor of `tabId` could not hand its text to the store — or,
+ * with no `tabId`, when any editor could not: the store then trails what the
+ * user sees, and a handler must refuse rather than read or replace it. Every
+ * other editor is still flushed.
  */
-export function flushLiveEditors(): void {
-  flushAllWysiwygNow();
+export function flushLiveEditors(tabId?: string): void {
+  const failed = flushAllWysiwygNow();
+  const blocking = tabId === undefined ? [...failed.keys()] : failed.has(tabId) ? [tabId] : [];
+  if (blocking.length === 0) return;
+  for (const key of blocking) mcpBridgeLog("live editor flush failed:", key, failed.get(key));
+  throw new Error(`The editor of ${blocking.join(", ")} could not synchronize its pending edits; retry shortly`);
 }
 
 /**

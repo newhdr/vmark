@@ -8,32 +8,16 @@
  *
  * Origin: the MCP pruning plan, whose decisions are recorded in
  * `.claude/adr/plans/20260504-mcp-pruning.md`.
+ *
+ * @coordinates-with tools/workspaceActions.ts — one handler per action
  */
 
 import { z } from 'zod';
 import { VMarkMcpServer } from '../server.js';
-import {
-  optionalIdSchema,
-  optionalPathSchema,
-  readOptionalId,
-  readRequiredId,
-  readRequiredPath,
-} from './toolArgs.js';
+import { optionalIdSchema, optionalPathSchema, readOptionalId } from './toolArgs.js';
+import { WORKSPACE_ACTIONS, workspaceActionHandler } from './workspaceActions.js';
 
-/** The `open_workspace` approval envelope, attached to a bridge failure's
- *  `data`. Distinct from the browser envelope (no operation/url): opening a
- *  folder needs a one-shot human approval, surfaced so the AI asks and retries. */
-export interface WorkspaceApprovalNeeded {
-  needsApproval: true;
-  folderPath: string;
-}
-
-/** Is `data` the open_workspace approval envelope? */
-export function isWorkspaceApprovalNeeded(data: unknown): data is WorkspaceApprovalNeeded {
-  if (typeof data !== 'object' || data === null) return false;
-  const d = data as { needsApproval?: unknown; folderPath?: unknown };
-  return d.needsApproval === true && typeof d.folderPath === 'string' && d.folderPath.length > 0;
-}
+export { WORKSPACE_ACTIONS, isWorkspaceApprovalNeeded } from './workspaceActions.js';
 
 export const WORKSPACE_TOOL = 'workspace' as const;
 
@@ -42,16 +26,6 @@ export const WORKSPACE_TOOL = 'workspace' as const;
  * defensive guard below, so the two cannot disagree about what a kind is.
  */
 export const WORKSPACE_TAB_KINDS = ['markdown', 'yaml-workflow'] as const;
-export const WORKSPACE_ACTIONS = [
-  'new',
-  'open',
-  'open_workspace',
-  'save',
-  'save_as',
-  'close',
-  'switch_tab',
-  'focus_window',
-] as const;
 
 export function registerWorkspaceTool(server: VMarkMcpServer): void {
   server.registerTool(
@@ -133,107 +107,9 @@ export function registerWorkspaceTool(server: VMarkMcpServer): void {
       }
       const kind = args.kind as string | undefined;
 
-      switch (action) {
-        case 'new': {
-          const data = await server.sendBridgeRequest({
-            type: 'vmark.workspace.new',
-            kind,
-            windowLabel,
-          });
-          return VMarkMcpServer.successJsonResult(data);
-        }
-        case 'open': {
-          const path = readRequiredPath(args.filePath, 'filePath');
-          if (!path.ok) return VMarkMcpServer.errorResult(path.error);
-          const data = await server.sendBridgeRequest({
-            type: 'vmark.workspace.open',
-            filePath: path.value,
-            windowLabel,
-          });
-          return VMarkMcpServer.successJsonResult(data);
-        }
-        case 'open_workspace': {
-          const folder = readRequiredPath(args.folderPath, 'folderPath');
-          if (!folder.ok) return VMarkMcpServer.errorResult(folder.error);
-          try {
-            // windowLabel is deliberately NOT forwarded: the handler binds to
-            // the window the request arrives on, because a client-supplied
-            // label could show the approval prompt in one window while
-            // mutating another. Sending it anyway advertised a parameter that
-            // silently did nothing.
-            const data = await server.sendBridgeRequest({
-              type: 'vmark.workspace.open_workspace',
-              folderPath: folder.value,
-            });
-            return VMarkMcpServer.successJsonResult(data);
-          } catch (error) {
-            // A refusal is a request for consent, not an ordinary error: the
-            // approval envelope rides on error.data. Render it so the AI asks
-            // the user and retries the SAME call, instead of surfacing a bare
-            // error it cannot act on (Codex M11).
-            const data = (error as { data?: unknown })?.data;
-            if (isWorkspaceApprovalNeeded(data)) {
-              return VMarkMcpServer.errorResult(
-                `approval required to open workspace '${data.folderPath}'. ` +
-                  'Ask the user to approve opening this folder in VMark, then retry the SAME call. ' +
-                  'Do not retry until they have approved — a retry only re-raises the same request.',
-              );
-            }
-            return VMarkMcpServer.errorResult(
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        }
-        case 'save': {
-          const data = await server.sendBridgeRequest({
-            type: 'vmark.workspace.save',
-            tabId,
-          });
-          return VMarkMcpServer.successJsonResult(data);
-        }
-        case 'save_as': {
-          const target = readRequiredPath(args.filePath, 'filePath');
-          if (!target.ok) return VMarkMcpServer.errorResult(target.error);
-          const data = await server.sendBridgeRequest({
-            type: 'vmark.workspace.save_as',
-            tabId,
-            filePath: target.value,
-          });
-          return VMarkMcpServer.successJsonResult(data);
-        }
-        case 'close': {
-          const target = readRequiredId(args.tabId, 'tabId');
-          if (!target.ok) return VMarkMcpServer.errorResult(target.error);
-          const data = await server.sendBridgeRequest({
-            type: 'vmark.workspace.close',
-            tabId: target.value,
-            force: args.force === true,
-          });
-          return VMarkMcpServer.successJsonResult(data);
-        }
-        case 'switch_tab': {
-          const target = readRequiredId(args.tabId, 'tabId');
-          if (!target.ok) return VMarkMcpServer.errorResult(target.error);
-          const data = await server.sendBridgeRequest({
-            type: 'vmark.workspace.switch_tab',
-            tabId: target.value,
-          });
-          return VMarkMcpServer.successJsonResult(data);
-        }
-        case 'focus_window': {
-          const target = readRequiredId(args.windowLabel, 'windowLabel');
-          if (!target.ok) return VMarkMcpServer.errorResult(target.error);
-          const data = await server.sendBridgeRequest({
-            type: 'vmark.workspace.focus_window',
-            windowLabel: target.value,
-          });
-          return VMarkMcpServer.successJsonResult(data);
-        }
-        default:
-          return VMarkMcpServer.errorResult(
-            `Invalid action: ${String(action)}`,
-          );
-      }
+      const handler = workspaceActionHandler(action);
+      if (!handler) return VMarkMcpServer.errorResult(`Invalid action: ${String(action)}`);
+      return handler(server, args, { tabId, windowLabel, kind });
     },
   );
 }

@@ -29,7 +29,7 @@ import {
   resetJournalBases,
 } from "@/services/agentJournal/documentIdentity";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
-import { TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
+import { TEST_WRITE_CONTEXT, testAdmittedReads } from "@/test/mcpAttributionFixture";
 import { registerUnsavedProvenanceSource, resetUnsavedProvenanceSources } from "@/services/agentJournal/unsavedProvenance";
 import { runJournaledEdit } from "../journaledEdit";
 import { resolveTab, type GuardedTab } from "../tabGuard";
@@ -60,6 +60,7 @@ function run(tab: GuardedTab) {
     requireFocus: false,
     tool: "document.write",
     context: TEST_WRITE_CONTEXT,
+    reads: testAdmittedReads(),
     apply,
   });
 }
@@ -178,7 +179,7 @@ describe("the tab changed while its provenance payload was awaited", () => {
     const tab = seed("before");
     sourceRunning(() => {});
 
-    expect(await run(tab)).toEqual({ value: 1, durable: true });
+    expect(await run(tab)).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(fake.prepareControlledWrite).toHaveBeenCalledTimes(1);
   });
 });
@@ -187,7 +188,7 @@ describe("an unchanged tab goes ahead", () => {
   it("prepares and applies (CJK text)", async () => {
     const tab = seed("测试 ABC 混合");
 
-    expect(await run(tab)).toEqual({ value: 1, durable: true });
+    expect(await run(tab)).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(fake.prepareControlledWrite).toHaveBeenCalledTimes(1);
     expect(apply).toHaveBeenCalledTimes(1);
   });

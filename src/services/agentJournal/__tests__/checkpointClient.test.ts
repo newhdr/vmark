@@ -119,6 +119,40 @@ describe("checkpointClient", () => {
     await seen;
   });
 
+  it("refuses within the start wait when a status call never answers", async () => {
+    vi.useFakeTimers();
+    invokeMock.mockImplementation(() => new Promise(() => {}));
+    const listed = listJournalCheckpoints();
+    const seen = expect(listed).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });
+    await vi.advanceTimersByTimeAsync(JOURNAL_START_WAIT_MS + 1_000);
+    await seen;
+  });
+
+  it("bounds the start wait by the monotonic clock, not the wall clock", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const wall = vi.spyOn(Date, "now").mockReturnValue(0);
+    try {
+      journal(["starting"]);
+      const listed = listJournalCheckpoints();
+      const seen = expect(listed).rejects.toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });
+      await vi.advanceTimersByTimeAsync(JOURNAL_START_WAIT_MS + 1_000);
+      await seen;
+    } finally {
+      wall.mockRestore();
+    }
+  });
+
+  it("never sleeps past the start wait: a poll interval is capped by what is left of it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    // A 30 ms status call puts the polls off the 100 ms grid, so the last
+    // full interval would overrun the wait.
+    invokeMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ phase: "starting" }), 30)));
+    let refused: unknown = null;
+    listJournalCheckpoints().catch((e: unknown) => (refused = e));
+    await vi.advanceTimersByTimeAsync(JOURNAL_START_WAIT_MS);
+    expect(refused).toMatchObject({ journalCode: "JOURNAL_UNAVAILABLE" });
+  });
+
   it("asks again after a refused wait, so a later call can succeed", async () => {
     journal(["failed", "ready"], () => []);
     await expect(listJournalCheckpoints()).rejects.toBeTruthy();

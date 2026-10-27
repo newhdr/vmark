@@ -10,6 +10,11 @@
  *   - An arm that answers after `dispose`, or whose `onArmed` handshake
  *     fails, is closed at once, so no epoch stays armed that no session
  *     holds.
+ *   - A close the journal did not confirm keeps its epoch as unclosed: the
+ *     writer refuses the document's next arm while it is open, so the next
+ *     demand retries the close before arming (answering `null` while it
+ *     still fails), and `dispose` retries once more and rejects if it still
+ *     cannot confirm the close.
  *   - `onArmed` runs before the epoch is handed out (the session's basis
  *     handshake); `afterArm` runs after (the session may close it again).
  *   - A known suspension (`SessionJournal.suspended`: recording on the
@@ -44,6 +49,8 @@ export class EpochLease {
   #arming: Promise<ArmedEpoch | null> | null = null;
   #chain: Promise<unknown> = Promise.resolve();
   #disposed = false;
+  /** An epoch whose close the journal has not confirmed. */
+  #unclosed: ArmedEpoch | null = null;
   /** In a suspension episode whose warning was given. */
   #suspended = false;
 
@@ -83,14 +90,19 @@ export class EpochLease {
     const armed = this.#armed;
     if (!armed) return;
     this.#armed = null;
-    void this.#queue(() => this.journal.close(armed.epoch)).catch((e: unknown) => this.hooks.warn("provenance: close failed", e));
+    void this.#queue(() => this.#closeNow(armed));
   }
 
+  /** Close everything; rejects when an epoch's close still cannot be confirmed. */
   async dispose(): Promise<void> {
     this.#disposed = true;
     await this.#arming;
     this.release();
     await this.idle();
+    const unclosed = this.#unclosed;
+    if (unclosed && !(await this.#queue(() => this.#closeNow(unclosed)))) {
+      throw new Error(`provenance: epoch ${unclosed.epoch} could not be closed`);
+    }
   }
 
   /** Resolves once every queued arm and close has finished. */
@@ -105,6 +117,9 @@ export class EpochLease {
   async #arm(): Promise<ArmedEpoch | null> {
     let armed: ArmedEpoch | null = null;
     try {
+      // @edge-case An epoch left open by a failed close blocks the writer's next arm.
+      const unclosed = this.#unclosed;
+      if (unclosed && !(await this.#closeNow(unclosed))) return null;
       armed = await this.journal.arm();
       if (this.#disposed) {
         await this.#closeNow(armed);
@@ -130,8 +145,17 @@ export class EpochLease {
     }
   }
 
-  #closeNow(armed: ArmedEpoch): Promise<void> {
-    return this.journal.close(armed.epoch).catch((e: unknown) => this.hooks.warn("provenance: close failed", e));
+  /** Close an epoch; `false` (and the epoch kept as unclosed) when the journal did not confirm it. */
+  async #closeNow(armed: ArmedEpoch): Promise<boolean> {
+    this.#unclosed = armed;
+    try {
+      await this.journal.close(armed.epoch);
+      this.#unclosed = null;
+      return true;
+    } catch (e: unknown) {
+      this.hooks.warn("provenance: close failed", e);
+      return false;
+    }
   }
 
   #queue<T>(step: () => Promise<T>): Promise<T> {

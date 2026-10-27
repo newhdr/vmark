@@ -10,7 +10,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
-import { TEST_ATTRIBUTION, TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
+import { TEST_ATTRIBUTION, TEST_WRITE_CONTEXT, testAdmittedReads } from "@/test/mcpAttributionFixture";
 import { useRevisionStore } from "@/stores/documentStore";
 import { useTabStore } from "@/stores/tabStore";
 import type { DocumentTab } from "@/stores/tabStoreTypes";
@@ -94,6 +94,7 @@ async function documentWrite(editor: Editor, post: string): Promise<PreparedTxn>
       requireFocus: false,
       tool: "document.write",
       context: TEST_WRITE_CONTEXT,
+      reads: testAdmittedReads(),
       apply: () => {
         store().setEditorContent("t1", post);
         return { postimage: post, value: "ok" };

@@ -94,6 +94,18 @@ describe("flushAllWysiwygNow", () => {
     expect(b).toHaveBeenCalledTimes(1);
   });
 
+  it("reports which editors failed to flush, and only those", () => {
+    registerWysiwygFlusher("a", () => {
+      throw new Error("boom");
+    });
+    registerWysiwygFlusher("b", vi.fn());
+
+    const failed = flushAllWysiwygNow();
+
+    expect([...failed.keys()]).toEqual(["a"]);
+    expect(failed.get("a")).toBeInstanceOf(Error);
+  });
+
   it("does nothing when no keyed flushers are registered", () => {
     expect(() => flushAllWysiwygNow()).not.toThrow();
   });

@@ -25,6 +25,7 @@
 
 import { invokeJournal } from "./journalTransport";
 import { JournalRefusal, toJournalRefusal } from "./journalRefusal";
+import { randomHex } from "./randomHex";
 import { settleRequestRefusal, type RequestExpectation } from "./journalSettlement";
 import { isDecimalU64 } from "./provenance/payload";
 
@@ -136,14 +137,7 @@ export async function callJournal(command: string, args: Record<string, unknown>
 }
 
 /** A fresh call id: 16 random bytes as 32 lowercase hex, or `null` when none can be minted. */
-function mintCallId(): string | null {
-  try {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  } catch {
-    return null;
-  }
-}
+const mintCallId = (): string | null => randomHex(16);
 
 /**
  * Invoke call-bound `command` with `args` and a fresh `callId`; resolves

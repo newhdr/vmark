@@ -24,6 +24,7 @@ import type { FileOwnershipClaim } from "@/services/workspaces/fileOwnership";
 import type { McpAttribution } from "@/services/mcpBridge/types";
 import type { Journaled } from "@/services/agentJournal/journalClient";
 import type { SaveTargetReservation } from "./saveTargetClaim";
+import type { McpReadBatch } from "@/services/coherence/mcpReads";
 
 /**
  * Who asked for the save. It decides the feedback (only a manual save may
@@ -64,10 +65,13 @@ export type SaveOutcome =
  * (activated only once its write succeeds), the check it still has to pass
  * (its path guard), run at the save's turn in the per-path queue, and whether
  * the write must refuse rather than replace a file already at the path
- * (Save As to a destination that is not the tab's own file).
+ * (Save As to a destination that is not the tab's own file). `reads` is the
+ * read batch the request detached at admission: the save records it as the
+ * write's inputs, and never gives it back — its owner decides that.
  */
 export interface McpSaveAdmission {
   reservation?: SaveTargetReservation | undefined;
   admit?: (() => Promise<SaveFailure | null>) | undefined;
   noReplace?: boolean | undefined;
+  reads?: McpReadBatch | undefined;
 }

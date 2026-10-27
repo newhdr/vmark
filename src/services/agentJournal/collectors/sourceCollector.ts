@@ -127,7 +127,8 @@ class SourceCollectorState {
     this.#seenText = doc.toString();
     if (!this.#isLive()) return;
     const sections: Section[] = [];
-    update.changes.iterChangedRanges((fromA, toA, fromB, toB) => sections.push({ fromA, toA, fromB, toB }));
+    // Individual sections: joined ranges would map a touching boundary to the joined replacement's ends.
+    update.changes.iterChanges((fromA, toA, fromB, toB) => sections.push({ fromA, toA, fromB, toB }), true);
     this.#collector?.edit(before, sections, this.#seenText);
   }
 

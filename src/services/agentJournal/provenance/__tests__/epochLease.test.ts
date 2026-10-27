@@ -1,5 +1,5 @@
 // @vitest-environment node
-// WI-AL1.4 — the epoch lease never leaves an epoch armed that no session holds: a failed handshake closes the epoch it just armed and answers null, and an arm that lands after dispose is closed at once
+// WI-AL1.4 — the epoch lease never leaves an epoch armed that no session holds: a failed handshake closes the epoch it just armed and answers null, and an arm that lands after dispose is closed at once; a close the journal rejects keeps its epoch unclosed, retried before the next arm and surfaced by dispose
 import { describe, it, expect, vi } from "vitest";
 import type { ArmedEpoch } from "../../epochClient";
 import { EpochLease, type SessionJournal } from "../epochLease";
@@ -73,5 +73,51 @@ describe("EpochLease", () => {
     for (let i = 0; i < 3; i++) await expect(lease.ensure()).resolves.toBeNull();
     expect(warn).toHaveBeenCalledTimes(2);
     expect(j.arm).toHaveBeenCalledTimes(3);
+  });
+
+  describe("a rejected close", () => {
+    it("on release is retried before the next arm, which waits for it", async () => {
+      const j = journal();
+      const warn = vi.fn();
+      j.close.mockRejectedValueOnce(new Error("ipc")).mockRejectedValueOnce(new Error("ipc"));
+      const lease = new EpochLease(j, { onArmed: async () => {}, afterArm: () => {}, warn });
+      await lease.ensure();
+      lease.release();
+      await lease.idle();
+      expect(warn).toHaveBeenCalledWith("provenance: close failed", expect.any(Error));
+      await expect(lease.ensure()).resolves.toBeNull();
+      expect(j.arm).toHaveBeenCalledTimes(1);
+      await expect(lease.ensure()).resolves.toEqual(ARMED);
+      expect(j.close).toHaveBeenCalledTimes(3);
+      expect(j.arm).toHaveBeenCalledTimes(2);
+    });
+
+    it("after a failed handshake is retried before the next arm", async () => {
+      const j = journal();
+      const onArmed = vi.fn().mockRejectedValueOnce(new Error("handshake")).mockResolvedValue(undefined);
+      j.close.mockRejectedValueOnce(new Error("ipc"));
+      const lease = new EpochLease(j, { onArmed, afterArm: () => {}, warn: () => {} });
+      await expect(lease.ensure()).resolves.toBeNull();
+      await expect(lease.ensure()).resolves.toEqual(ARMED);
+      expect(j.close.mock.invocationCallOrder[1]).toBeLessThan(j.arm.mock.invocationCallOrder[1]);
+    });
+
+    it("on dispose is retried once, then rejects", async () => {
+      const j = journal();
+      j.close.mockRejectedValue(new Error("ipc"));
+      const lease = new EpochLease(j, { onArmed: async () => {}, afterArm: () => {}, warn: () => {} });
+      await lease.ensure();
+      await expect(lease.dispose()).rejects.toThrow("epoch 7 could not be closed");
+      expect(j.close).toHaveBeenCalledTimes(2);
+    });
+
+    it("on dispose resolves when the retry is confirmed", async () => {
+      const j = journal();
+      j.close.mockRejectedValueOnce(new Error("ipc"));
+      const lease = new EpochLease(j, { onArmed: async () => {}, afterArm: () => {}, warn: () => {} });
+      await lease.ensure();
+      await expect(lease.dispose()).resolves.toBeUndefined();
+      expect(j.close).toHaveBeenCalledTimes(2);
+    });
   });
 });

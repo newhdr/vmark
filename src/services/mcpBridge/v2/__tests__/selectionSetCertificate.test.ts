@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
+import { markContentApplied } from "@/services/editor/contentApplied";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorState as CMState } from "@codemirror/state";
 import { EditorView as CMView } from "@codemirror/view";
@@ -145,6 +146,7 @@ describe("selection.set — certificates", () => {
   it("a WYSIWYG editor without a provenance collector sends no certificate", async () => {
     seed("Hello world");
     editor = new Editor({ extensions: [StarterKit], content: "<p>Hello world</p>" });
+    markContentApplied(editor); // its initial load has run
     editor.commands.setTextSelection({ from: 7, to: 12 });
     useEditorStore.getState().setActiveWysiwygEditor(editor, "a");
     await handleSelectionSet("c2", { content: "there" }, TEST_WRITE_CONTEXT);

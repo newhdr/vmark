@@ -67,6 +67,7 @@
  * @coordinates-with services/persistence/saveToPath.ts — the caller
  * @coordinates-with services/agentJournal/saveCapture.ts — the capture stage
  * @coordinates-with services/agentJournal/saveMove.ts — the Save As move
+ * @coordinates-with services/agentJournal/saveChain.ts — the chain link and the ticket
  * @module services/agentJournal/saveJournal
  */
 
@@ -75,20 +76,17 @@ import { getCurrentWindowLabel } from "@/services/persistence/workspaceStorage";
 import { journalWarn } from "@/utils/debug";
 import type { CaptureInput, JournalObservedRef, JournalSaveInitiator } from "./journalClient";
 import { journalActorFor } from "./journalActor";
-import { JOURNAL_DEADLINE_MS, withJournalDeadline } from "./journalDeadline";
-import { toJournalRefusal, type JournalCode } from "./journalRefusal";
+import type { JournalCode } from "./journalRefusal";
 import { capture, expired, type CaptureResult, type SaveClaim, type SaveJournalOutcome } from "./saveCapture";
+import { ChainedSaveTicket, linkChain, type JournalSaveTicket } from "./saveChain";
 import { movedFrom, moveForSave } from "./saveMove";
 import {
   admitOutstandingSave,
   basisStamp,
-  clearOutstandingSaveBase,
   docKeyFor,
   finishOutstandingSave,
   journalObservedBase,
   journalTabLife,
-  outstandingSaveBase,
-  setOutstandingSaveBase,
   windowNameFor,
 } from "./documentIdentity";
 import type { ProvenanceFreeze } from "./provenance/session";
@@ -96,18 +94,10 @@ import { freezeUnsavedProvenance } from "./unsavedProvenance";
 import { reportingSaveTicket } from "./recordingReport";
 import { beginRecordingSubmission } from "@/stores/journalRecordingStore";
 
-/** One submitted save's place in the journal. */
-export interface JournalSaveTicket {
-  /** Capture the written save. Once: a repeat answers the same. Never throws. */
-  record(): Promise<SaveJournalOutcome>;
-  /** The save wrote nothing: pass its base on. Idempotent; no-op once recorded. */
-  cancel(): void;
-}
+export type { JournalSaveTicket } from "./saveChain";
 
 /** Most saves of one tab and file in flight at once. */
 export const MAX_OUTSTANDING_SAVES = 8;
-
-const NOT_RECORDED: SaveJournalOutcome = { journaled: "no", revision: null, reason: null };
 
 /** Who asked for a save, as the journal records it. */
 export function saveInitiatorFor(origin: SaveOrigin): JournalSaveInitiator {
@@ -176,35 +166,6 @@ interface SavePlan {
   claim: SaveClaim;
 }
 
-/** This save's link in its tab and file's chain: the base it observed, and the release of the next save. */
-interface ChainLink {
-  base: Promise<JournalObservedRef | null>;
-  /** Hand `next` to the save behind this one. Once: later calls do nothing. */
-  release(next: JournalObservedRef | null): void;
-}
-
-function linkChain(tabId: string, docKey: string, baseKey: string): ChainLink {
-  // @edge-case A save moving the tab (or recovering a failed move) chains on
-  // the newest save already submitted to its destination first: each save
-  // links there, while the base stays on the source until a bind lands.
-  const base =
-    outstandingSaveBase(tabId, docKey) ?? outstandingSaveBase(tabId, baseKey) ?? Promise.resolve(journalObservedBase(tabId, baseKey));
-  let settle: (next: JournalObservedRef | null) => void = () => {};
-  const settled = new Promise<JournalObservedRef | null>((resolve) => (settle = resolve));
-  setOutstandingSaveBase(tabId, docKey, settled);
-  let released = false;
-  return {
-    base,
-    release(next) {
-      if (released) return;
-      released = true;
-      finishOutstandingSave(tabId, docKey);
-      clearOutstandingSaveBase(tabId, docKey, settled);
-      settle(next);
-    },
-  };
-}
-
 /** Runs a save on its observed base: the Save As move, then the capture, committing only while `live()`. */
 async function executeSave(plan: SavePlan, parent: JournalObservedRef | null, live: () => boolean, windowLabel: string): Promise<CaptureResult> {
   const { tabId, docKey, window, content, origin, freeze } = plan;
@@ -234,48 +195,20 @@ function submitSave(
   }
   const from = movedFrom(tabId, docKey, windowLabel);
   const window = windowNameFor(tabId, docKey, windowLabel);
+  if (window === null) {
+    finishOutstandingSave(tabId, docKey);
+    journalWarn("no journal window name could be minted (no random source); this save is not recorded in the agent edit journal");
+    return refusedTicket("JOURNAL_UNAVAILABLE");
+  }
   const claim: SaveClaim = { stamp: basisStamp(tabId, from ?? docKey), life: journalTabLife(tabId) };
   const link = linkChain(tabId, docKey, from ?? docKey);
   // Frozen last: from here every exit settles the freeze (`record`'s
   // `finally`, or `cancel`), or it would hold its session's send turn.
   const plan: SavePlan = { tabId, docKey, from, window, content, origin, freeze: freezeFor(tabId, content), claim };
-  // Live until the deadline passes, by the wall clock or the timer, whichever is first.
-  let abandoned = false;
-  let deadlineAt = Infinity;
-  const live = () => !abandoned && performance.now() <= deadlineAt;
-  const work = () =>
-    link.base.then(async (parent) => {
-      if (!live()) {
-        link.release(parent);
-        return expired(plan.freeze);
-      }
-      let next: JournalObservedRef | null | undefined;
-      try {
-        const result = await executeSave(plan, parent, live, windowLabel);
-        next = result.next;
-        return result.outcome;
-      } finally {
-        link.release(next === undefined ? journalObservedBase(tabId, docKey) : next);
-      }
-    });
-  let outcome: Promise<SaveJournalOutcome> | null = null;
-  return {
-    record() {
-      if (outcome) return outcome;
-      deadlineAt = performance.now() + JOURNAL_DEADLINE_MS;
-      outcome = withJournalDeadline("a save capture", work).catch((error: unknown) => {
-        abandoned = true;
-        const refusal = toJournalRefusal(error);
-        journalWarn("save not recorded in the agent edit journal:", refusal.journalCode, refusal.message);
-        return { ...expired(plan.freeze), reason: refusal.journalCode };
-      }).finally(() => plan.freeze?.invalidate()); // a no-op once recorded: the first settle wins
-      return outcome;
-    },
-    cancel() {
-      if (outcome) return;
-      outcome = Promise.resolve(NOT_RECORDED);
-      plan.freeze?.invalidate();
-      void link.base.then(link.release);
-    },
-  };
+  return new ChainedSaveTicket(
+    link,
+    plan.freeze,
+    (parent, live) => executeSave(plan, parent, live, windowLabel),
+    () => journalObservedBase(tabId, docKey),
+  );
 }

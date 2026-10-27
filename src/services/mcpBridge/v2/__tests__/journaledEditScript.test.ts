@@ -17,7 +17,7 @@ import { textHash } from "@/services/agentJournal/provenance/payload";
 import { declaredScriptCertificate } from "@/services/agentJournal/review/declaredScript";
 import type { SelectionCertificate } from "@/services/agentJournal/selectionCertificate";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
-import { TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
+import { TEST_WRITE_CONTEXT, testAdmittedReads } from "@/test/mcpAttributionFixture";
 import { journalWarn } from "@/utils/debug";
 import { runJournaledEdit } from "../journaledEdit";
 import { resolveTab, type GuardedTab } from "../tabGuard";
@@ -48,6 +48,7 @@ function run(target: string, applied: string) {
     tool: "document.write",
     target,
     context: TEST_WRITE_CONTEXT,
+    reads: testAdmittedReads(),
     apply: () => {
       useDocumentStore.getState().setEditorContent(TAB, applied);
       return { postimage: applied, value: 1 };
@@ -68,7 +69,7 @@ beforeEach(() => {
 
 describe("runJournaledEdit — declared script", () => {
   it("sends the script's certificate with the prepare, not the commit", async () => {
-    expect(await run(TARGET, TARGET)).toEqual({ value: 1, durable: true });
+    expect(await run(TARGET, TARGET)).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(prepared().certificate).toEqual(await declaredScriptCertificate(PRE, TARGET));
     expect(committed()[2]).toBeUndefined();
   });
@@ -81,14 +82,14 @@ describe("runJournaledEdit — declared script", () => {
 
   it("a live editor that re-serializes commits other text, so the postimage check records a barrier", async () => {
     const reserialized = TARGET.replace("# 标题", "标题\n===");
-    expect(await run(TARGET, reserialized)).toEqual({ value: 1, durable: true });
+    expect(await run(TARGET, reserialized)).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(committed()[1]).toBe(reserialized);
     expect(prepared().certificate?.preHash).toBe(await textHash(PRE));
     expect(prepared().certificate?.postHash).not.toBe(await textHash(reserialized));
   });
 
   it("a script that cannot be built is logged, and the write goes ahead as a barrier", async () => {
-    expect(await run("lone \uD800", TARGET)).toEqual({ value: 1, durable: true });
+    expect(await run("lone \uD800", TARGET)).toEqual({ value: 1, durable: true, life: expect.any(Number) });
     expect(prepared().certificate).toBeUndefined();
     expect(vi.mocked(journalWarn)).toHaveBeenCalledWith(expect.stringContaining("document.write"), expect.anything());
   });

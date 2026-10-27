@@ -1,19 +1,19 @@
 // @vitest-environment node
-// WI-AL1.7 — the journal's health for the history panel's status line (`agent_journal_status`): starting, ready (with its generation, read-only and degraded flags) and failed (with the reason); whether live updates are starting, ready or failed, kept apart from the writer's health; a ready journal's own error (a legacy import that failed), an identity index that could not open, and the startup retention pass's warnings and errors are kept, never dropped as healthy; a malformed reply (an unknown or missing live-update state, a malformed retention summary included) is refused as JOURNAL_UNAVAILABLE; the count of selection certificates that fell back to a barrier is required and read (WI-AL2.1c)
+// WI-AL1.7 — the journal's health for the history panel's status line (`agent_journal_status`): starting, ready (with its generation, read-only and degraded flags) and failed (with the reason); whether live updates are starting, ready or failed, kept apart from the writer's health; a ready journal's own error (a legacy import that failed), an identity index that could not open, and the startup retention pass's warnings and errors are kept, never dropped as healthy; a malformed reply (an unknown or missing live-update state, a malformed retention summary included) is refused as JOURNAL_UNAVAILABLE; the count of selection certificates that fell back to a barrier is required and read (WI-AL2.1c); so are the page registrations refused at the per-window cap and the cleanup-worker runs lost, which a status must never drop as healthy; a pin breakdown that is an array is malformed
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
 import { readJournalHealth } from "../journalStatusClient";
 
 const invokeMock = vi.mocked(invoke);
-const base = { phase: "ready", generation: "9", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", truncatedTailBytes: 0, uncommittedAtStart: 0, uncertifiedFallbacks: 0 };
+const base = { phase: "ready", generation: "9", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", truncatedTailBytes: 0, uncommittedAtStart: 0, uncertifiedFallbacks: 0, registrationCapRefusals: 0, cleanupWorkerFailures: 0 };
 
 beforeEach(() => invokeMock.mockReset());
 
 describe("readJournalHealth", () => {
   it("reads a healthy journal", async () => {
     invokeMock.mockResolvedValueOnce(base);
-    expect(await readJournalHealth()).toEqual({ phase: "ready", generation: "9", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", error: null, identityError: null, retention: null, uncertifiedFallbacks: 0 });
+    expect(await readJournalHealth()).toEqual({ phase: "ready", generation: "9", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", error: null, identityError: null, retention: null, uncertifiedFallbacks: 0, registrationCapRefusals: 0, cleanupWorkerFailures: 0 });
     expect(invokeMock).toHaveBeenCalledWith("agent_journal_status", {});
   });
 
@@ -22,18 +22,23 @@ describe("readJournalHealth", () => {
     expect(await readJournalHealth()).toMatchObject({ uncertifiedFallbacks: 3 });
   });
 
+  it("reads the registration cap refusals and the cleanup-worker failures", async () => {
+    invokeMock.mockResolvedValueOnce({ ...base, registrationCapRefusals: 2, cleanupWorkerFailures: 1 });
+    expect(await readJournalHealth()).toMatchObject({ registrationCapRefusals: 2, cleanupWorkerFailures: 1 });
+  });
+
   it("reads a degraded and a read-only journal", async () => {
     invokeMock.mockResolvedValueOnce({ ...base, degraded: true, readOnly: true });
     expect(await readJournalHealth()).toMatchObject({ degraded: true, readOnly: true });
   });
 
   it("reads a journal that failed to start, with its reason", async () => {
-    invokeMock.mockResolvedValueOnce({ phase: "failed", readOnly: false, degraded: false, liveUpdates: "failed", identity: "sessionOnly", truncatedTailBytes: 0, uncommittedAtStart: 0, uncertifiedFallbacks: 0, error: "disk full" });
-    expect(await readJournalHealth()).toEqual({ phase: "failed", generation: null, readOnly: false, degraded: false, liveUpdates: "failed", identity: "sessionOnly", error: "disk full", identityError: null, retention: null, uncertifiedFallbacks: 0 });
+    invokeMock.mockResolvedValueOnce({ phase: "failed", readOnly: false, degraded: false, liveUpdates: "failed", identity: "sessionOnly", truncatedTailBytes: 0, uncommittedAtStart: 0, uncertifiedFallbacks: 0, registrationCapRefusals: 0, cleanupWorkerFailures: 0, error: "disk full" });
+    expect(await readJournalHealth()).toEqual({ phase: "failed", generation: null, readOnly: false, degraded: false, liveUpdates: "failed", identity: "sessionOnly", error: "disk full", identityError: null, retention: null, uncertifiedFallbacks: 0, registrationCapRefusals: 0, cleanupWorkerFailures: 0 });
   });
 
   it("reads a journal still starting", async () => {
-    invokeMock.mockResolvedValueOnce({ phase: "starting", readOnly: false, degraded: false, liveUpdates: "starting", identity: "sessionOnly", truncatedTailBytes: 0, uncommittedAtStart: 0, uncertifiedFallbacks: 0 });
+    invokeMock.mockResolvedValueOnce({ phase: "starting", readOnly: false, degraded: false, liveUpdates: "starting", identity: "sessionOnly", truncatedTailBytes: 0, uncommittedAtStart: 0, uncertifiedFallbacks: 0, registrationCapRefusals: 0, cleanupWorkerFailures: 0 });
     expect(await readJournalHealth()).toMatchObject({ phase: "starting", generation: null });
   });
 
@@ -107,6 +112,11 @@ describe("readJournalHealth", () => {
     ["a missing fallback count", { ...base, uncertifiedFallbacks: undefined }],
     ["a negative fallback count", { ...base, uncertifiedFallbacks: -1 }],
     ["a string fallback count", { ...base, uncertifiedFallbacks: "1" }],
+    ["a missing registration cap count", { ...base, registrationCapRefusals: undefined }],
+    ["a negative registration cap count", { ...base, registrationCapRefusals: -1 }],
+    ["a missing cleanup failure count", { ...base, cleanupWorkerFailures: undefined }],
+    ["a fractional cleanup failure count", { ...base, cleanupWorkerFailures: 0.5 }],
+    ["an array of pin counts", { ...base, gc: { ...gc, warnings: [{ ...gc.warnings[0], pinnedBy: [] }] } }],
     ["a numeric generation", { ...base, generation: 9 }],
     ["a missing degraded flag", { ...base, degraded: undefined }],
     ["a ready journal without its generation", { ...base, generation: undefined }],

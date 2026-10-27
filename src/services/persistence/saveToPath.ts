@@ -13,13 +13,19 @@
  *   - Line ending and hard break normalization applied on save (not in-memory)
  *     to preserve the original editing experience while writing clean files
  *   - SERIALIZED PER PATH. Saves to one file run in submission order; saves to
- *     different files stay concurrent. Without this an older write could land
- *     second and be recorded as the saved snapshot — see serializeByPath.ts
+ *     different files stay concurrent. "One file" is its identity
+ *     (`fileIdentity.ts`), so two spellings of it share one queue. Without this an older write could land
+ *     second and be recorded as the saved snapshot — see serializeByPath.ts.
+ *     A symlink is not a spelling: Rust's per-file lock
+ *     (`files/write/target_lock.rs`) keeps writes through it and its target
+ *     from interleaving. One document's saves
+ *     to two paths are deliberately not queued together, so a stalled write
+ *     to the old path never blocks a Save As.
  *   - History snapshots live in saveHistorySnapshot.ts. Failures don't block
  *     save success, but the call is AWAITED: `saveToPath` does not resolve
- *     until it settles, which close flows need. A hung history backend
- *     therefore holds the save promise open after the file and stores are
- *     already updated; a bounded timeout is the fix if that ever bites
+ *     until it settles, which close flows need. It settles within
+ *     `SNAPSHOT_TIMEOUT_MS`, so a hung history backend delays a save and the
+ *     saves queued behind it on its path by that much, never forever
  *   - Auto-save skips recent files list AND skips error toasts to avoid spam on
  *     a flaky disk; the user didn't initiate the action and the next manual save
  *     will surface the error
@@ -40,6 +46,15 @@
  *     later save. The reservation is activated only once its bytes reach the
  *     disk: a request refused by its path guard or its no-replace
  *     publication, or whose write fails, never supersedes an earlier save
+ *   - The ownership check excludes the saving tab only while it still holds
+ *     the document the save was claimed for: a save that outlived its tab's
+ *     close is checked against the tab reopened under its id like any other
+ *   - The ownership check runs at the save's turn, synchronously before the
+ *     write, and is not held across the write's await. It refuses a write
+ *     over a copy with unsaved changes at that turn; a copy that gains them
+ *     while the write is in flight ends exactly as one that gains them just
+ *     after it lands, which the rule allows. Holding it across the write
+ *     would mean blocking edits in every other tab for a disk round trip
  *   - A save counts as written the moment its bytes reach the disk: an MCP
  *     save whose later bookkeeping throws still consumed its client's reads
  *
@@ -68,7 +83,8 @@ import {
 } from "@/services/workspaces/fileOwnership";
 import { registerPendingSave } from "@/utils/pendingSaves";
 import { handleWriteError } from "./saveWriteError";
-import { normalizePath } from "@/utils/paths";
+import { fileIdentityKey } from "@/utils/paths/fileIdentity";
+import { getRuntimePlatform } from "@/utils/platform";
 import { serializeByPath } from "./serializeByPath";
 import {
   activateSaveTarget,
@@ -124,7 +140,9 @@ async function performSave(
   const format = isSameDocument(claim) ? documentSaveFormat(tabId) : ticket.format;
   const normalized = normalizeWithFormat(format, content);
 
-  const ownership = resolveWritableFileOwnership(tabId, path);
+  // Checked synchronously before the write, with no await between. A save of
+  // a document closed since (its tab id may hold a newer one) excludes no tab.
+  const ownership = resolveWritableFileOwnership(tabId, path, { foreignTab: !isSameDocument(claim) });
   if (!ownership.ok) {
     if (saveType === "manual") showFileOwnershipConflictToast(path, ownership.conflicts);
     return { ok: false, reason: "ownership-conflict", conflicts: ownership.conflicts };
@@ -183,7 +201,8 @@ function submitSave(
     wrote: false,
     noReplace: admission.noReplace === true,
   };
-  return serializeByPath(normalizePath(path), async () => {
+  // Keyed by file identity: two spellings of one file share one queue.
+  return serializeByPath(fileIdentityKey(path, getRuntimePlatform()), async () => {
     try {
       // The admission check runs at the save's turn, so its await cannot let
       // a later save of this file reach the disk first.
@@ -192,8 +211,9 @@ function submitSave(
       return await performSave(tabId, path, content, origin, ticket);
     } finally {
       ticket.journal.cancel();
-      // A save that wrote nothing consumed no reads: they precede the client's next write.
-      if (!ticket.wrote && origin.saveType === "mcp") restoreMcpReads(origin.reads);
+      // A save that wrote nothing consumed no reads: they precede the client's
+      // next write. A batch admitted with the request is its owner's to give back.
+      if (!ticket.wrote && origin.saveType === "mcp" && !admission.reads) restoreMcpReads(origin.reads);
     }
   });
 }
@@ -237,7 +257,8 @@ export function saveToPathForMcp(
   actor: McpAttribution,
   admission?: McpSaveAdmission
 ): Promise<SaveOutcome> {
-  // Detached before any await: a read made while this save is queued or writing is the next write's.
-  const reads = detachMcpReads(actor.connectionId);
+  // Detached before any await, unless the request detached its batch at
+  // admission: a read made while this save is queued or writing is the next write's.
+  const reads = admission?.reads ?? detachMcpReads(actor.connectionId);
   return submitSave(tabId, path, content, { saveType: "mcp", toolName, actor, reads }, admission);
 }

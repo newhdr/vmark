@@ -8,7 +8,9 @@
 //      RETURNS counts every gap of ≥ STALL_GAP_MS as stall (less one period, so it under-counts).
 //      Only stall after the library's own settle point (`due`, a probe timer armed before the call)
 //      up to that probe is excused, and only when the settle follows the probe with no sampler tick
-//      between: a tick between means the thread was free and the delay was the library's.
+//      between: a tick between means the thread was free and the delay was the library's. The gap
+//      from the last sample to the caller's continuation is counted the same way, so a stall after
+//      the settle (preemption, a GC pause, another `.then`) is excused, not charged.
 // Library-owned work: a library that blocks the main thread in a callback that does NOT settle the
 // call (a continuation, a dispatch) shows up to the sampler exactly like a caller stall. So the
 // library reports `ownMs` — the time it spent in all of its own callbacks after the call returned —
@@ -66,7 +68,14 @@ export async function timed<R>(call: () => Promise<R>, deadlineMs: number, ownMs
     const sampler = setInterval(sample, SAMPLE_MS);
     try {
       const r = await p;
-      const ms = performance.now() - t0;
+      const end = performance.now();
+      const ms = end - t0;
+      // The last gap, from the last sample to this continuation, no tick can see: a stall after the
+      // settle (a caller's `.then`, a GC pause, preemption) lands here. It is excused under the same
+      // rule as a stall before it — no tick after the probe — and the library's own time is charged
+      // back below, so library work in the settling callback still reads late.
+      const tail = end - prev;
+      if (dueAt !== null && tail >= STALL_GAP_MS) dueStallMs += tail - SAMPLE_MS;
       const stallExcuse = dueAt !== null && ticksAfterDue === 0 ? dueStallMs : 0;
       const excusedMs = Math.max(0, stallExcuse - ownMs(r));
       return { r, ms, stallMs, dueStallMs: stallExcuse, excusedMs, late, deadlineMs };
@@ -90,7 +99,7 @@ export function expectInTime(t: Timed<unknown>, what: string): void {
 }
 
 /** Block the main thread for `ms` of wall time: a caller stall. */
-function busy(ms: number): void {
+export function busy(ms: number): void {
   const end = performance.now() + ms;
   while (performance.now() < end);
 }

@@ -15,13 +15,17 @@
  *     a failed start (`generation: null`) or a health change with the same
  *     generation, only triggers a re-read.
  *   - A failed read is retried after `FEED_RETRY_MS`, doubling to
- *     `FEED_RETRY_MAX_MS`, without waiting for another append.
+ *     `FEED_RETRY_MAX_MS`, without waiting for another append. A read that
+ *     never settles fails at the journal deadline (`JOURNAL_TIMEOUT`), so a
+ *     hung journal call cannot stall the feed for good.
  *   - A listener that cannot be registered is not a read failure: `onError`
  *     reports reads only, so a good read never hides a feed that hears
  *     nothing. Until the listener registers the feed polls (at `pollMs`, or
  *     `FEED_POLL_MS` when the caller asked for none) and retries the
  *     registration with the same backoff; once it listens, events drive the
- *     reads again and the fallback polling ends.
+ *     reads again and the fallback polling ends. A registration that has not
+ *     settled within `FEED_LISTEN_BOUND_MS` counts as failed; if it resolves
+ *     after another attempt already listens, its listener is released.
  *   - Polling is opt-in (`pollMs`), for when live updates are not running:
  *     each successful read schedules the next one `pollMs` later. It shares
  *     the one timer with the retry, so an event's read restarts the interval
@@ -36,6 +40,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { journalWarn } from "@/utils/debug";
+import { JOURNAL_DEADLINE_MS, withJournalDeadline } from "./journalDeadline";
 
 /** The Tauri event the journal emits after appends and health changes. */
 export const GENERATION_EVENT = "agent-journal:generation";
@@ -43,6 +48,8 @@ export const FEED_RETRY_MS = 1_000;
 /** How often a feed re-reads while live updates are not running. */
 export const FEED_POLL_MS = 2_000;
 const FEED_RETRY_MAX_MS = 30_000;
+/** How long a listener registration may stay unsettled before it counts as failed. */
+export const FEED_LISTEN_BOUND_MS = 5_000;
 
 export interface JournalFeed {
   stop(): void;
@@ -88,7 +95,7 @@ function readScheduler<T>(
       timer = null;
     }
     try {
-      const value = await fetch();
+      const value = await withJournalDeadline("a feed read", fetch, JOURNAL_DEADLINE_MS);
       if (!state.stopped) {
         apply(value);
         const poll = nextPoll();
@@ -120,39 +127,62 @@ function readScheduler<T>(
 
 /**
  * Registers the generation listener (calling `onEvent` per event), retrying
- * a failed registration with backoff. `catchUp` runs once the first attempt
- * settles either way, and again after any later registration succeeds: a
+ * a failed or hung registration with backoff. `catchUp` runs once the first
+ * attempt fails or hangs, and after every registration that succeeds: a
  * change may have landed unheard.
  */
 function listenWithRetry(state: FeedState, onEvent: () => void, catchUp: () => void): { stop(): void } {
   let unlisten: (() => void) | null = null;
   let retryMs = FEED_RETRY_MS;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let bound: ReturnType<typeof setTimeout> | null = null;
+  let caughtUp = false;
 
-  const register = (first: boolean): void => {
+  const register = (): void => {
     timer = null;
-    listen(GENERATION_EVENT, onEvent)
-      .then((fn) => {
-        if (state.stopped) return fn();
+    let settled = false;
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      if (bound !== null) clearTimeout(bound);
+      bound = null;
+      if (state.stopped || state.listening) return;
+      journalWarn("journal live updates unavailable, polling:", error);
+      if (!caughtUp) {
+        caughtUp = true;
+        catchUp();
+      }
+      timer = setTimeout(register, retryMs);
+      retryMs = Math.min(retryMs * 2, FEED_RETRY_MAX_MS);
+    };
+    bound = setTimeout(() => fail(new Error(`no registration within ${FEED_LISTEN_BOUND_MS} ms`)), FEED_LISTEN_BOUND_MS);
+    listen(GENERATION_EVENT, onEvent).then(
+      (fn) => {
+        // A late answer from a hung attempt: another may already listen.
+        if (state.stopped || state.listening) return fn();
+        if (!settled && bound !== null) {
+          clearTimeout(bound);
+          bound = null;
+        }
+        settled = true;
+        // A late success may land while a retry waits or runs: cancel the wait;
+        // the running attempt's bound and answer stand down on `listening`.
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
         unlisten = fn;
         state.listening = true;
-        if (!first) catchUp();
-      })
-      .catch((error: unknown) => {
-        if (state.stopped) return;
-        journalWarn("journal live updates unavailable, polling:", error);
-        timer = setTimeout(() => register(false), retryMs);
-        retryMs = Math.min(retryMs * 2, FEED_RETRY_MAX_MS);
-      })
-      .finally(() => {
-        if (first) catchUp();
-      });
+        caughtUp = true;
+        catchUp();
+      },
+      fail,
+    );
   };
-  register(true);
+  register();
 
   return {
     stop() {
       if (timer !== null) clearTimeout(timer);
+      if (bound !== null) clearTimeout(bound);
       unlisten?.();
       unlisten = null;
     },

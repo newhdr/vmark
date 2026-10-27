@@ -69,9 +69,10 @@ import { respond } from "@/services/mcpBridge/utils";
 import { wrapHandler } from "./wrapHandler";
 import { writeContent } from "./writeContent";
 import { runJournaledEdit } from "./journaledEdit";
+import { withAdmittedReads } from "./admittedReads";
 import { liveCompositionRefusal, recoverLiveWysiwyg } from "./liveEditor";
 import { readOperationArgs, readOperationArgsChecked } from "./readOperationArgs";
-import { requireAddresses } from "./writeAddresses";
+import { requireWriteArgs } from "./writeAddresses";
 import { requireCurrentRevision, requireTab, resolveTab, structuredError } from "./tabGuard";
 import {
   applyTransform,
@@ -145,10 +146,10 @@ export async function handleDocumentTransform(
   args: Record<string, unknown>,
   context: McpWriteContext,
 ): Promise<void> {
-  return wrapHandler(id, async () => {
+  return wrapHandler(id, () => withAdmittedReads(context, async (reads) => {
     const checked = readOperationArgsChecked("vmark.document.transform", args);
     const { wire } = checked;
-    const addressed = await requireAddresses(id, checked);
+    const addressed = await requireWriteArgs(id, checked);
     if (!addressed) return;
     const { kind } = wire;
     if (!isTransformKind(kind)) {
@@ -182,6 +183,7 @@ export async function handleDocumentTransform(
       target: transformed,
       ...addressed,
       context,
+      reads,
       apply: () => {
         const result = writeContent(tab.tabId, transformed, tab.kind);
         if ("error" in result) return { refused: result.error === "INVALID_TAB" ? ("closed" as const) : ("composing" as const) };
@@ -196,5 +198,5 @@ export async function handleDocumentTransform(
       success: true,
       data: { revision: outcome.value, applied: true, durable: outcome.durable },
     });
-  });
+  }));
 }

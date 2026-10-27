@@ -59,15 +59,19 @@ export function journalTimeout(what: string, ms: number): JournalRefusal {
 }
 
 /**
- * `running`'s value, or `null` once `ms` passes without it settling. Its
- * rejection passes through unchanged.
+ * `running`'s value, or `null` once `ms` passes without it settling — by
+ * the timer, or by the monotonic clock when the value lands late but before
+ * the timer could fire (see the header). Its rejection passes through
+ * unchanged.
  */
 export function settleWithin<T>(running: Promise<T>, ms: number): Promise<{ value: T } | null> {
+  const started = performance.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), Math.max(0, ms));
   });
-  return Promise.race([running.then((value) => ({ value })), expired]).finally(() => clearTimeout(timer));
+  const settled = running.then((value) => (performance.now() - started > ms ? null : { value }));
+  return Promise.race([settled, expired]).finally(() => clearTimeout(timer));
 }
 
 /**

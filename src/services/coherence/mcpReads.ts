@@ -8,9 +8,12 @@
  * synchronously when a write is submitted (`detachMcpReads`), so reads
  * arriving while the write is queued or saving belong to the next write;
  * a write that never happened gives its batch back (`restoreMcpReads`).
+ * An MCP edit detaches its batch at admission instead (`admittedReads.ts`)
+ * and hands it to its save.
  *
  * @coordinates-with mcpCapture.ts — the write that consumes a batch
  * @coordinates-with services/persistence/saveToPath.ts — detaches at submission
+ * @coordinates-with services/mcpBridge/v2/admittedReads.ts — detaches at an edit's admission
  * @coordinates-with mcpConnectionLifetimes.ts — which connections may hold reads
  * @module services/coherence/mcpReads
  */

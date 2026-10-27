@@ -30,6 +30,7 @@ import { saveToPath, saveToPathForMcp } from "./saveToPath";
 import { __resetSerializer } from "./serializeByPath";
 import { resetSaveTargetClaims } from "./saveTargetClaim";
 import { TEST_ATTRIBUTION } from "@/test/mcpAttributionFixture";
+import { cleanupTabState } from "@/services/windowClose/tabCleanup";
 
 const DOC = `${ROOT}/notes.md`;
 const BOM = "\u{FEFF}";
@@ -122,6 +123,35 @@ describe("saveToPathForMcp reports how the save ended", () => {
     expect(conflicts.map((c) => [c.tabId, c.windowLabel])).toEqual([["tab-elsewhere", "doc-1"]]);
     expect(statefulFs.writesTo(DOC)).toEqual([]);
     expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it("a save queued before its tab closed and reopened under the same id respects the newcomer's unsaved changes", async () => {
+    const tabId = await openDocInTab(DOC, "before\n");
+    setRailMode(true);
+    // Hold the per-path queue: the first save's write waits for the gate.
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    let writing = 0;
+    statefulFs.stubCommand("atomic_write_file", async (args) => {
+      writing++;
+      await gate;
+      statefulFs.externalWrite(String(args.path), String(args.content));
+    });
+    const first = saveToPath(tabId, DOC, "first\n", "manual");
+    await vi.waitFor(() => expect(writing).toBe(1));
+    const stale = saveToPathForMcp(tabId, DOC, "stale\n", "document.write", TEST_ATTRIBUTION);
+    // The tab closes (its document and save claims go), and a new document opens under the same id with unsaved edits.
+    cleanupTabState(tabId);
+    useDocumentStore.getState().initDocument(tabId, "first\n", DOC);
+    editDoc(tabId, "the newcomer's unsaved edit\n");
+    open();
+
+    expect(await first).toBe(true);
+    const outcome = await stale;
+    expect(outcome).toMatchObject({ ok: false, reason: "ownership-conflict" });
+    const conflicts = (outcome as { conflicts: Array<{ tabId: string }> }).conflicts;
+    expect(conflicts.map((c) => c.tabId)).toEqual([tabId]);
+    expect(statefulFs.read(DOC)).toBe("first\n");
   });
 
   it("the human door still answers with a boolean and still toasts a failure", async () => {

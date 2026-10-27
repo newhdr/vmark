@@ -106,6 +106,21 @@ impl McpBridgeState {
         self.write_lock.lock().await
     }
 
+    /// The write lock for a client's request, or the WRITE_BUSY refusal once
+    /// [`WRITE_LOCK_WAIT`](super::state::WRITE_LOCK_WAIT) passes without it.
+    /// The refusal comes before the request is registered or run, so it is a
+    /// definite "not applied" the client can retry.
+    pub(crate) async fn write_lock_for_request(&self) -> Result<MutexGuard<'_, ()>, String> {
+        tokio::time::timeout(super::state::WRITE_LOCK_WAIT, self.write_lock.lock())
+            .await
+            .map_err(|_| {
+                format!(
+                    "WRITE_BUSY: another write held VMark's write lock for {} s; this request was not applied. Retry it.",
+                    super::state::WRITE_LOCK_WAIT.as_secs()
+                )
+            })
+    }
+
     /// Mark the webview as alive or not.
     pub(crate) fn set_webview_alive(&self, alive: bool) {
         self.webview_alive.store(alive, Ordering::Relaxed);
@@ -186,15 +201,28 @@ impl McpBridgeState {
     }
 
     /// Wait until every admitted operation has finished. `stop_bridge` calls
-    /// it after draining the clients, so no new operation can be admitted.
+    /// it after draining the clients, so no new operation can be admitted,
+    /// and bounds the wait.
     pub(crate) async fn await_operations(&self) {
         drop(self.operations.write().await);
     }
 
     /// Forget everything keyed by a destroyed window's label. Its webview
-    /// dies without clearing its own workspace registration.
+    /// dies without clearing its own workspace and tab registrations.
     pub(crate) async fn forget_window(&self, label: &str) {
-        self.lock().await.window_workspaces.remove(label);
+        let mut guard = self.lock().await;
+        guard.window_workspaces.remove(label);
+        guard.window_tabs.remove(label);
+    }
+
+    /// Replace the tabs `label`'s window holds; an empty list removes its entry.
+    pub(crate) async fn set_window_tabs(&self, label: &str, tab_ids: Vec<String>) {
+        let mut guard = self.lock().await;
+        if tab_ids.is_empty() {
+            guard.window_tabs.remove(label);
+        } else {
+            guard.window_tabs.insert(label.to_string(), tab_ids);
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// WI-AL1.4 — the Source-mode provenance collector: a real CodeMirror view reports every transaction to its tab's session before the store write, a transaction it did not see (a state swap) fails closed as unobserved-transaction, a view created on text the session does not hold attaches uncertified, a hidden view reports nothing, store-to-view syncs are not certified as edits, and a replaced session (save-as) is re-attached uncertified.
+// WI-AL1.4 — the Source-mode provenance collector: a real CodeMirror view reports every transaction to its tab's session before the store write, a transaction it did not see (a state swap) fails closed as unobserved-transaction, a view created on text the session does not hold attaches uncertified, a hidden view reports nothing, store-to-view syncs are not certified as edits, and a replaced session (save-as) is re-attached uncertified; touching changes in one transaction (multi-cursor, formatting) are composed section by section, so the journal's map matches CodeMirror's own mapPos at the shared boundary.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
@@ -10,6 +10,7 @@ import { useDocumentStore } from "@/stores/documentStore";
 import { freezeUnsavedProvenance } from "../../unsavedProvenance";
 import { provenanceSessionFor, startProvenanceSessions } from "../../provenanceSessions";
 import { createSourceProvenance, type SourceProvenance } from "../sourceCollector";
+import { decodeProvenance } from "../../provenance/codec";
 
 type Breaks = { whole: { reason: string; origin: string } | null };
 async function wholeOf(tabId: string, buffer: string) {
@@ -199,5 +200,24 @@ describe("source collector", () => {
     p.start(view);
     expect(() => type(view, 0, "a")).not.toThrow();
     p.stop();
+  });
+
+  it("composes touching changes section by section, matching CodeMirror's mapPos", async () => {
+    const { view } = mount("t1");
+    type(view, 0, "abcd");
+    expect(await wholeOf("t1", "abcd")).toBeNull(); // the next window starts at "abcd"
+    const changes = view.state.changes([
+      { from: 0, to: 2, insert: "X" },
+      { from: 2, to: 4, insert: "Y" },
+    ]);
+    view.dispatch({ changes });
+    const f = freezeUnsavedProvenance("t1", "XY")!;
+    const named = await f.payload(null);
+    const body = (named!.payload as unknown as { body: unknown }).body;
+    const map = decodeProvenance(body);
+    f.invalidate();
+    for (let p = 0; p <= 4; p++) {
+      expect([p, map.L(p), map.R(p)]).toEqual([p, changes.mapPos(p, -1), changes.mapPos(p, 1)]);
+    }
   });
 });

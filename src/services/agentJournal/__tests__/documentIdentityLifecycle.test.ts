@@ -1,5 +1,5 @@
 // @vitest-environment node
-// Journal identity lifetimes: the budget never evicts an entry whose save is outstanding or in flight (the save behind it must still chain on it), and a tab's journal state ends when the tab closes — a save capture or Save As bind still in flight then, answering late, writes nothing back, even when the same tab id was reopened meanwhile
+// Journal identity lifetimes: the budget never evicts an entry whose save is outstanding or in flight (the save behind it must still chain on it), nor the redirect a moved save still reports back through, and a tab's journal state ends when the tab closes — a save capture or Save As bind still in flight then, answering late, writes nothing back, even when the same tab id was reopened meanwhile
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/persistence/workspaceStorage", () => ({ getCurrentWindowLabel: () => "main" }));
@@ -11,11 +11,13 @@ import { agentJournalEpochFake } from "@/test/agentJournalEpochFake";
 import {
   JOURNAL_IDENTITY_BUDGET,
   admitOutstandingSave,
+  carryJournalBasis,
   clearOutstandingSaveBase,
   finishOutstandingSave,
   isJournalBasisEvicted,
   isJournalTabLive,
   journalBasis,
+  journalKeyNow,
   journalObservedBase,
   journalTabLife,
   outstandingSaveBase,
@@ -40,6 +42,21 @@ beforeEach(() => {
 afterEach(() => resetUnsavedProvenanceSources());
 
 describe("eviction spares entries with saves in flight", () => {
+  it("keeps a moved save's redirect past the redirect budget, so its finish reaches where it moved", () => {
+    expect(admitOutstandingSave("s", "path:/a.md", 1)).toBe(true);
+    carryJournalBasis("s", "path:/a.md", "path:/b.md");
+    for (let i = 0; i <= JOURNAL_IDENTITY_BUDGET; i++) carryJournalBasis(`m${i}`, "k", "k2");
+    expect(journalKeyNow("s", "path:/a.md")).toBe("path:/b.md");
+    finishOutstandingSave("s", "path:/a.md");
+    expect(admitOutstandingSave("s", "path:/b.md", 1)).toBe(true);
+  });
+
+  it("evicts an idle redirect at the redirect budget", () => {
+    carryJournalBasis("idle", "path:/a.md", "path:/b.md");
+    for (let i = 0; i < JOURNAL_IDENTITY_BUDGET; i++) carryJournalBasis(`m${i}`, "k", "k2");
+    expect(journalKeyNow("idle", "path:/a.md")).toBe("path:/a.md");
+  });
+
   it("keeps an outstanding save's chain and evicts the next idle entry instead", () => {
     const chain = new Promise<JournalObservedRef | null>(() => {});
     expect(admitOutstandingSave("busy", "k", 8)).toBe(true);

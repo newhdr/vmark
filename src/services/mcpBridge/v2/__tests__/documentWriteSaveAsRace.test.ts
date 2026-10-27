@@ -1,5 +1,5 @@
 // @vitest-environment node
-// vmark.document.write against a Save As that lands while the write is in flight. During the prepare: the tab now holds another journal document, so the write aborts as closed and nothing is applied or committed under the old key. After the commit: the save goes to the path the tab holds now, never back to the old one.
+// vmark.document.write against a Save As that lands while the write is in flight. During the prepare: the tab now holds another journal document, so the write aborts as closed and nothing is applied or committed under the old key. After the commit: the save goes to the path the tab holds now, never back to the old one; a tab closed (and perhaps reopened under the same id) is not saved at all.
 // And vmark.workspace.save_as against a file created at its destination after the overwrite probe: the real pipeline publishes without replacing, so the save is refused as APPROVAL_REQUIRED and the tab keeps its path.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -28,7 +28,7 @@ import { useDocumentStore, useRevisionStore } from "@/stores/documentStore";
 import { respond } from "@/services/mcpBridge/utils";
 import { saveToPathForMcp } from "@/services/persistence/saveToPath";
 import { handleDocumentWrite } from "@/services/mcpBridge/v2/document";
-import { resetJournalBases } from "@/services/agentJournal/documentIdentity";
+import { releaseTabJournal, resetJournalBases } from "@/services/agentJournal/documentIdentity";
 import { agentJournalFake as fake } from "@/test/agentJournalFake";
 import { TEST_WRITE_CONTEXT } from "@/test/mcpAttributionFixture";
 import { handleWorkspaceSaveAs } from "@/services/mcpBridge/v2/workspaceSaveAs";
@@ -113,6 +113,24 @@ describe("document.write — Save As while the write is in flight", () => {
     expect(saveToPathForMcp).not.toHaveBeenCalled();
     expect(reply("s-closed")).toMatchObject({ success: true, data: { saved: false } });
     expect((reply("s-closed").data as { save_error?: string }).save_error).toMatch(/closed/);
+  });
+
+  it("a tab closed and reopened under the same id during the commit is not saved over the newcomer's file", async () => {
+    seed();
+    const commit = fake.commitControlledWrite.getMockImplementation();
+    if (!commit) throw new Error("fake commit missing");
+    fake.commitControlledWrite.mockImplementationOnce(async (...args) => {
+      useDocumentStore.getState().removeDocument("t1");
+      releaseTabJournal("t1");
+      useDocumentStore.getState().initDocument("t1", "another file\n", "/notes/other.md");
+      return commit(...args);
+    });
+    await handleDocumentWrite("s-reopened", { content: "AI text\n" }, TEST_WRITE_CONTEXT);
+
+    expect(saveToPathForMcp).not.toHaveBeenCalled();
+    expect(reply("s-reopened")).toMatchObject({ success: true, data: { applied: true, saved: false } });
+    expect((reply("s-reopened").data as { save_error?: string }).save_error).toMatch(/closed/);
+    expect(useDocumentStore.getState().documents.t1?.content).toBe("another file\n");
   });
 
   it("without a Save As the save goes to the path the write started on", async () => {

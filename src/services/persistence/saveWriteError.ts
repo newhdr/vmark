@@ -22,6 +22,8 @@
 import { imeToast as toast } from "@/services/ime/imeToast";
 import i18n from "@/i18n";
 import { useDocumentStore } from "@/stores/documentStore";
+import { isSameFile } from "@/utils/paths/fileIdentity";
+import { getRuntimePlatform } from "@/utils/platform";
 import { clearPendingSave, type registerPendingSave } from "@/utils/pendingSaves";
 import { saveError } from "@/utils/debug";
 import { commandErrorDetailString, isCommandErrorCode } from "@/services/commands/commandError";
@@ -49,20 +51,21 @@ function parseParentMissingError(error: unknown): string | null {
   return message.slice(PARENT_MISSING_PREFIX.length);
 }
 
-/** True when a no-replace write was refused because a file was already there. */
-function isTargetExists(error: unknown): boolean {
-  return (
-    isCommandErrorCode(error, "conflict") &&
-    commandErrorDetailString(error, "kind") === "target-exists"
-  );
+/** The `detail.kind` of a `conflict` refusal, or `null` for anything else. */
+function conflictKind(error: unknown): string | null {
+  return isCommandErrorCode(error, "conflict") ? commandErrorDetailString(error, "kind") : null;
+}
+
+/** Whether `path` is still the file of the open document `claim` names. */
+function isOwnFile(claim: SaveTargetClaim, path: string): boolean {
+  if (!isSameDocument(claim)) return false;
+  const live = useDocumentStore.getState().getDocument(claim.tabId)?.filePath;
+  return !!live && isSameFile(live, path, getRuntimePlatform());
 }
 
 /** Mark the claim's document missing when `path` is still that document's own file. */
 function markMissingIfOwnFile(claim: SaveTargetClaim, path: string): void {
-  if (!isSameDocument(claim)) return;
-  const store = useDocumentStore.getState();
-  if (store.getDocument(claim.tabId)?.filePath !== path) return;
-  store.markMissing(claim.tabId);
+  if (isOwnFile(claim, path)) useDocumentStore.getState().markMissing(claim.tabId);
 }
 
 /**
@@ -100,7 +103,8 @@ export function handleWriteError(
 
   // Only an MCP Save As asks for no-replace, and that door never toasts:
   // its caller reports the refusal to the client.
-  if (isTargetExists(error)) return { ok: false, reason: "target-exists", path };
+  const kind = conflictKind(error);
+  if (kind === "target-exists") return { ok: false, reason: "target-exists", path };
 
   // Manual saves toast; auto-saves stay quiet so a flaky disk doesn't pop
   // a notification every interval. The next manual save (or an external

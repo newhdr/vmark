@@ -63,7 +63,7 @@ describe("createComment", () => {
     framed("comment_user_create", async () => created);
     await createComment(TAB, { mode: "markdown", from: 0, to: 5, selected: "hello", text: "hello there" }, "x");
     const [sent] = payloads("comment_user_create");
-    expect(sent.selection).toEqual({ start: TEXT.indexOf("hello"), end: TEXT.indexOf("hello") + 5, precision: "exact" });
+    expect(sent.selection).toEqual({ start: TEXT.indexOf("hello"), end: TEXT.indexOf("hello") + 5, precision: "approximate" });
   });
 
   it("passes a refusal through with its code", async () => {

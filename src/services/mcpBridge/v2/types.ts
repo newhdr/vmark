@@ -141,9 +141,9 @@ export type V2ErrorCode =
   | "INVALID_ADDRESSES"
   // The comment tools (vmark.comments.*). INVALID_COMMENT: a malformed or
   // unknown comment id, or a malformed request. STALE_COMMENT: the thread
-  // changed since its commentGen was read — list again. COMMENT_NOT_ALLOWED:
-  // the thread is resolved or deleted. COMMENT_LIMIT: too many replies or
-  // too long a body.
+  // changed or was deleted since its commentGen was read — list again.
+  // COMMENT_NOT_ALLOWED: the thread is resolved. COMMENT_LIMIT: too many replies,
+  // too long a body, a full comment store, or a thread that can change no more.
   | "INVALID_COMMENT"
   | "STALE_COMMENT"
   | "COMMENT_NOT_ALLOWED"
@@ -157,16 +157,30 @@ interface V2ErrorBase {
   message: string;
   /** Optional payload — populated by STALE responses with the up-to-date revision. */
   current_revision?: string;
-  /** INTERNAL only: the edit changed the document before the failure (re-read it). */
-  applied?: true;
-  /** With `applied`: whether the journal durably recorded the changed text. */
-  durable?: boolean;
 }
 
-/** A V2 error envelope; only ABORTED carries a `reason`, and it always does. */
+/** An error after which the document is as it was. */
+interface NothingApplied {
+  applied?: never;
+  durable?: never;
+}
+
+/** INTERNAL after the edit changed the document (re-read it). */
+interface EditApplied {
+  applied: true;
+  /** Whether the journal durably recorded the changed text. */
+  durable: boolean;
+}
+
+/**
+ * A V2 error envelope. Only ABORTED carries a `reason`, and it always does;
+ * only INTERNAL may report an applied edit, and then always says whether it
+ * is durable.
+ */
 export type V2Error =
-  | (V2ErrorBase & { error: "ABORTED"; reason: AbortReason })
-  | (V2ErrorBase & { error: Exclude<V2ErrorCode, "ABORTED">; reason?: never });
+  | (V2ErrorBase & NothingApplied & { error: "ABORTED"; reason: AbortReason })
+  | (V2ErrorBase & NothingApplied & { error: Exclude<V2ErrorCode, "ABORTED">; reason?: never })
+  | (V2ErrorBase & EditApplied & { error: "INTERNAL"; reason?: never });
 
 /**
  * Construct a V2 error envelope.
