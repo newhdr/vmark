@@ -240,11 +240,20 @@ describe("runJournaledMutation — the worst case", () => {
     slowPayload(3000);
     const worst = JOURNAL_PREAPPLY_BUDGET_MS + EFFECTS_DEADLINE_MS + JOURNAL_DEADLINE_MS;
     expect(worst).toBe(17_000);
+    let effectsStarted = false;
     const t0 = performance.now();
-    const run = track(runJournaledMutation(mutation({ effects: () => never() })));
+    const run = track(runJournaledMutation(mutation({
+      effects: () => {
+        effectsStarted = true;
+        return never();
+      },
+    })));
     await vi.advanceTimersByTimeAsync(3000);
     await untilReady(() => sent(PREPARE) === 1);
     await vi.advanceTimersByTimeAsync(3999);
+    // The prepare reply is checked against a real digest before the effects
+    // start their deadline; advancing the clock before then would fire nothing.
+    await untilReady(() => effectsStarted);
     await vi.advanceTimersByTimeAsync(EFFECTS_DEADLINE_MS);
     await untilReady(() => sent("agent_journal_commit") === 1);
     await vi.advanceTimersByTimeAsync(JOURNAL_DEADLINE_MS);
