@@ -23,7 +23,9 @@ fn the_largest_size_cap_reads_the_whole_log() {
 #[cfg(unix)]
 #[test]
 fn a_path_whose_existence_cannot_be_checked_is_an_io_failure() {
-    use crate::agent_journal::legacy_import::{retire_legacy_file, LegacyImportReport, RetireError};
+    use crate::agent_journal::legacy_import::{
+        retire_legacy_file, LegacyImportReport, RetireError,
+    };
     let dir = tmp();
     let file = dir.path().join("plain");
     std::fs::write(&file, "x").unwrap();
