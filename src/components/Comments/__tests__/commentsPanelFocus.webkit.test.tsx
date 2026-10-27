@@ -1,4 +1,4 @@
-// WI-AL3.2 — the comments panel's keyboard focus in real WebKit, where a clicked button does not take focus, a disabled one loses it at the next rendering update and a removed one leaves it on the page: after a recorded action focus waits on the page for the re-read and then goes to the action in the pressed one's place, whether the journal answered within the frame or after it; a refusal or a cancelled delete after a frame lets focus fall and returns it to the pressed button, also when the list read after it never answers, while one answered within the frame never takes focus from a button pressed by keyboard; a panel closed while that is being confirmed moves nothing afterwards; after this window's delete it goes to the thread now in the deleted one's place, and of two quick deletes the second's place decides; a click on the panel's own blank space while an action runs or waits for the re-read is the person's choice and nothing is placed after it; of two overlapping actions the one begun later decides; a thread deleted elsewhere while its reply box had focus, mid-composition too, hands focus to the Deleted comment line's Dismiss, which hands it to the restored reply box when the thread is listed again, and a focused action another window's change removed hands it to the action now in its place; a recorded action whose target another panel's action has disabled waits for it to be enabled; focus a shortcut moves to the editor while an action runs is the person's, so no later re-read takes it back; the panel is mounted as the app mounts it under StrictMode, and also without it
+// WI-AL3.2 — the comments panel's keyboard focus in real WebKit, where a clicked button takes focus only off macOS (a mouse press there then runs as a keyboard press does), a disabled one loses it at the next rendering update and a removed one leaves it on the page: after a recorded action focus waits on the page for the re-read and then goes to the action in the pressed one's place, whether the journal answered within the frame or after it; a refusal or a cancelled delete after a frame lets focus fall and returns it to the pressed button, also when the list read after it never answers, while one answered within the frame never takes focus from a button pressed by keyboard; a panel closed while that is being confirmed moves nothing afterwards; after this window's delete it goes to the thread now in the deleted one's place, and of two quick deletes the second's place decides; a click on the panel's own blank space while an action runs or waits for the re-read is the person's choice and nothing is placed after it; of two overlapping actions the one begun later decides; a thread deleted elsewhere while its reply box had focus, mid-composition too, hands focus to the Deleted comment line's Dismiss, which hands it to the restored reply box when the thread is listed again, and a focused action another window's change removed hands it to the action now in its place; a recorded action whose target another panel's action has disabled waits for it to be enabled; focus a shortcut moves to the editor while an action runs is the person's, so no later re-read takes it back; the panel is mounted as the app mounts it under StrictMode, and also without it
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -30,6 +30,7 @@ import type { CommentThread, ThreadState } from "@/services/agentJournal/comment
 import { CommentsPanel } from "../CommentsPanel";
 import { forgetCommentDrafts } from "../commentDrafts";
 import { releaseCommentAction, takeCommentAction } from "../commentActionLock";
+import { webkitClickFocusesButton } from "@/test/focusFacts";
 
 const TAB = "t-1";
 const KEY = "path:/a.md";
@@ -199,6 +200,14 @@ describe("after a recorded action", () => {
   });
 });
 
+/**
+ * The focus trail of a mouse press on `name`. Where a click focuses the button
+ * (`webkitClickFocusesButton`), the press starts as a keyboard one does, so
+ * the keyboard trail follows the click's own `in`; on macOS only the return.
+ */
+const byMouse = (name: string, keyboard: string[]): string[] =>
+  webkitClickFocusesButton() ? [`in:${name}`, ...keyboard] : [`in:${name}`];
+
 describe("after an action that changed nothing", () => {
   /**
    * The focus events after the press, not only where focus ends: a keyboard
@@ -213,7 +222,7 @@ describe("after an action that changed nothing", () => {
 
   it.each<[How, string[]]>([
     ["keyboard", ["out:resolve", "in:resolve"]],
-    ["mouse", ["in:resolve"]],
+    ["mouse", byMouse("resolve", ["out:resolve", "in:resolve"])],
   ])("a refusal after a frame: focus falls to the page and returns to the pressed button (%s)", async (how, trail) => {
     refuseResolve(afterFrame);
     mount();
@@ -258,7 +267,7 @@ describe("after an action that changed nothing", () => {
 
   it.each<["after a frame" | "at once", How, string[]]>([
     ["after a frame", "keyboard", ["out:delete", "in:delete"]],
-    ["after a frame", "mouse", ["in:delete"]],
+    ["after a frame", "mouse", byMouse("delete", ["out:delete", "in:delete"])],
     ["at once", "keyboard", []],
     ["at once", "mouse", ["in:delete"]],
   ])("a delete whose confirmation is cancelled %s: focus ends on Delete (%s)", async (when, how, trail) => {

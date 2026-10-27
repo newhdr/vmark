@@ -20,8 +20,21 @@
 import { expect } from "vitest";
 import { add, afterFrame, countFocusOut, factHost, mountBusy, record, where } from "./focusFactHost";
 
+/**
+ * Whether a mouse click focuses the clicked button in the WebKit this runs in.
+ * macOS WebKit (WKWebView, Safari) focuses nothing on a click; Linux WebKit
+ * (WebKitGTK, and the Playwright WebKit on CI's Ubuntu runner) focuses the
+ * button, measured on that runner: focus ended on the clicked button, with a
+ * `focusin` between the previous owner's `focusout` and the `pointerup`.
+ */
+export function webkitClickFocusesButton(): boolean {
+  return !navigator.platform.startsWith("Mac");
+}
+
 export interface FocusEngine {
   name: string;
+  /** A mouse click focuses the clicked button (see `webkitClickFocusesButton`). */
+  clickFocusesButton: boolean;
   /** A mouse click on `el`, as the engine delivers one. */
   click(el: HTMLElement): Promise<void>;
   /** Let deferred focus work (blur of a disabled control) happen. */
@@ -38,13 +51,13 @@ export interface FocusFact {
 /** The facts, in the order they run. */
 export const FOCUS_FACTS: readonly FocusFact[] = [
   {
-    name: "F1: a mouse click does not focus the clicked button",
+    name: "F1: a mouse click focuses the clicked button only where the platform does",
     pointer: true,
     run: async (engine) => {
       const b = add("button", "b");
       await engine.click(b);
       await engine.settle();
-      expect({ focus: where() }).toEqual({ focus: "body" });
+      expect({ focus: where() }).toEqual({ focus: engine.clickFocusesButton ? "b" : "body" });
     },
   },
   {
@@ -60,7 +73,7 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
     },
   },
   {
-    name: "F3: a mouse click elsewhere moves focus from a focused textarea to the page, with a focusout",
+    name: "F3: a mouse click elsewhere moves focus from a focused textarea to the page or the clicked button, with a focusout",
     pointer: true,
     run: async (engine) => {
       const area = add("textarea", "area");
@@ -70,11 +83,11 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
       const out = countFocusOut(area);
       await engine.click(other);
       await engine.settle();
-      expect({ focus: where(), focusout: out.n }).toEqual({ focus: "body", focusout: 1 });
+      expect({ focus: where(), focusout: out.n }).toEqual({ focus: engine.clickFocusesButton ? "other" : "body", focusout: 1 });
     },
   },
   {
-    name: "F3b: a mouse click elsewhere moves focus from a focused button to the page, with a focusout",
+    name: "F3b: a mouse click elsewhere moves focus from a focused button to the page or the clicked button, with a focusout",
     pointer: true,
     run: async (engine) => {
       const b = add("button", "b");
@@ -84,11 +97,11 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
       const out = countFocusOut(b);
       await engine.click(other);
       await engine.settle();
-      expect({ focus: where(), focusout: out.n }).toEqual({ focus: "body", focusout: 1 });
+      expect({ focus: where(), focusout: out.n }).toEqual({ focus: engine.clickFocusesButton ? "other" : "body", focusout: 1 });
     },
   },
   {
-    name: "F3c: a mouse click elsewhere moves focus from a focused button just disabled to the page, with one focusout",
+    name: "F3c: a mouse click elsewhere moves focus from a focused button just disabled to the page or the clicked button, with one focusout",
     pointer: true,
     run: async (engine) => {
       const b = add("button", "b");
@@ -98,7 +111,7 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
       b.disabled = true;
       await engine.click(other);
       await engine.settle();
-      expect({ focus: where(), focusout: out.n }).toEqual({ focus: "body", focusout: 1 });
+      expect({ focus: where(), focusout: out.n }).toEqual({ focus: engine.clickFocusesButton ? "other" : "body", focusout: 1 });
     },
   },
   {
@@ -234,9 +247,10 @@ export const FOCUS_FACTS: readonly FocusFact[] = [
       record(document, ["pointerdown", "mousedown", "blur", "focusout", "focusin", "pointerup", "mouseup", "click"], log);
       await engine.click(other);
       await engine.settle();
+      const focusin = engine.clickFocusesButton ? ["focusin@other"] : [];
       expect({ focus: where(), log }).toEqual({
-        focus: "body",
-        log: ["pointerdown@other", "mousedown@other", "blur@b", "focusout@b", "pointerup@other", "mouseup@other", "click@other"],
+        focus: engine.clickFocusesButton ? "other" : "body",
+        log: ["pointerdown@other", "mousedown@other", "blur@b", "focusout@b", ...focusin, "pointerup@other", "mouseup@other", "click@other"],
       });
     },
   },

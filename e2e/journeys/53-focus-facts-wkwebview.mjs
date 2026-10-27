@@ -29,6 +29,7 @@ const RUN_FACTS = `(async () => {
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
   const engine = {
     name: "WKWebView",
+    clickFocusesButton: false,
     click: async () => { throw new Error("a pointer fact reached the in-app runner"); },
     settle: async () => { await frame(); await frame(); },
   };

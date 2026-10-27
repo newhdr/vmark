@@ -13,6 +13,8 @@ afterEach(() => uninstall());
 
 const engine: FocusEngine = {
   name: "jsdom with the WebKit focus model",
+  // The model is of macOS WKWebView, the primary platform.
+  clickFocusesButton: false,
   click: async (el) => mouseClick(el),
   settle: nextFrame,
 };
