@@ -1,4 +1,4 @@
-// WI-AL2.4 — outcome messages per R29 row: every revert outcome and every refusal a review action can meet maps to its own translated message and tone (applied, applied not durable, applied with an error, recovery required, a conflicted decision, a found base, each abort reason, AMBIGUOUS_REVERT, REVERT_REFUSED conflicted and reapply, STALE_REVIEW, STALE_PARENT, REVIEW_BACKLOG_FULL, REVIEW_STATE_EXHAUSTED, JOURNAL_BUSY), and an unknown failure is never silent
+// WI-AL2.4 — outcome messages per R29 row: every revert outcome and every refusal a review action can meet maps to its own translated message and tone (applied, applied not durable, applied with an error, applied with an error and not durable, recovery required, a conflicted decision, a found base, each abort reason, AMBIGUOUS_REVERT, REVERT_REFUSED conflicted and reapply, STALE_REVIEW, STALE_PARENT, REVIEW_BACKLOG_FULL, REVIEW_STATE_EXHAUSTED, JOURNAL_BUSY), and an unknown failure is never silent
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { JournalRefusal, type JournalCode } from "@/services/agentJournal/journalRefusal";
@@ -21,6 +21,7 @@ describe("revertNotice — one message per revert outcome", () => {
     ["applied", { status: "applied", durable: true }, "success", "review.outcomeReverted"],
     ["applied, not durable", { status: "applied", durable: false }, "warning", "review.outcomeRevertedNotDurable"],
     ["applied with an error", { status: "appliedWithError", error: new Error("x"), durable: true }, "warning", "review.outcomeRevertedWithError"],
+    ["applied with an error, not durable", { status: "appliedWithError", error: new Error("x"), durable: false }, "warning", "review.outcomeRevertedWithErrorNotDurable"],
     ["recovery required", { status: "recoveryRequired", error: new Error("x") }, "error", "review.outcomeRecoveryRequired"],
     ["a conflicted decision", decided("conflicted"), "warning", "review.outcomeConflicted"],
     ["a found base", decided("revertFoundBase"), "info", "review.outcomeFoundBase"],

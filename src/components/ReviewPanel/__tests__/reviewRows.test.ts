@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { BlockedHunk, DocumentHistory, HistoryRow, LiveHunk } from "@/services/agentJournal/docHistoryClient";
 import type { JournalActor } from "@/services/agentJournal/journalActor";
+import { measureGrowth, growthExponent } from "@/test/cpuClock";
 import { AGENT_SLOT_LIMIT, actorKey, buildReviewModel } from "../reviewRows";
 
 const claude = (connectionId = "c-1", sessionLabel: string | null = null): JournalActor => ({
@@ -115,5 +116,17 @@ describe("buildReviewModel", () => {
   it("the slot limit is the writer's", () => {
     const rust = readFileSync(resolve(import.meta.dirname, "../../../../src-tauri/src/agent_journal/review_slots.rs"), "utf8");
     expect(rust).toMatch(new RegExp(`pub const AGENT_SLOT_LIMIT: usize = ${AGENT_SLOT_LIMIT};`));
+  });
+});
+
+// Grouping hunks by the revision that made them is one pass: a cost quadratic
+// in the hunks of one revision reads an exponent of 2 from 400 to 4,000.
+describe("buildReviewModel cost", () => {
+  it("grows about linearly in the hunks one revision made", () => {
+    const SMALL = 400;
+    const LARGE = 4_000;
+    const build = (n: number) => history([row("r1")], Array.from({ length: n }, (_, i) => hunk(`h${i}`, "r1")));
+    const growth = measureGrowth((h: DocumentHistory) => void buildReviewModel(h), build(SMALL), build(LARGE));
+    expect(growthExponent(growth, SMALL, LARGE)).toBeLessThan(1.4);
   });
 });

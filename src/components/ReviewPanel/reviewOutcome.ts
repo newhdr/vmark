@@ -11,7 +11,8 @@
  *     hunk's state, the second recorded nothing.
  *   - A revert that applied but could not be confirmed, or could not be
  *     read back, says the document changed and must be checked; it is never
- *     reported as a failure to revert.
+ *     reported as a failure to revert. A history record not confirmed on
+ *     disk is said too, with or without that error.
  *   - Any other token is named in the message, and a rejection that is no
  *     journal refusal reads as a failure: never silent, never guessed.
  *   - Pure: the panel translates the key, so the mapping is unit-tested.
@@ -63,7 +64,7 @@ export function revertNotice(outcome: HunkRevertOutcome): ReviewNotice {
     case "applied":
       return outcome.durable ? { tone: "success", key: "review.outcomeReverted" } : { tone: "warning", key: "review.outcomeRevertedNotDurable" };
     case "appliedWithError":
-      return { tone: "warning", key: "review.outcomeRevertedWithError" };
+      return outcome.durable ? { tone: "warning", key: "review.outcomeRevertedWithError" } : { tone: "warning", key: "review.outcomeRevertedWithErrorNotDurable" };
     case "recoveryRequired":
       return { tone: "error", key: "review.outcomeRecoveryRequired" };
     case "decided":

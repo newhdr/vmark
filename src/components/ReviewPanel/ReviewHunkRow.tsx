@@ -11,7 +11,9 @@
  *     marked handled once the person fixed it by hand. Settled-bound states
  *     (`superseded`, `resolvedByHumanEdit`) offer nothing but Clear reviewed.
  *   - A blocked hunk (its provenance broke, so the journal cannot place it)
- *     says why and offers no revert: the journal would refuse it.
+ *     says why and offers no revert: the journal would refuse it. A hunk
+ *     both blocked and conflicted shows both notes, the block first, since
+ *     the conflict note alone would not explain the missing Revert.
  *   - `data-state` carries the journal's state, so what the row shows is
  *     what the journal holds.
  *
@@ -53,16 +55,23 @@ const ACTIONS: Record<LiveHunk["state"], ActionSpec[]> = {
   settled: [],
 };
 
-function noteOf(hunk: LiveHunk, blocked: BlockedHunk | null, t: Translate): string | null {
-  if (hunk.state === "conflicted") return t("review.hunkConflicted");
-  if (blocked) return t("review.hunkBlocked", { reason: breakReasonLabel(blocked.reason, t), origin: originLabel(blocked.origin, t) });
-  if (hunk.editedSince) return t("review.hunkEditedSince");
-  return null;
+interface Note {
+  text: string;
+  warning: boolean;
+}
+
+/** What the person must know: the block (it is what removes Revert), the conflict, or else an edit since. */
+function notesOf(hunk: LiveHunk, blocked: BlockedHunk | null, t: Translate): Note[] {
+  const notes: Note[] = [];
+  if (blocked) notes.push({ text: t("review.hunkBlocked", { reason: breakReasonLabel(blocked.reason, t), origin: originLabel(blocked.origin, t) }), warning: true });
+  if (hunk.state === "conflicted") notes.push({ text: t("review.hunkConflicted"), warning: true });
+  if (notes.length === 0 && hunk.editedSince) notes.push({ text: t("review.hunkEditedSince"), warning: false });
+  return notes;
 }
 
 export function ReviewHunkRow({ hunk, blocked, busy, onAction }: Props): React.ReactElement {
   const { t } = useTranslation("statusbar");
-  const note = noteOf(hunk, blocked, t);
+  const notes = notesOf(hunk, blocked, t);
   const actions = ACTIONS[hunk.state].filter((a) => !(blocked && a.action === "revert"));
   return (
     <div className="review-hunk" data-hunk-id={hunk.hunkId} data-state={hunk.state} data-blocked={blocked ? "true" : undefined}>
@@ -84,11 +93,11 @@ export function ReviewHunkRow({ hunk, blocked, busy, onAction }: Props): React.R
           ))}
         </span>
       </div>
-      {note && (
-        <span className={`review-hunk__note${hunk.state === "conflicted" || blocked ? " review-hunk__note--warning" : ""}`} title={note}>
-          {note}
+      {notes.map(({ text, warning }) => (
+        <span key={text} className={`review-hunk__note${warning ? " review-hunk__note--warning" : ""}`} title={text}>
+          {text}
         </span>
-      )}
+      ))}
     </div>
   );
 }

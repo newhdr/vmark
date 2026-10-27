@@ -57,7 +57,7 @@ import { journalWarn } from "@/utils/debug";
 import { ActorLabel } from "./ActorLabel";
 import { LazyConcurrentPairDiffs } from "./lazyHistoryParts";
 import { breakReasonLabel, historyTime, hunkLabel, kindLabel, originLabel } from "./historyLabels";
-import { classifyRestore } from "./restoreVerdict";
+import { NOT_DURABLE_KEY, classifyRestore } from "./restoreVerdict";
 
 interface Props {
   tabId: string;
@@ -133,6 +133,7 @@ function useHistoryRestore(tabId: string): (revision: string) => Promise<void> {
         if (verdict.kind === "problem") toast[verdict.tone](t(verdict.key));
         else if (verdict.changed) toast.success(t("mcpHistoryRestoredVersion"));
         else toast.error(t("mcpHistoryRestoreNoop"));
+        if (!verdict.durable) toast.warning(t(NOT_DURABLE_KEY));
       } finally {
         busy.current = false;
       }

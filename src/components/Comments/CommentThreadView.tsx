@@ -11,7 +11,9 @@
  *     the caller the journal recorded from the command family, shown first.
  *   - The buttons are exactly `userActions(state)`.
  *   - The reply being written is kept per thread across the popover
- *     closing (`commentDrafts.ts`).
+ *     closing (`commentDrafts.ts`). While any action on the document runs
+ *     the reply box is read-only and Cancel disabled, so a reply being sent
+ *     is neither edited under it nor forgotten.
  *   - It never moves focus itself: each handler says where focus should
  *     go after what it did (`useCommentFocus.ts`) — the reply box when
  *     opened, Reply when it closes, Send when a reply is refused, the
@@ -147,10 +149,11 @@ export function CommentThreadView({ docKey, thread, actions, replying, onReplyin
             rows={2}
             aria-label={t("comments.replyLabel")}
             value={reply}
+            readOnly={actions.busy}
             onChange={(e) => setReply(e.target.value)}
           />
           <div className="comments-thread__actions">
-            <button type="button" data-focus="replyCancel" className="vm-btn vm-btn--compact" onClick={() => closeReply(focus.begin())}>
+            <button type="button" data-focus="replyCancel" className="vm-btn vm-btn--compact" disabled={actions.busy} onClick={() => closeReply(focus.begin())}>
               {t("comments.cancel")}
             </button>
             <button type="button" data-focus="replySend" className="vm-btn vm-btn--compact vm-btn--primary" disabled={actions.busy || reply.trim() === ""} onClick={() => void sendReply()}>

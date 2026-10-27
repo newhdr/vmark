@@ -9,7 +9,7 @@ vi.mock("@/services/agentJournal/docHistoryClient", () => ({
   listDocumentHistory: vi.fn(async () => ({ generation: "1", head: null, rows: [], truncated: false, hunks: [], blocked: [], degraded: false })),
 }));
 vi.mock("@/services/agentJournal/journalStatusClient", () => ({
-  readJournalHealth: vi.fn(async () => ({ phase: "ready", generation: "1", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", error: null, identityError: null, retention: null, uncertifiedFallbacks: 0 })),
+  readJournalHealth: vi.fn(async () => ({ phase: "ready", generation: "1", readOnly: false, degraded: false, liveUpdates: "ready", identity: "durable", error: null, identityError: null, retention: null, uncertifiedFallbacks: 0, registrationCapRefusals: 0, cleanupWorkerFailures: 0 })),
 }));
 vi.mock("@/services/agentJournal/checkpointClient", () => ({ listJournalCheckpoints: vi.fn(async () => []), forgetJournalCheckpoints: vi.fn(async () => 0) }));
 vi.mock("@/services/ime/imeToast", () => ({ imeToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));

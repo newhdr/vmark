@@ -1,4 +1,4 @@
-// WI-AL3.2 — adding a comment on the selection, through the real selection reader, create coordinator and client over the journal wire (only the IPC is answered): the selection is read once, when "Comment on selection" is clicked, and the comment is created on that selection whatever the editor does while the body is typed; a caret says it anchors to its paragraph; no readable selection is told and opens nothing; an empty body cannot be sent; a refusal or an abort (the tab closed) is told and keeps the draft; success is told, closes the draft and re-reads the list; the draft (selection and body) outlives the panel unmounting — the popover closing — and is forgotten on cancel, and one tab's draft is never offered on another; opening the draft focuses its body, and cancel or success returns focus to the button, a refusal or an abort to Submit once it is enabled again; a WYSIWYG selection that cannot be mapped exactly (stored widened to whole blocks) says so in words true of one block or several, and one mapped exactly does not
+// WI-AL3.2 — adding a comment on the selection, through the real selection reader, create coordinator and client over the journal wire (only the IPC is answered): the selection is read once, when "Comment on selection" is clicked, and the comment is created on that selection whatever the editor does while the body is typed; a caret says it anchors to its paragraph; no readable selection, or an editor that cannot hand over its pending edits, is told and opens nothing; an empty body cannot be sent; a refusal or an abort (the tab closed) is told and keeps the draft; success is told, closes the draft and re-reads the list; the draft (selection and body) outlives the panel unmounting — the popover closing — and is forgotten on cancel, and one tab's draft is never offered on another; opening the draft focuses its body, and cancel or success returns focus to the button, a refusal or an abort to Submit once it is enabled again; a WYSIWYG selection that cannot be mapped exactly (stored widened to whole blocks) says so in words true of one block or several, and one mapped exactly does not
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -23,6 +23,7 @@ import { useDocumentStore } from "@/stores/documentStore";
 import { useEditorStore } from "@/stores/editorStore";
 import { useTabStore } from "@/stores/tabStore";
 import { markContentApplied } from "@/services/editor/contentApplied";
+import { registerWysiwygFlusher } from "@/utils/wysiwygFlush";
 import { AddComment } from "../AddComment";
 import { forgetCommentDrafts } from "../commentDrafts";
 import { useCommentFocus } from "../useCommentFocus";
@@ -142,6 +143,17 @@ describe("AddComment", () => {
   it("tells when there is no selection to read, and opens nothing", async () => {
     await openDraft();
     expect(toast.info).toHaveBeenCalledWith(en("comments.noSelection"));
+    expect(screen.queryByRole("textbox", { name: en("comments.bodyLabel") })).toBeNull();
+  });
+
+  it("tells when the editor cannot hand over its pending edits, and opens nothing", async () => {
+    editor(WORLD, WORLD + 5);
+    registerWysiwygFlusher(TAB, () => {
+      throw new Error("serializer crashed");
+    });
+    onTestFinished(() => registerWysiwygFlusher(TAB, null));
+    await openDraft();
+    expect(toast.error).toHaveBeenCalledWith(en("comments.failed"));
     expect(screen.queryByRole("textbox", { name: en("comments.bodyLabel") })).toBeNull();
   });
 

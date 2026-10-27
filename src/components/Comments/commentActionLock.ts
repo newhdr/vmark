@@ -8,11 +8,13 @@
  *     panel's action runs mounts busy, refuses a second action, and enables
  *     its controls when the first action releases the lock.
  *   - Keyed by document: actions on different documents do not wait for
- *     each other.
+ *     each other. Sending a new comment locks its draft's own key instead
+ *     (never a document key), so it excludes only a second send of itself.
  *   - Read through `useSyncExternalStore`, so every mounted panel for the
  *     document re-renders on take and release.
  *
  * @coordinates-with components/Comments/useCommentActions.ts — takes and releases it
+ * @coordinates-with components/Comments/AddComment.tsx — locks the draft it sends
  * @module components/Comments/commentActionLock
  */
 

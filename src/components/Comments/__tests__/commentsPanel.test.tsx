@@ -1,4 +1,4 @@
-// WI-AL3.2 — the comments panel through the real client: it lists the document's threads anchored in the tab's text, with ambiguous (and its count) and orphaned anchors, and "creation revision no longer retained" on a thread reopened after its creation revision was collected; the person's buttons are exactly the user column of the matrix; reopen and resolve send the rendered commentGen to their own command and re-read; a STALE_COMMENT refusal is told and re-read; delete asks first and sends nothing when cancelled; a reply is sent and the box closes; a thread being replied to that a re-read no longer holds reads "Deleted comment"; a failed read shows no thread
+// WI-AL3.2 — the comments panel through the real client: it lists the document's threads anchored in the tab's text, with ambiguous (and its count) and orphaned anchors, and "creation revision no longer retained" on a thread reopened after its creation revision was collected; the person's buttons are exactly the user column of the matrix; reopen and resolve send the rendered commentGen to their own command and re-read; a STALE_COMMENT refusal is told and re-read; delete asks first and sends nothing when cancelled; a reply is sent and the box closes, and while it is sent the box is neither edited nor cancelled; a thread being replied to that a re-read no longer holds reads "Deleted comment"; a failed read shows no thread
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,6 +17,8 @@ import { useTabStore } from "@/stores/tabStore";
 import { JournalRefusal } from "@/services/agentJournal/journalRefusal";
 import type { CommentThread } from "@/services/agentJournal/comments/commentReplies";
 import { CommentsPanel } from "../CommentsPanel";
+import { forgetCommentDrafts } from "../commentDrafts";
+import { releaseCommentAction } from "../commentActionLock";
 
 const TAB = "t-1";
 const KEY = "path:/a.md";
@@ -53,6 +55,8 @@ const buttonNames = (el: HTMLElement) => within(el).queryAllByRole("button").map
 beforeEach(() => {
   vi.clearAllMocks();
   fake.reset();
+  forgetCommentDrafts();
+  releaseCommentAction(KEY);
   threads = [];
   listFails = false;
   answer = async () => undefined;
@@ -173,6 +177,31 @@ describe("CommentsPanel — the person's actions", () => {
     await waitFor(() => expect(payloads("comment_user_reply")).toHaveLength(1));
     expect(payloads("comment_user_reply")[0]).toMatchObject({ docKey: KEY, comment: "c1", body: "done", author: "", expectedCommentGen: "2" });
     await waitFor(() => expect(screen.queryByRole("textbox", { name: en("comments.replyLabel") })).toBeNull());
+  });
+
+  it("while a reply is sent, neither edits it nor cancels it, and frees both once it is answered", async () => {
+    threads = [thread("c1")];
+    let refuse: (e: unknown) => void = () => {};
+    answer = async (command, args) =>
+      command === "comment_user_reply" ? answerPrepare(args, () => new Promise((_resolve, reject) => (refuse = reject))) : undefined;
+    const user = userEvent.setup();
+    render(<CommentsPanel tabId={TAB} docKey={KEY} />);
+
+    await user.click(within(await article("c1")).getByRole("button", { name: en("comments.reply") }));
+    const box = screen.getByRole("textbox", { name: en("comments.replyLabel") });
+    await user.type(box, "done");
+    await user.click(screen.getByRole("button", { name: en("comments.sendReply") }));
+    await waitFor(() => expect(payloads("comment_user_reply")).toHaveLength(1));
+
+    expect(box).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: en("comments.cancel") })).toBeDisabled();
+    await user.type(box, " more");
+    expect(box).toHaveValue("done");
+
+    refuse(new JournalRefusal("STALE_COMMENT", "moved"));
+    await waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    expect(box).toHaveValue("done");
+    expect(screen.getByRole("button", { name: en("comments.cancel") })).toBeEnabled();
   });
 
   it("a thread being replied to that a re-read no longer holds reads Deleted comment", async () => {

@@ -17,6 +17,9 @@
  *   - A restore the editor failed after applying warns (restored, check the
  *     document); one that could not be confirmed says the document stays
  *     locked for agent edits until VMark restarts. Neither reads as failed.
+ *     The restore is classified by the panel's shared `classifyRestore`.
+ *   - A restore or discard whose record was not confirmed on disk (queued)
+ *     adds the shared not-durable warning beside its own message.
  *   - An unavailable journal, or a document with none, renders nothing
  *     (not the last list read); the panel's other sections are unaffected.
  *   - The list follows the journal's generation broadcast, so an entry
@@ -27,6 +30,7 @@
  *
  * @coordinates-with services/agentJournal/historyClient.ts — list and discard
  * @coordinates-with services/agentJournal/historyRestore.ts — restore
+ * @coordinates-with components/McpHistory/restoreVerdict.ts — the outcome's message
  * @coordinates-with components/McpHistory/useJournalFeed.ts — live updates
  * @module components/McpHistory/UncommittedEntries
  */
@@ -40,6 +44,7 @@ import { discardUncommitted, listUncommitted } from "@/services/agentJournal/his
 import { restoreFromHistory } from "@/services/agentJournal/historyRestore";
 import { journalWarn } from "@/utils/debug";
 import { ActorLabel } from "./ActorLabel";
+import { NOT_DURABLE_KEY, classifyRestore } from "./restoreVerdict";
 import { useJournalFeed } from "./useJournalFeed";
 
 interface Props {
@@ -76,18 +81,20 @@ export function UncommittedEntries({ tabId, docKey, pollMs = null }: Props): Rea
   const onRestore = (txn: string) =>
     act(async () => {
       const out = await restoreFromHistory(tabId, { from: "uncommittedPreimage", txn });
-      // Each of these is reported here, so the generic failure toast is not added.
-      if (out.status === "appliedWithError") toast.warning(t("mcpHistoryRestoreAppliedWithError"));
-      else if (out.status === "recoveryRequired") toast.error(t("mcpHistoryRestoreRecoveryRequired"));
-      else if (out.status === "applied") toast.success(t("mcpHistoryUncommittedRestored"));
-      else return false;
+      const verdict = classifyRestore(out);
+      // A plain failure is left to the generic failure toast; every other verdict is reported here.
+      if (verdict.kind === "problem" && verdict.key === "mcpHistoryRestoreFailed") return false;
+      if (verdict.kind === "problem") toast[verdict.tone](t(verdict.key));
+      else toast.success(t("mcpHistoryUncommittedRestored"));
+      if (!verdict.durable) toast.warning(t(NOT_DURABLE_KEY));
       return true;
     });
 
   const onDiscard = (txn: string) =>
     act(async () => {
-      await discardUncommitted(docKey, txn);
+      const { durable } = await discardUncommitted(docKey, txn);
       toast.success(t("mcpHistoryUncommittedDiscarded"));
+      if (!durable) toast.warning(t(NOT_DURABLE_KEY));
       return true;
     });
 

@@ -10,6 +10,12 @@
  *     tab's document revision; on the click it flushes again, and if the
  *     revision moved (an edit the panel never saw) the decision is not
  *     sent, the person is told the list was out of date, and it is re-read.
+ *     A re-read re-takes the revision only when the list it shows differs
+ *     (head, hunk states, blocks) or an action asked for it: the feed also
+ *     re-reads on polls and on other documents' journal changes, and those
+ *     must not accept an edit made since the list was shown. The revision
+ *     is taken in the same commit that shows the list (a layout effect),
+ *     so no edit can land between the two.
  *     The check and the send happen in one task, and the journal's own
  *     head and `reviewGen` checks refuse anything that landed in between.
  *   - `JOURNAL_BUSY` (a save of this document is being recorded) is retried
@@ -29,7 +35,7 @@
  * @module components/ReviewPanel/useReviewActions
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRevisionStore } from "@/stores/documentStore";
 import { flushAllWysiwygNow } from "@/utils/wysiwygFlush";
@@ -59,6 +65,13 @@ function flushedRevision(tabId: string): string {
   return useRevisionStore.getState().getRevision(tabId);
 }
 
+/** What the panel shows of a history: its head and each hunk's review state and block. */
+function listSignature(history: DocumentHistory): string {
+  const hunks = history.hunks.map((h) => `${h.hunkId}:${h.state}:${h.reviewGen}`);
+  const blocked = history.blocked.map((b) => `${b.hunkId}:${b.reason}`);
+  return JSON.stringify([history.head, hunks, blocked]);
+}
+
 class StaleView extends Error {}
 
 export interface ReviewActions {
@@ -72,9 +85,19 @@ export function useReviewActions(tabId: string, docKey: string, history: Documen
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const shown = useRef<string | null>(null);
+  const shownList = useRef<string | null>(null);
+  const reshow = useRef(false);
 
-  // The revision this history is shown against: taken when it arrives.
-  useEffect(() => {
+  // The revision the list is shown against: taken when the list the person
+  // sees changes, or on the re-read an action asked for — never on a re-read
+  // that shows the same list, which would accept an edit nobody was shown.
+  // Taken in the commit that shows the list: a passive effect runs in a later
+  // task, and an edit landing before it would be taken as already shown.
+  useLayoutEffect(() => {
+    const list = `${tabId}\u0000${listSignature(history)}`;
+    if (list === shownList.current && !reshow.current) return;
+    shownList.current = list;
+    reshow.current = false;
     shown.current = flushedRevision(tabId);
   }, [tabId, history]);
 
@@ -112,6 +135,7 @@ export function useReviewActions(tabId: string, docKey: string, history: Documen
       } finally {
         running.current = false;
         setBusy(false);
+        reshow.current = true;
         onChanged();
       }
     },

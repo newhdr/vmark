@@ -16,6 +16,8 @@
  *   - The rows are a list whose items carry their position in the whole
  *     list (`aria-setsize`, `aria-posinset`), so a screen reader still
  *     hears "row 412 of 600" although only a window is mounted.
+ *   - The window reads the last scroll offset clamped to the rows it has:
+ *     a list that shrinks after a deep scroll still shows its last rows.
  *   - Hand-written rather than a virtualization dependency: one fixed row
  *     height needs a dozen lines, and the app ships no list virtualizer.
  *
@@ -40,8 +42,10 @@ interface Props<R> {
 export function ReviewList<R>({ rows, rowKey, renderRow, label }: Props<R>): React.ReactElement {
   const [scrollTop, setScrollTop] = useState(0);
   const height = Math.min(rows.length * REVIEW_ROW_HEIGHT, REVIEW_VIEWPORT_HEIGHT);
-  const first = Math.max(0, Math.floor(scrollTop / REVIEW_ROW_HEIGHT) - OVERSCAN);
-  const last = Math.min(rows.length, Math.ceil((scrollTop + height) / REVIEW_ROW_HEIGHT) + OVERSCAN);
+  // The last scroll may predate a shrink the browser clamped without a scroll event.
+  const top = Math.min(scrollTop, Math.max(0, rows.length * REVIEW_ROW_HEIGHT - height));
+  const first = Math.max(0, Math.floor(top / REVIEW_ROW_HEIGHT) - OVERSCAN);
+  const last = Math.min(rows.length, Math.ceil((top + height) / REVIEW_ROW_HEIGHT) + OVERSCAN);
 
   return (
     <div className="review-list vm-scroll--thin" style={{ height }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} data-testid="review-list">

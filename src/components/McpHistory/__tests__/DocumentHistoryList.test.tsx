@@ -192,7 +192,7 @@ describe("DocumentHistoryList", () => {
   });
 
   it.each([true, false])(
-    "a restore the editor failed after applying (durable %s) warns that it was restored but the document needs checking",
+    "a restore the editor failed after applying (durable %s) warns that it was restored but the document needs checking, and that its record is unconfirmed when it is",
     async (durable) => {
       restore.restoreFromHistory.mockResolvedValueOnce({
         status: "appliedWithError", error: new Error("listener crashed"), durable, changed: true, resolves: null,
@@ -200,8 +200,10 @@ describe("DocumentHistoryList", () => {
       const user = userEvent.setup();
       render(<DocumentHistoryList tabId="t-1" docKey="path:/a.md" history={history()} failed={false} />);
       await user.click(within(rowOf("r1")).getByRole("button", { name: /restore this version/i }));
-      await waitFor(() => expect(toastMock.warning).toHaveBeenCalledTimes(1));
+      // An unconfirmed history record adds its own warning beside it.
+      await waitFor(() => expect(toastMock.warning).toHaveBeenCalledTimes(durable ? 1 : 2));
       expect(toastMock.warning).toHaveBeenCalledWith(expect.stringMatching(/restored.*editor reported an error.*check the document/i));
+      if (!durable) expect(toastMock.warning).toHaveBeenCalledWith(expect.stringMatching(/could not confirm the edit history was saved to disk/i));
       expect(toastMock.error).not.toHaveBeenCalled();
       expect(toastMock.success).not.toHaveBeenCalled();
     },

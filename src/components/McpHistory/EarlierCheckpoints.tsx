@@ -38,7 +38,7 @@ import { forgetJournalCheckpoints, listJournalCheckpoints, type JournalCheckpoin
 import { restoreEarlierCheckpoint } from "@/services/agentJournal/earlierCheckpointRestore";
 import { journalWarn } from "@/utils/debug";
 import { historyTime } from "./historyLabels";
-import { classifyRestore } from "./restoreVerdict";
+import { NOT_DURABLE_KEY, classifyRestore } from "./restoreVerdict";
 import { useJournalFeed } from "./useJournalFeed";
 
 const readAll = () => listJournalCheckpoints();
@@ -78,6 +78,7 @@ export function EarlierCheckpoints({ windowLabel, pollMs = null }: Props): React
       else if (!verdict.changed) toast.error(t("mcpHistoryRestoreNoop"));
       else if (!cp.filePath) toast.success(t("mcpHistoryEarlierRestoredNew"));
       else toast.success(t("mcpHistoryRestored", { tool: cp.tool }));
+      if (!verdict.durable) toast.warning(t(NOT_DURABLE_KEY));
     });
 
   if (failed || !value || value.length === 0) return null;

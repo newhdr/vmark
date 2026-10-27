@@ -1,4 +1,4 @@
-// WI-AL1.6, WI-AL1.7 — the history panel's uncommitted entries (who made each: provider, connection, session label; an unidentified client is never shown as a provider; the list follows the journal's generation broadcast): each is listed with its tool, agent and preview; restore puts its preimage back through the journal (the restore resolves the entry: its terminal record is appended and its pin dropped, so the row leaves the list), discard appends `discarded` (pin dropped, row gone); a refused action keeps the row and says so; a document with none shows nothing
+// WI-AL1.6, WI-AL1.7 — the history panel's uncommitted entries (who made each: provider, connection, session label; an unidentified client is never shown as a provider; the list follows the journal's generation broadcast): each is listed with its tool, agent and preview; restore puts its preimage back through the journal (the restore resolves the entry: its terminal record is appended and its pin dropped, so the row leaves the list), discard appends `discarded` (pin dropped, row gone); a refused action keeps the row and says so; a restore or discard whose record was not confirmed on disk warns beside its success; a document with none shows nothing
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -56,12 +56,14 @@ const restore = vi.hoisted(() => ({
 }));
 vi.mock("@/services/agentJournal/historyRestore", () => restore);
 
+const en = (key: string) => resolveKey(key, ["statusbar"]);
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock("@/services/ime/imeToast", () => ({ imeToast: toastMock }));
 
 import { act } from "@testing-library/react";
 import { UncommittedEntries } from "../UncommittedEntries";
 import { FEED_POLL_MS } from "@/services/agentJournal/journalFeed";
+import { resolveKey } from "@/test/i18nResolve";
 
 const KEY = "path:/a.md";
 
@@ -109,6 +111,19 @@ describe("UncommittedEntries", () => {
     expect(journal.pinned("txn-1")).toBe(false);
     await waitFor(() => expect(screen.queryByText("before the agent 長い 😀")).not.toBeInTheDocument());
     expect(journal.pinned("txn-2")).toBe(true);
+  });
+
+  it.each([
+    ["restore", /restore the text this unrecorded write found/i, () => restore.restoreFromHistory.mockResolvedValueOnce({ status: "applied", durable: false, changed: true, resolves: "txn-1" } as never)],
+    ["discard", /discard this unrecorded write/i, () => client.discardUncommitted.mockResolvedValueOnce({ durable: false })],
+  ] as const)("a %s whose record was not confirmed on disk says so beside its success", async (_name, button, arrange) => {
+    arrange();
+    const user = userEvent.setup();
+    render(<UncommittedEntries tabId="t-1" docKey={KEY} />);
+    const [first] = await screen.findAllByRole("button", { name: button });
+    await user.click(first);
+    await waitFor(() => expect(toastMock.warning).toHaveBeenCalledWith(en("mcpHistoryNotDurable")));
+    expect(toastMock.success).toHaveBeenCalledTimes(1);
   });
 
   it("a refused restore keeps the row and reports the failure", async () => {

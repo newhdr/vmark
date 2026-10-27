@@ -118,7 +118,7 @@ describe("EarlierCheckpoints", () => {
   });
 
   it.each([true, false])(
-    "a restore the editor failed after applying (durable %s) warns that it was restored but the document needs checking",
+    "a restore the editor failed after applying (durable %s) warns that it was restored but the document needs checking, and that its record is unconfirmed when it is",
     async (durable) => {
       restorer.restoreEarlierCheckpoint.mockResolvedValueOnce({
         status: "restored",
@@ -130,8 +130,10 @@ describe("EarlierCheckpoints", () => {
       render(<EarlierCheckpoints windowLabel="main" />);
       const list = await screen.findByRole("list", { name: /earlier checkpoints/i });
       await user.click(within(list).getAllByRole("button", { name: /restore this checkpoint/i })[0]);
-      await waitFor(() => expect(toastMock.warning).toHaveBeenCalledTimes(1));
+      // An unconfirmed history record adds its own warning beside it.
+      await waitFor(() => expect(toastMock.warning).toHaveBeenCalledTimes(durable ? 1 : 2));
       expect(toastMock.warning).toHaveBeenCalledWith(expect.stringMatching(/restored.*editor reported an error.*check the document/i));
+      if (!durable) expect(toastMock.warning).toHaveBeenCalledWith(expect.stringMatching(/could not confirm the edit history was saved to disk/i));
       expect(toastMock.error).not.toHaveBeenCalled();
       expect(toastMock.success).not.toHaveBeenCalled();
     },

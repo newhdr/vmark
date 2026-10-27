@@ -15,7 +15,15 @@
  *   - No editor selection to read (none mounted, or mounting) is told, not
  *     guessed.
  *   - The draft (selection and body) is kept per tab across the popover
- *     closing (`commentDrafts.ts`); cancel and success forget it.
+ *     closing (`commentDrafts.ts`); cancel and success forget it, in
+ *     whichever panel is open when the create lands.
+ *   - Sending a draft takes a lock keyed by the draft (`commentActionLock.ts`),
+ *     not component state: a panel reopened while the create runs mounts
+ *     busy and cannot send the same draft again. It is not the document's
+ *     lock, so a thread action may still run beside a create. While the
+ *     create runs the body is read-only and Cancel disabled, so nothing
+ *     typed after Submit is silently dropped and the draft cannot be
+ *     forgotten under the create.
  *   - It never moves focus itself; each handler says where focus should go
  *     (`useCommentFocus.ts`): the body when the draft opens, the button when
  *     it closes (cancel or success), Submit after a refusal or an abort. Its
@@ -25,16 +33,18 @@
  * @coordinates-with services/agentJournal/comments/commentCreate.ts — the selection and the create
  * @coordinates-with components/Comments/commentView.ts — the messages
  * @coordinates-with components/Comments/commentDrafts.ts — the kept draft
+ * @coordinates-with components/Comments/commentActionLock.ts — one send per draft
  * @coordinates-with components/Comments/useCommentFocus.ts — where focus goes
  * @module components/Comments/AddComment
  */
 
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { imeToast as toast } from "@/services/ime/imeToast";
 import { createComment, readCommentSelection } from "@/services/agentJournal/comments/commentCreate";
 import type { EditorSelection } from "@/services/agentJournal/comments/commentSelection";
 import { journalWarn } from "@/utils/debug";
+import { releaseCommentAction, takeCommentAction, useCommentActionLock } from "./commentActionLock";
 import { useCommentDraft } from "./commentDrafts";
 import { createNotice, errorNotice, type CommentNotice } from "./commentView";
 import type { CommentFocusIntents } from "./useCommentFocus";
@@ -54,13 +64,21 @@ const toControl = (name: string) => ({ kind: "control" as const, scope: "add", n
 
 export function AddComment({ tabId, onCreated, focus }: Props): React.ReactElement {
   const { t } = useTranslation("statusbar");
-  const [draft, setDraft] = useCommentDraft<Draft | null>(`add\n${tabId}`, null);
-  const [busy, setBusy] = useState(false);
+  const draftKey = `add\n${tabId}`;
+  const [draft, setDraft] = useCommentDraft<Draft | null>(draftKey, null);
+  const busy = useCommentActionLock(draftKey);
   useLayoutEffect(() => focus.settle());
   const tell = (n: CommentNotice) => toast[n.tone](n.values ? t(n.key, n.values) : t(n.key));
 
   const start = () => {
-    const sel = readCommentSelection(tabId);
+    let sel: EditorSelection | null;
+    try {
+      sel = readCommentSelection(tabId);
+    } catch (e) {
+      journalWarn("comment selection unreadable:", e);
+      tell(errorNotice(e));
+      return;
+    }
     if (!sel) {
       toast.info(t("comments.noSelection"));
       return;
@@ -75,9 +93,8 @@ export function AddComment({ tabId, onCreated, focus }: Props): React.ReactEleme
   };
 
   const submit = async () => {
-    if (!draft || busy) return;
+    if (!draft || !takeCommentAction(draftKey)) return;
     const token = focus.begin();
-    setBusy(true);
     try {
       const outcome = await createComment(tabId, draft.selection, draft.body);
       tell(createNotice(outcome));
@@ -88,7 +105,7 @@ export function AddComment({ tabId, onCreated, focus }: Props): React.ReactEleme
       tell(errorNotice(e));
       focus.intend(token, toControl("addSubmit"));
     } finally {
-      setBusy(false);
+      releaseCommentAction(draftKey);
       onCreated();
     }
   };
@@ -121,10 +138,11 @@ export function AddComment({ tabId, onCreated, focus }: Props): React.ReactEleme
         rows={3}
         aria-label={t("comments.bodyLabel")}
         value={body}
+        readOnly={busy}
         onChange={(e) => setDraft({ selection, body: e.target.value })}
       />
       <div className="comments-thread__actions">
-        <button type="button" data-focus="addCancel" className="vm-btn vm-btn--compact" onClick={() => close(focus.begin())}>
+        <button type="button" data-focus="addCancel" className="vm-btn vm-btn--compact" disabled={busy} onClick={() => close(focus.begin())}>
           {t("comments.cancel")}
         </button>
         <button type="button" data-focus="addSubmit" className="vm-btn vm-btn--compact vm-btn--primary" disabled={busy || body.trim() === ""} onClick={() => void submit()}>

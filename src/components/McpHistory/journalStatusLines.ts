@@ -3,8 +3,10 @@
  * changes are being recorded: a failed, read-only or behind journal, a
  * queued record of this document, a save the history refused or did not
  * answer in time, live updates that failed (the panel polls instead), what
- * failed beside a recording journal (part of its startup, the startup
- * retention pass and its cap warnings), recording turned off by an identity
+ * failed beside a recording journal (part of its startup, page
+ * registrations refused at the per-window cap, lost cleanup runs, edits
+ * recorded as whole-document changes because their selection certificate
+ * failed a check, the startup retention pass and its cap warnings), recording turned off by an identity
  * index that could not be used, recording suspended because the document's
  * identity could not be updated, and changes whose automatic revert is
  * blocked.
@@ -72,6 +74,9 @@ function readyLines(health: JournalHealth): StatusLine[] {
   if (health.degraded) lines.push({ tone: "warning", key: "mcpHistoryStatusDegraded" });
   if (health.liveUpdates === "failed") lines.push({ tone: "warning", key: "mcpHistoryStatusLiveUpdatesFailed" });
   reason("mcpHistoryStatusStartupProblem", health.error);
+  if (health.registrationCapRefusals > 0) lines.push({ tone: "warning", key: "mcpHistoryStatusRegistrationCapRefusals", values: { count: health.registrationCapRefusals } });
+  if (health.cleanupWorkerFailures > 0) lines.push({ tone: "warning", key: "mcpHistoryStatusCleanupWorkerFailures", values: { count: health.cleanupWorkerFailures } });
+  if (health.uncertifiedFallbacks > 0) lines.push({ tone: "warning", key: "mcpHistoryStatusUncertifiedFallbacks", values: { count: health.uncertifiedFallbacks } });
   if (health.identity === "disabled") lines.push({ tone: "error", key: "mcpHistoryStatusIdentityDisabled", values: { detail: health.identityError ?? "" } });
   const retention = health.retention;
   if (!retention) return lines;

@@ -1,4 +1,4 @@
-// WI-AL1.7 — the history status: a failed, read-only or behind journal, a queued record of this document, a save the history refused or did not answer in time (the deadline), changes whose automatic revert is blocked (provenance loss), and recording suspended because the document's identity could not be updated each show their own line; a healthy journal with nothing blocked shows nothing; a journal whose state cannot be read counts as unavailable; live updates that failed beside a recording journal get a warning (the panel polls instead), while starting live updates and a journal that never started say nothing more
+// WI-AL1.7 — the history status: a failed, read-only or behind journal, a queued record of this document, a save the history refused or did not answer in time (the deadline), changes whose automatic revert is blocked (provenance loss), and recording suspended because the document's identity could not be updated each show their own line; a healthy journal with nothing blocked shows nothing; a journal whose state cannot be read counts as unavailable; live updates that failed beside a recording journal get a warning (the panel polls instead), while starting live updates and a journal that never started say nothing more; page registrations refused at the per-window cap and cleanup-worker runs lost are each counted on their own warning line
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { JournalStatusNotice } from "../JournalStatusNotice";
@@ -30,6 +30,9 @@ describe("journalStatusLines", () => {
     ["live updates failed", { health: { ...healthy, liveUpdates: "failed" as const } }, "mcpHistoryStatusLiveUpdatesFailed"],
     ["blocked hunks", { history: doc({ blocked: [hunk("a"), hunk("b")] }) }, "mcpHistoryStatusBlocked"],
     ["identity not updated", { unbound: true }, "mcpHistoryStatusIdentityUnbound"],
+    ["registrations refused at the cap", { health: { ...healthy, registrationCapRefusals: 3 } }, "mcpHistoryStatusRegistrationCapRefusals"],
+    ["cleanup runs lost", { health: { ...healthy, cleanupWorkerFailures: 1 } }, "mcpHistoryStatusCleanupWorkerFailures"],
+    ["edits recorded as whole-document changes", { health: { ...healthy, uncertifiedFallbacks: 2 } }, "mcpHistoryStatusUncertifiedFallbacks"],
   ])("%s has its own line", (_name, over, key) => {
     expect(journalStatusLines({ ...base, ...over }).map((l) => l.key)).toEqual([key]);
   });

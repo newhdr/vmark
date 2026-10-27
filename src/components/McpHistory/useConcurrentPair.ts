@@ -7,12 +7,18 @@
  *   - Nothing is read until the pair is opened. A loaded pair is kept for
  *     the life of the row, so hiding and showing it again reads nothing; a
  *     failed read is forgotten on hide, so the next open retries.
+ *   - What is open and loaded belongs to one document and revision: a row
+ *     handed another (a reused revision id on another document) starts
+ *     closed and idle.
  *   - Each load has its own token: a reply that lands after the pair was
- *     hidden, or after the row unmounted, is dropped rather than shown.
+ *     hidden, after the identity changed, or after the row unmounted, is
+ *     dropped rather than shown.
  *   - The diffs run in the review's budgeted worker (`BudgetedDiff`) with
- *     `PAIR_DEADLINE_MS` per diff, counted from each call; one the worker
- *     cannot finish, or cannot start, comes back as one coarse change and
- *     is marked `coarse`. The worker pair is closed when the load ends.
+ *     `PAIR_DEADLINE_MS` per diff, one after the other: the worker runs one
+ *     job at a time, so asking for both at once would spend the second's
+ *     deadline queued behind the first. One the worker cannot finish, or
+ *     cannot start, comes back as one coarse change and is marked
+ *     `coarse`. The worker pair is closed when the load ends.
  *   - What is shown is bounded by `pairDiffView` whatever the document size.
  *
  * @coordinates-with services/agentJournal/concurrentPairClient.ts — the read
@@ -28,7 +34,7 @@ import type { DiffOutcome } from "@/services/agentJournal/review/diffBudget";
 import { journalWarn } from "@/utils/debug";
 import { diffView, type DiffView } from "./pairDiffView";
 
-/** How long one of the two diffs may take, from its call, before it is shown coarse. */
+/** How long one of the two diffs may take, from its own call, before it is shown coarse. */
 const PAIR_DEADLINE_MS = 1_000;
 
 export interface PairDiff {
@@ -53,30 +59,45 @@ async function loadPairDiffs(docKey: string, revision: string): Promise<{ fromSt
   const pair = await readConcurrentPair(docKey, revision);
   const diff = new BudgetedDiff();
   try {
-    const [fromStart, against] = await Promise.all([
-      diff.diff(pair.observedBefore, pair.result, { deadlineMs: PAIR_DEADLINE_MS }),
-      diff.diff(pair.linearBefore, pair.result, { deadlineMs: PAIR_DEADLINE_MS }),
-    ]);
+    // One after the other: each deadline counts that diff's own work.
+    const fromStart = await diff.diff(pair.observedBefore, pair.result, { deadlineMs: PAIR_DEADLINE_MS });
+    const against = await diff.diff(pair.linearBefore, pair.result, { deadlineMs: PAIR_DEADLINE_MS });
     return { fromStart: pairDiff(pair.observedBefore, pair.result, fromStart), against: pairDiff(pair.linearBefore, pair.result, against) };
   } finally {
     diff.close();
   }
 }
 
+interface PairState {
+  readonly identity: string;
+  readonly open: boolean;
+  readonly load: PairLoad;
+}
+
+const closed = (identity: string): PairState => ({ identity, open: false, load: { status: "idle" } });
+
 /** Whether the pair is open, what has loaded, and the toggle. */
 export function useConcurrentPair(docKey: string, revision: string): { open: boolean; load: PairLoad; toggle: () => void } {
-  const [open, setOpen] = useState(false);
-  const [load, setLoad] = useState<PairLoad>({ status: "idle" });
+  const identity = `${docKey}\u0000${revision}`;
+  const [state, setState] = useState<PairState>(() => closed(identity));
   const token = useRef(0);
+  // Another document or revision starts closed and idle.
+  const current = state.identity === identity ? state : closed(identity);
+  if (state.identity !== identity) setState(current);
+  const { open, load } = current;
 
+  // Leaving an identity (or unmounting) drops the reply of its load.
   useEffect(
     () => () => {
       token.current += 1;
     },
-    [],
+    [identity],
   );
 
   const toggle = useCallback(() => {
+    // Bound to this identity: a write after the row moved on is dropped.
+    const setOpen = (value: boolean) => setState((s) => (s.identity === identity ? { ...s, open: value } : s));
+    const setLoad = (value: PairLoad) => setState((s) => (s.identity === identity ? { ...s, load: value } : s));
     if (open) {
       token.current += 1;
       setOpen(false);
@@ -97,7 +118,7 @@ export function useConcurrentPair(docKey: string, revision: string): { open: boo
         if (token.current === mine) setLoad({ status: "failed" });
       },
     );
-  }, [open, load.status, docKey, revision]);
+  }, [open, load.status, docKey, revision, identity]);
 
   return { open, load, toggle };
 }

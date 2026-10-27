@@ -67,7 +67,11 @@ export function actorKey(actor: JournalActor): string {
 
 function hunksByTarget(hunks: readonly LiveHunk[]): Map<string, LiveHunk[]> {
   const byTarget = new Map<string, LiveHunk[]>();
-  for (const h of hunks) byTarget.set(h.target, [...(byTarget.get(h.target) ?? []), h]);
+  for (const h of hunks) {
+    const bucket = byTarget.get(h.target);
+    if (bucket) bucket.push(h);
+    else byTarget.set(h.target, [h]);
+  }
   return byTarget;
 }
 
