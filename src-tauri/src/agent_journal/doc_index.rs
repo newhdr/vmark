@@ -64,7 +64,9 @@ pub(crate) use faults::{APPENDS_BEFORE_FAILURE, REWRITE_FAILS_AFTER_REPLACE};
 
 pub struct DocIndex {
     path: PathBuf,
-    file: File,
+    /// The append handle; `None` only while a Windows rewrite has released
+    /// it, or after a failed reopen (which also poisons the index).
+    file: Option<File>,
     entries: BTreeMap<String, IndexEntry>,
     near: Near,
     poisoned: bool,
@@ -129,7 +131,7 @@ impl DocIndex {
         }
         let mut index = Self {
             path,
-            file,
+            file: Some(file),
             near: Near::of(&entries),
             entries,
             poisoned: false,
@@ -218,18 +220,13 @@ impl DocIndex {
             return Err(IndexError::Poisoned);
         }
         append_injected()?;
-        let before = self.file.metadata()?.len();
-        let written = self
-            .file
-            .write_all(&line(&op))
-            .and_then(|()| self.file.sync_data());
+        let Some(file) = self.file.as_mut() else {
+            return Err(IndexError::Poisoned);
+        };
+        let before = file.metadata()?.len();
+        let written = file.write_all(&line(&op)).and_then(|()| file.sync_data());
         if let Err(e) = written {
-            if self
-                .file
-                .set_len(before)
-                .and_then(|()| self.file.sync_all())
-                .is_err()
-            {
+            if file.set_len(before).and_then(|()| file.sync_all()).is_err() {
                 self.poisoned = true;
             }
             return Err(e.into());
@@ -239,9 +236,11 @@ impl DocIndex {
     }
 
     /// Atomically replace the log with the header and one `put` line per
-    /// `entries` mapping, then adopt them. A failed replacement changes nothing. After it, the
-    /// open handle names the replaced file: a failed reopen poisons the
-    /// index so no append lands there (logged; the new mappings stand).
+    /// `entries` mapping, then adopt them. A failed replacement changes nothing
+    /// on disk or in memory (on Windows it still reopens the released handle).
+    /// After a replacement the open handle names the replaced file: a failed
+    /// reopen poisons the index so no append lands there (logged; the new
+    /// mappings stand).
     fn rewrite(&mut self, entries: BTreeMap<String, IndexEntry>) -> Result<(), IndexError> {
         let mut out = header_line().into_bytes();
         for (key, entry) in &entries {
@@ -252,18 +251,28 @@ impl DocIndex {
         }
         let dir = self.path.parent().unwrap_or(Path::new("."));
         injected(false)?;
-        crate::atomic_replace::atomic_replace(&self.path, dir, &out)
-            .map_err(|e| IndexError::Io(std::io::Error::other(format!("{e:?}"))))?;
-        self.near = Near::of(&entries);
-        self.entries = entries;
+        // Windows: the replacement is `MoveFileExW`, which refuses to replace
+        // a file while any handle holds it open — this index's own append
+        // handle included — so it is released first. A failed replacement
+        // then reaches the reopen below, which restores it on the old file.
+        #[cfg(windows)]
+        drop(self.file.take());
+        let replaced = crate::atomic_replace::atomic_replace(&self.path, dir, &out)
+            .map_err(|e| IndexError::Io(std::io::Error::other(format!("{e:?}"))));
+        if replaced.is_ok() {
+            self.near = Near::of(&entries);
+            self.entries = entries;
+        } else if self.file.is_some() {
+            return replaced;
+        }
         match injected(true).and_then(|()| append_options().create(true).open(&self.path)) {
-            Ok(file) => self.file = file,
+            Ok(file) => self.file = Some(file),
             Err(e) => {
                 log::error!("agent journal: identity index reopen after a rewrite failed: {e}");
                 self.poisoned = true;
             }
         }
-        Ok(())
+        replaced
     }
 }
 
