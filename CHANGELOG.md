@@ -11,6 +11,27 @@ section as part of the version bump (`.claude/rules/40-version-bump.md`).
 
 ## [Unreleased]
 
+## [0.9.106] - 2026-10-28
+
+### Added
+
+- **Choose how the sidebar looks.** Settings → Appearance → Sidebar has a new
+  **Sidebar style**: **Full height** (the default) runs the sidebar from the
+  top of the window to the bottom with a thin divider, as macOS 27 apps do;
+  **Card** keeps the earlier rounded, inset card.
+
+### Fixed
+
+- **The sidebar's header buttons no longer get cut off.** Dragging the sidebar
+  to its narrowest pushed New File and New Folder past its edge. The narrowest
+  sidebar is now 220px, wide enough for every button, and the view title
+  shortens with an ellipsis before any button is hidden.
+- **Search finds text that wraps onto the next source line** (#1590). A query
+  such as "a chat assis" missed text whose words were split by a soft line
+  break; the break now counts as a space when searching outside code blocks.
+- Updated the Tauri plugins and other dependencies to their latest patch
+  releases.
+
 ## [0.9.105] - 2026-10-28
 
 ### Fixed
@@ -435,7 +456,8 @@ section as part of the version bump (`.claude/rules/40-version-bump.md`).
 
 - Raised the `markdown-it` version floor past GHSA-253c-mchw-3w2r.
 
-[Unreleased]: https://github.com/xiaolai/vmark/compare/v0.9.105...HEAD
+[Unreleased]: https://github.com/xiaolai/vmark/compare/v0.9.106...HEAD
+[0.9.106]: https://github.com/xiaolai/vmark/releases/tag/v0.9.106
 [0.9.105]: https://github.com/xiaolai/vmark/releases/tag/v0.9.105
 [0.9.104]: https://github.com/xiaolai/vmark/releases/tag/v0.9.104
 [0.9.103]: https://github.com/xiaolai/vmark/releases/tag/v0.9.103
