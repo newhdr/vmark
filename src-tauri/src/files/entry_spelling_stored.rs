@@ -10,8 +10,9 @@
 //!     creating names, and a lookup never writes into the user's folder.
 //!   - Windows: `FindFirstFileW` on the requested name reports the stored
 //!     name of the entry the lookup reached, a hard link's own included.
-//!   - Every answer is checked against a second look at the request, and
-//!     the first look against what following the links saw (`same_entry`):
+//!   - Every answer is checked against a second look at the request (its
+//!     identity and its file type: an inode freed by the replaced entry can
+//!     be reused at once), and the first look against what following the links saw (`same_entry`):
 //!     an entry replaced meanwhile (by a link, say) is `Changed`, never
 //!     keyed by a name it no longer holds.
 //!
@@ -80,7 +81,12 @@ pub(super) fn stored_name(
     before_listing();
     let pick = platform::lookup(dir, name, target)?;
     let now = std::fs::symlink_metadata(&asked).map_err(|e| io_err(dir, e))?;
-    if platform::identity(&now, &asked).map_err(|e| io_err(dir, e))? != target {
+    // The type too: a file system may hand a freed inode straight to the
+    // link that replaced the entry (ext4 does), so the identity alone can
+    // match a replacement.
+    if now.file_type() != meta.file_type()
+        || platform::identity(&now, &asked).map_err(|e| io_err(dir, e))? != target
+    {
         return Err(LookupError::Changed(asked));
     }
     Ok(pick)
