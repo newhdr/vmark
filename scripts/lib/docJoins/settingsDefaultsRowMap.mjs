@@ -89,6 +89,7 @@ const notASetting = (page, row, reason) => ({ page, row, render: { notASetting: 
 export const ROW_MAP = [
   // ── settings.md › Appearance ────────────────────────────────────────────
   settings("Follow system appearance", "appearance.followSystemAppearance", ON_OFF),
+  settings("Sidebar style", "appearance.sidebarStyle", { enum: { flat: "Full height", card: "Card" } }),
   settings("Show filename in titlebar", "appearance.showFilenameInTitlebar", ON_OFF),
   settings("Dim level", "appearance.focusModeDim", { enum: { standard: "Standard", strong: "Strong", stronger: "Stronger" } }),
   // ── settings.md › Editor ────────────────────────────────────────────────

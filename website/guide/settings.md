@@ -35,6 +35,12 @@ On Windows and Linux the system draws the title bar (and, on Windows, the menu b
 
 When enabled, the single theme row is replaced by two rows — **Light theme** (used while the system is in light mode, default Paper) and **Dark theme** (used in dark mode, default Night). VMark switches between them the moment the system appearance changes; your manual theme choice is kept and restored when you turn the option off.
 
+### Sidebar
+
+| Setting | Description | Default | Options |
+|---------|-------------|---------|---------|
+| Sidebar style | How the sidebar and workspace rail are framed. **Full height** runs them along the window's edge with a thin divider, as macOS's own sidebars do; **Card** floats them inside the window with rounded corners and a shadow. Applies to the Settings window too | Full height | Full height, Card |
+
 ### Window
 
 | Setting | Description | Default |

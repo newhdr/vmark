@@ -478,7 +478,9 @@ module.exports = [
   ...[
     ["AboutSettings", "11.5 kB"],
     ["AdvancedSettings", "7.1 kB"],
-    ["AppearanceSettings", "3.6 kB"],
+    // 3.6 → 4.0 kB: the Sidebar group (sidebar style, flat or card) adds
+    // its Select row; actual 3.78 kB.
+    ["AppearanceSettings", "4.0 kB"],
     ["EditorSettings", "9.6 kB"],
     ["FilesImagesSettings", "8.9 kB"],
     ["FormatsSettings", "5.2 kB"],

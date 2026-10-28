@@ -14,37 +14,39 @@ import {
   SHELL_CARD_INSET,
   SHELL_CARD_RADIUS,
   WINDOW_RADIUS,
+  resolveSidebarStyle,
 } from "./shellChrome";
+import { initialState } from "@/stores/settingsStore/defaults";
 import { TRAFFIC_LIGHTS_CENTRE, TRAFFIC_LIGHTS_CLEARANCE, TRAFFIC_LIGHTS_ZONE } from "./trafficLights";
 
 describe("shellSideWidth", () => {
   it("is zero with no rail and no sidebar", () => {
     expect(
-      shellSideWidth({ workspaceRailVisible: false, sidebarVisible: false, sidebarWidth: 260 }),
+      shellSideWidth({ workspaceRailVisible: false, sidebarVisible: false, sidebarWidth: 260, sidebarStyle: "card" }),
     ).toBe(0);
   });
 
   it("counts the rail on its own", () => {
     expect(
-      shellSideWidth({ workspaceRailVisible: true, sidebarVisible: false, sidebarWidth: 260 }),
+      shellSideWidth({ workspaceRailVisible: true, sidebarVisible: false, sidebarWidth: 260, sidebarStyle: "card" }),
     ).toBe(WORKSPACE_RAIL_WIDTH + SHELL_CARD_INSET * 2);
   });
 
   it("counts the sidebar on its own", () => {
     expect(
-      shellSideWidth({ workspaceRailVisible: false, sidebarVisible: true, sidebarWidth: 260 }),
+      shellSideWidth({ workspaceRailVisible: false, sidebarVisible: true, sidebarWidth: 260, sidebarStyle: "card" }),
     ).toBe(260 + SHELL_CARD_INSET * 2);
   });
 
   it("counts BOTH — the case the terminal used to miss", () => {
     expect(
-      shellSideWidth({ workspaceRailVisible: true, sidebarVisible: true, sidebarWidth: 260 }),
+      shellSideWidth({ workspaceRailVisible: true, sidebarVisible: true, sidebarWidth: 260, sidebarStyle: "card" }),
     ).toBe(WORKSPACE_RAIL_WIDTH + 260 + SHELL_CARD_INSET * 2);
   });
 
   it("ignores the sidebar width while the sidebar is hidden", () => {
     expect(
-      shellSideWidth({ workspaceRailVisible: true, sidebarVisible: false, sidebarWidth: 9999 }),
+      shellSideWidth({ workspaceRailVisible: true, sidebarVisible: false, sidebarWidth: 9999, sidebarStyle: "card" }),
     ).toBe(WORKSPACE_RAIL_WIDTH + SHELL_CARD_INSET * 2);
   });
 
@@ -53,7 +55,7 @@ describe("shellSideWidth", () => {
   // the window edge with nothing beside it.
   it("charges no card gutters when there is no card", () => {
     expect(
-      shellSideWidth({ workspaceRailVisible: false, sidebarVisible: false, sidebarWidth: 260 }),
+      shellSideWidth({ workspaceRailVisible: false, sidebarVisible: false, sidebarWidth: 260, sidebarStyle: "card" }),
     ).toBe(0);
   });
 });
@@ -72,13 +74,70 @@ describe("the leading card", () => {
   });
 
   it("publishes both so CSS never restates them", () => {
-    expect(shellChromeVars(true)["--shell-card-inset"]).toBe(`${SHELL_CARD_INSET}px`);
-    expect(shellChromeVars(true)["--shell-card-radius"]).toBe(`${SHELL_CARD_RADIUS}px`);
+    expect(shellChromeVars(true, "card")["--shell-card-inset"]).toBe(`${SHELL_CARD_INSET}px`);
+    expect(shellChromeVars(true, "card")["--shell-card-radius"]).toBe(`${SHELL_CARD_RADIUS}px`);
   });
 
   it("keeps the card on BOTH platforms — it is the app's shape, not the OS's", () => {
-    expect(shellChromeVars(false)["--shell-card-inset"]).toBe(`${SHELL_CARD_INSET}px`);
-    expect(shellChromeVars(false)["--shell-card-radius"]).toBe(`${SHELL_CARD_RADIUS}px`);
+    expect(shellChromeVars(false, "card")["--shell-card-inset"]).toBe(`${SHELL_CARD_INSET}px`);
+    expect(shellChromeVars(false, "card")["--shell-card-radius"]).toBe(`${SHELL_CARD_RADIUS}px`);
+  });
+});
+
+// The user's choice of frame: "card" floats the column inside the window (the
+// leading card above); "flat" runs it full height against the window edge,
+// the way macOS 27's own sidebars do again. Both are decided HERE, once, so no
+// consumer can draw one style while measuring the other.
+describe("sidebar style", () => {
+  const both = { workspaceRailVisible: true, sidebarVisible: true, sidebarWidth: 260 } as const;
+
+  it("flat charges no gutters — the column IS the edge", () => {
+    expect(shellSideWidth({ ...both, sidebarStyle: "flat" })).toBe(WORKSPACE_RAIL_WIDTH + 260);
+  });
+
+  it("card charges both gutters", () => {
+    expect(shellSideWidth({ ...both, sidebarStyle: "card" })).toBe(
+      WORKSPACE_RAIL_WIDTH + 260 + SHELL_CARD_INSET * 2,
+    );
+  });
+
+  it("flat is still zero with nothing showing", () => {
+    expect(
+      shellSideWidth({ workspaceRailVisible: false, sidebarVisible: false, sidebarWidth: 260, sidebarStyle: "flat" }),
+    ).toBe(0);
+  });
+
+  it("flat publishes no inset, no radius, no shadow — and a divider instead", () => {
+    for (const overlay of [true, false]) {
+      const vars = shellChromeVars(overlay, "flat");
+      expect(vars["--shell-card-inset"]).toBe("0px");
+      expect(vars["--shell-card-radius"]).toBe("0px");
+      expect(vars["--shell-card-shadow"]).toBe("none");
+      expect(vars["--shell-card-divider"]).toBe("1px solid var(--border-color)");
+    }
+  });
+
+  it("card publishes the shadow and no divider — the shadow does the separating", () => {
+    const vars = shellChromeVars(true, "card");
+    expect(vars["--shell-card-shadow"]).toBe("var(--shadow-md)");
+    expect(vars["--shell-card-divider"]).toBe("none");
+  });
+
+  // Settings only checks a persisted leaf's TYPE, so a hand-edited or
+  // other-build value such as "rounded" reaches here as a string. It must
+  // render the default rather than look up a frame that does not exist.
+  it("resolves an unknown persisted value to the default style", () => {
+    expect(resolveSidebarStyle("rounded")).toBe(initialState.appearance.sidebarStyle);
+    expect(resolveSidebarStyle(undefined)).toBe(initialState.appearance.sidebarStyle);
+    expect(resolveSidebarStyle("card")).toBe("card");
+    expect(resolveSidebarStyle("flat")).toBe("flat");
+    const corrupt = "rounded" as unknown as "flat";
+    expect(shellSideWidth({ ...both, sidebarStyle: corrupt })).toBe(WORKSPACE_RAIL_WIDTH + 260);
+    expect(shellChromeVars(true, corrupt)["--shell-card-radius"]).toBe("0px");
+  });
+
+  it("defaults to flat", () => {
+    expect(initialState.appearance.sidebarStyle).toBe("flat");
   });
 });
 
@@ -87,38 +146,38 @@ describe("the leading card", () => {
 // and the rail stop hardcoding a number each.
 describe("shellChromeVars", () => {
   it("publishes the rail width so descendants inherit the TS value", () => {
-    expect(shellChromeVars(true)["--workspace-rail-width"]).toBe(
+    expect(shellChromeVars(true, "card")["--workspace-rail-width"]).toBe(
       `${WORKSPACE_RAIL_WIDTH}px`,
     );
   });
 
   it("reserves the top inset where the app overlays the native title bar", () => {
-    expect(shellChromeVars(true)["--shell-top-inset"]).toBe(`${SHELL_TOP_INSET}px`);
+    expect(shellChromeVars(true, "card")["--shell-top-inset"]).toBe(`${SHELL_TOP_INSET}px`);
   });
 
   it("reserves NOTHING where the OS draws its own title bar", () => {
     // Windows/Linux have no traffic lights and mount no chrome strip, so the
     // reservation was a gap with no cause — and once the strip is gone it is
     // simply the top of the window.
-    expect(shellChromeVars(false)["--shell-top-inset"]).toBe("0px");
+    expect(shellChromeVars(false, "card")["--shell-top-inset"]).toBe("0px");
   });
 
   it("keeps the rail width platform-independent", () => {
-    expect(shellChromeVars(false)["--workspace-rail-width"]).toBe(
-      shellChromeVars(true)["--workspace-rail-width"],
+    expect(shellChromeVars(false, "card")["--workspace-rail-width"]).toBe(
+      shellChromeVars(true, "card")["--workspace-rail-width"],
     );
   });
 
   it("publishes the window controls' zone and optical centre", () => {
-    expect(shellChromeVars(true)["--traffic-lights-zone"]).toBe(`${TRAFFIC_LIGHTS_ZONE}px`);
-    expect(shellChromeVars(true)["--traffic-lights-centre"]).toBe(`${TRAFFIC_LIGHTS_CENTRE}px`);
+    expect(shellChromeVars(true, "card")["--traffic-lights-zone"]).toBe(`${TRAFFIC_LIGHTS_ZONE}px`);
+    expect(shellChromeVars(true, "card")["--traffic-lights-centre"]).toBe(`${TRAFFIC_LIGHTS_CENTRE}px`);
   });
 
   it("collapses BOTH light-derived values off macOS, with the inset", () => {
     // They describe buttons that are not inside the webview there. Leaving the
     // zone at 82px would indent a title bar against nothing; leaving the centre
     // would push its content down for the same absent reason.
-    const off = shellChromeVars(false);
+    const off = shellChromeVars(false, "card");
     expect(off["--traffic-lights-zone"]).toBe("0px");
     expect(off["--traffic-lights-centre"]).toBe("0px");
     expect(off["--shell-top-inset"]).toBe("0px");

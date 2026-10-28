@@ -66,6 +66,7 @@ export const initialState: SettingsState = {
     editorWidth: 50, // em units, 0 = unlimited (50em ≈ 900px at 18px font)
     showFilenameInTitlebar: false,
     focusModeDim: "standard", // color-only dimming by default (current behavior)
+    sidebarStyle: "flat", // full height, as macOS 27's own sidebars are
   },
   cjkFormatting: { ...DEFAULT_CJK_FORMATTING },
   markdown: {

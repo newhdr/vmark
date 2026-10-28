@@ -35,6 +35,12 @@ No Windows e no Linux é o sistema que desenha a barra de título (e, no Windows
 
 Quando ativada, a linha única de tema é substituída por duas linhas — **Tema claro** (usado enquanto o sistema está no modo claro, padrão Paper) e **Tema escuro** (usado no modo escuro, padrão Night). O VMark alterna entre eles no momento em que a aparência do sistema muda; sua escolha manual de tema é mantida e restaurada quando você desativa a opção.
 
+### Barra lateral
+
+| Configuração | Descrição | Padrão | Opções |
+|-------------|-----------|--------|--------|
+| Estilo da barra lateral | Como a barra lateral e o trilho de espaços de trabalho são enquadrados. **Altura total** os encosta na borda da janela com um divisor fino, como as barras laterais do próprio macOS; **Cartão** os faz flutuar dentro da janela com cantos arredondados e sombra. Vale também para a janela de Configurações | Altura total | Altura total, Cartão |
+
 ### Janela
 
 | Configuração | Descrição | Padrão |

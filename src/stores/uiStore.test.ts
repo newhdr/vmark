@@ -294,7 +294,7 @@ describe("uiStore", () => {
   describe("setSidebarWidth", () => {
     it("clamps to minimum width", () => {
       useUIStore.getState().setSidebarWidth(50);
-      expect(useUIStore.getState().sidebarWidth).toBe(180);
+      expect(useUIStore.getState().sidebarWidth).toBe(220);
     });
 
     it("clamps to maximum width", () => {

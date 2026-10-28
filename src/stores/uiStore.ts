@@ -40,8 +40,14 @@ export type { SidebarViewMode, UIStore, FileSearchResult, EffectiveTerminalPosit
  * it to `setSidebarWidth`. It used to carry its own 150–500 copy, so a
  * persisted 500 passed validation and was then clamped to 480: restore
  * "succeeded" with a width it had just declared valid and did not apply.
+ *
+ * The floor is the Files header with its title fully truncated: the column's
+ * left padding, the view toggle and five action buttons with their gaps, and
+ * the right padding come to 212px, plus the flat style's 1px divider. At 180
+ * the column clipped New File and New Folder off its edge
+ * (sidebarHeaderFit.webkit.test.tsx measures it).
  */
-export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MIN_WIDTH = 220;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 

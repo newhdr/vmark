@@ -15,7 +15,7 @@ const { mockSetSidebarWidth, uiState } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/stores/uiStore", () => ({
-  SIDEBAR_MIN_WIDTH: 180,
+  SIDEBAR_MIN_WIDTH: 220,
   SIDEBAR_MAX_WIDTH: 480,
   useUIStore: {
     getState: () => ({
@@ -88,7 +88,7 @@ beforeEach(() => {
 
 describe("useSidebarResize", () => {
   it.each([
-    ["below the floor clamps to MIN (180)", 500, 100, 180],
+    ["below the floor clamps to MIN (220)", 500, 100, 220],
     ["above the ceiling clamps to MAX (480)", 0, 1000, 480],
     ["inside the range passes through", 100, 150, 300],
   ])("a drag %s and commits once, on release", (_name, downX, moveX, expected) => {
@@ -290,13 +290,13 @@ describe("useSidebarResize", () => {
       expect(mockSetSidebarWidth).toHaveBeenLastCalledWith(282);
     });
 
-    it("ArrowLeft clamps to MIN (180) when already at floor", () => {
+    it("ArrowLeft clamps to MIN (220) when already at floor", () => {
       uiState.sidebarWidth = 152;
       const { result } = renderHook(() => useSidebarResize());
 
       act(() => result.current.handleResizeKeyDown(fireKeyDown("ArrowLeft")));
 
-      expect(mockSetSidebarWidth).toHaveBeenLastCalledWith(180);
+      expect(mockSetSidebarWidth).toHaveBeenLastCalledWith(220);
     });
 
     it("ArrowRight clamps to MAX (480) when already at ceiling", () => {
@@ -308,13 +308,13 @@ describe("useSidebarResize", () => {
       expect(mockSetSidebarWidth).toHaveBeenLastCalledWith(480);
     });
 
-    it("Home jumps directly to MIN (180)", () => {
+    it("Home jumps directly to MIN (220)", () => {
       uiState.sidebarWidth = 350;
       const { result } = renderHook(() => useSidebarResize());
 
       act(() => result.current.handleResizeKeyDown(fireKeyDown("Home")));
 
-      expect(mockSetSidebarWidth).toHaveBeenLastCalledWith(180);
+      expect(mockSetSidebarWidth).toHaveBeenLastCalledWith(220);
     });
 
     it("End jumps directly to MAX (480)", () => {

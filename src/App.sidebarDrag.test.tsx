@@ -54,7 +54,8 @@ const { shellSideWidth } = await import("@/shell/shellChrome");
 
 /** The shell's own derivation of the leading column's width, as a CSS length. */
 function side(workspaceRailVisible: boolean, sidebarWidth: number, sidebarVisible = true): string {
-  return `${shellSideWidth({ workspaceRailVisible, sidebarVisible, sidebarWidth })}px`;
+  const sidebarStyle = useSettingsStore.getState().appearance.sidebarStyle;
+  return `${shellSideWidth({ workspaceRailVisible, sidebarVisible, sidebarWidth, sidebarStyle })}px`;
 }
 
 function mouseMove(clientX: number): void {

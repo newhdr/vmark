@@ -35,6 +35,12 @@ Su Windows e Linux è il sistema a disegnare la barra del titolo (e, su Windows,
 
 Quando è attiva, la singola riga del tema viene sostituita da due righe — **Tema chiaro** (usato mentre il sistema è in modalità chiara, predefinito Paper) e **Tema scuro** (usato in modalità scura, predefinito Night). VMark passa dall'uno all'altro nel momento in cui cambia l'aspetto del sistema; la tua scelta manuale del tema viene conservata e ripristinata quando disattivi l'opzione.
 
+### Barra laterale
+
+| Impostazione | Descrizione | Predefinito | Opzioni |
+|-------------|-------------|-------------|---------|
+| Stile della barra laterale | Come vengono incorniciate la barra laterale e la barra delle aree di lavoro. **Altezza piena** le affianca al bordo della finestra con un sottile divisore, come le barre laterali di macOS; **Scheda** le fa fluttuare nella finestra con angoli arrotondati e un'ombra. Vale anche per la finestra delle impostazioni | Altezza piena | Altezza piena, Scheda |
+
 ### Finestra
 
 | Impostazione | Descrizione | Predefinito |

@@ -443,7 +443,7 @@ describe('restoreHelpers', () => {
       expect(mockSetSidebarWidth).toHaveBeenCalledWith(300);
     });
 
-    // Bounds are uiStore's (180-480) — the same range setSidebarWidth clamps
+    // Bounds are uiStore's (220-480) — the same range setSidebarWidth clamps
     // to. 150 and 500 were this file's own copy, and both are now REJECTED:
     // accepting a width the store would silently clamp is what the mismatch
     // did wrong.

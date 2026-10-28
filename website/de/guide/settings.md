@@ -35,6 +35,12 @@ Unter Windows und Linux zeichnet das System die Titelleiste (und unter Windows a
 
 Ist die Option aktiviert, wird die einzelne Design-Zeile durch zwei Zeilen ersetzt — **Helles Design** (verwendet, solange das System im hellen Modus ist, Standard Papier) und **Dunkles Design** (verwendet im dunklen Modus, Standard Nacht). VMark wechselt in dem Moment zwischen ihnen, in dem sich die Systemdarstellung ändert; Ihre manuelle Designauswahl bleibt erhalten und wird wiederhergestellt, wenn Sie die Option ausschalten.
 
+### Seitenleiste
+
+| Einstellung | Beschreibung | Standard | Optionen |
+|-------------|-------------|---------|---------|
+| Stil der Seitenleiste | Wie Seitenleiste und Arbeitsbereichsleiste gerahmt werden. **Volle Höhe** führt sie mit einer feinen Trennlinie am Fensterrand entlang, wie die Seitenleisten von macOS selbst; **Karte** lässt sie mit abgerundeten Ecken und Schatten im Fenster schweben. Gilt auch für das Einstellungsfenster | Volle Höhe | Volle Höhe, Karte |
+
 ### Fenster
 
 | Einstellung | Beschreibung | Standard |

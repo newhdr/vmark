@@ -170,8 +170,9 @@ export function MainLayout() {
   const browserWorkspaceActive = useBrowserWorkspaceActive();
   const workspaceRailMode = useSettingsStore((state) => state.general.workspaceRailMode);
   const showWorkspaceRail = isDocumentWindow && workspaceRailMode;
+  const sidebarStyle = useSettingsStore((state) => state.appearance.sidebarStyle);
   // One definition, shared with the terminal's layout maths (see shellChrome).
-  const sideWidth = shellSideWidth({ workspaceRailVisible: showWorkspaceRail, sidebarVisible, sidebarWidth });
+  const sideWidth = shellSideWidth({ workspaceRailVisible: showWorkspaceRail, sidebarVisible, sidebarWidth, sidebarStyle });
   const overlayTitleBar = usesOverlayTitleBar();
 
   // T03 lifecycle composites — every per-document/per-window hook now
@@ -191,7 +192,7 @@ export function MainLayout() {
       className={className}
       // Single source for the shell's chrome geometry: descendants inherit
       // these instead of restating the numbers in CSS (see shellChrome).
-      style={shellChromeVars(overlayTitleBar) as CSSProperties}
+      style={shellChromeVars(overlayTitleBar, sidebarStyle) as CSSProperties}
       // Only macOS overlays the native title bar, so only macOS needs the app
       // to draw one. Elsewhere the OS already did, and a second strip below the
       // menu bar is the empty band reported in #1296.

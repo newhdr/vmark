@@ -307,8 +307,10 @@ Icon SVG sizes (conventions, not tokens):
 | `--sidebar-bg` | Sidebar background |
 | `--workspace-rail-width` | Workspace rail column width |
 | `--bar-height` | Status bar / universal toolbar height |
-| `--shell-card-inset` | Gutter around the leading rail+sidebar card |
-| `--shell-card-radius` | Leading card radius, concentric with the 21px window corner |
+| `--shell-card-inset` | Gutter around the leading rail+sidebar card (0 in the flat sidebar style) |
+| `--shell-card-radius` | Leading card radius, concentric with the 21px window corner (0 in the flat sidebar style) |
+| `--shell-card-shadow` | Leading card shadow (`none` in the flat sidebar style) |
+| `--shell-card-divider` | Leading column's right-edge border — the flat style's separator, `none` for the card |
 | `--shell-top-inset` | Top inset a full-height column leaves clear |
 | `--traffic-lights-zone` | Horizontal space the title bar keeps clear of the window controls |
 | `--traffic-lights-centre` | The window controls' optical line, which the title bar centres content on |
