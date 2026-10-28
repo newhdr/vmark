@@ -57,8 +57,15 @@
    rest/hover/pressed/focus and the aria-pressed accent all come from
    src/styles/icon-button-shared.css. */
 
+/* The title is the one part of the header that may give way: the toggle icon
+   beside it already names the view, so in a narrow sidebar it truncates rather
+   than pushing the action buttons out of the clipped column. */
 .sidebar-title {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: var(--letter-spacing-loose);

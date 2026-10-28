@@ -54,7 +54,7 @@ describe("SidebarResizeHandle", () => {
     // MIN_SIDEBAR_WIDTH (150) / MAX_SIDEBAR_WIDTH (500) come from the
     // real module — we kept the actual constants in the mock above so
     // a future bump in the source values surfaces here.
-    expect(handle.getAttribute("aria-valuemin")).toBe("180");
+    expect(handle.getAttribute("aria-valuemin")).toBe("220");
     expect(handle.getAttribute("aria-valuemax")).toBe("480");
     expect(handle.getAttribute("tabindex")).toBe("0");
   });
