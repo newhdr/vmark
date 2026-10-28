@@ -32,7 +32,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::agent_journal::journal_file::open_created;
@@ -64,7 +64,7 @@ pub(crate) use faults::{APPENDS_BEFORE_FAILURE, REWRITE_FAILS_AFTER_REPLACE};
 
 pub struct DocIndex {
     path: PathBuf,
-    /// The append handle; `None` only while a Windows rewrite has released
+    /// The read-write handle appends go through; `None` only while a Windows rewrite has released
     /// it, or after a failed reopen (which also poisons the index).
     file: Option<File>,
     entries: BTreeMap<String, IndexEntry>,
@@ -72,10 +72,13 @@ pub struct DocIndex {
     poisoned: bool,
 }
 
-/// Owner-only read-append options, with no creation flag set.
+/// Owner-only read-write options, with no creation flag set. Not append
+/// mode: on Windows an append handle lacks `FILE_WRITE_DATA`, so the tail
+/// repair and the rollback (`set_len`) would be refused; every append seeks
+/// to the end instead.
 fn append_options() -> OpenOptions {
     let mut o = OpenOptions::new();
-    o.read(true).append(true);
+    o.read(true).write(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -224,7 +227,10 @@ impl DocIndex {
             return Err(IndexError::Poisoned);
         };
         let before = file.metadata()?.len();
-        let written = file.write_all(&line(&op)).and_then(|()| file.sync_data());
+        let written = file
+            .seek(SeekFrom::Start(before))
+            .and_then(|_| file.write_all(&line(&op)))
+            .and_then(|()| file.sync_data());
         if let Err(e) = written {
             if file.set_len(before).and_then(|()| file.sync_all()).is_err() {
                 self.poisoned = true;

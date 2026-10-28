@@ -114,8 +114,12 @@ fn the_log_compacts_when_it_outgrows_its_live_entries_and_keeps_every_mapping() 
 #[test]
 fn an_empty_or_missing_index_opens_empty() {
     let dir = tmp();
-    let idx = DocIndex::open(dir.path()).unwrap().0;
-    assert!(idx.get("k:a").is_none());
+    // Closed before the reopen: the app holds one index per journal, and
+    // Windows refuses to replace a file another handle holds open.
+    {
+        let idx = DocIndex::open(dir.path()).unwrap().0;
+        assert!(idx.get("k:a").is_none());
+    }
     fs::write(dir.path().join(DOC_INDEX_FILE), b"").unwrap();
     assert!(DocIndex::open(dir.path()).unwrap().0.get("k:a").is_none());
 }
