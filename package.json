@@ -1,7 +1,7 @@
 {
   "name": "vmark",
   "private": true,
-  "version": "0.9.103",
+  "version": "0.9.104",
   "license": "ISC",
   "description": "The plain-text workspace where humans and AI collaborate",
   "type": "module",
@@ -100,7 +100,8 @@
     "lint:provenance-ids": "node scripts/check-provenance-ids.mjs",
     "lint:adr-refs": "node scripts/check-adr-refs.mjs",
     "lint:feature-map": "node scripts/check-feature-map.mjs",
-    "gen:feature-ledger": "node scripts/gen-feature-ledger.mjs"
+    "gen:feature-ledger": "node scripts/gen-feature-ledger.mjs",
+    "gen:comment-anchor-goldens": "tsx scripts/gen-comment-anchor-goldens.ts"
   },
   "dependencies": {
     "@actions/workflow-parser": "0.3.61",
@@ -164,6 +165,7 @@
     "@xyflow/react": "12.12.0",
     "alfaaz": "^1.1.0",
     "codemirror-lang-mermaid": "0.5.0",
+    "diff-match-patch": "1.0.5",
     "dompurify": "^3.4.17",
     "highlight.js": "^11.12.0",
     "html-to-image": "1.11.13",
@@ -230,10 +232,11 @@
       "ip-address": ">=10.7.4 <11",
       "vite@7": ">=7.3.7 <8",
       "vite@8": ">=8.3.3 <9",
-      "@modelcontextprotocol/server": ">=2.3.0 <3",
+      "@modelcontextprotocol/server": ">=2.4.0 <3",
+      "@modelcontextprotocol/node": ">=2.1.0 <3",
       "body-parser": ">=2.4.0 <3",
       "zod@4": ">=4.6.6 <5",
-      "qs": ">=6.14.2 <7",
+      "qs": ">=6.16.1 <7",
       "picomatch": ">=4.0.4 <5",
       "path-to-regexp": ">=8.4.0 <9",
       "js-yaml@3": ">=3.15.2 <4",
@@ -264,6 +267,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
+    "@types/diff-match-patch": "1.0.36",
     "@types/mdast": "^4.0.4",
     "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
