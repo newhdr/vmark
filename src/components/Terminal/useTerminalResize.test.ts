@@ -27,6 +27,8 @@ const { settingsState } = vi.hoisted(() => {
     terminal: { panelRatio: 0.4 },
     // currentShellSideWidth() reads the rail setting (audit fix).
     general: { workspaceRailMode: false },
+    // ...and the sidebar style, which decides whether the card's gutters count.
+    appearance: { sidebarStyle: "flat" },
     // Writes through, so a test that persists a ratio really changes what a
     // later read sees — otherwise "restore" would pass even while the stored
     // ratio was being clobbered.

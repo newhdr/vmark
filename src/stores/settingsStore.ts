@@ -63,6 +63,7 @@ export type {
   ThemeColors,
   AppearanceSettings,
   FocusModeDim,
+  SidebarStyle,
   CJKFormattingSettings,
   MediaBorderStyle,
   MediaAlignment,

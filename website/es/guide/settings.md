@@ -35,6 +35,12 @@ En Windows y Linux el sistema dibuja la barra de título (y, en Windows, la barr
 
 Cuando está activado, la fila única de tema se sustituye por dos filas — **Tema claro** (usado mientras el sistema está en modo claro, Paper por defecto) y **Tema oscuro** (usado en modo oscuro, Night por defecto). VMark cambia entre ellos en cuanto cambia la apariencia del sistema; tu elección manual de tema se conserva y se restaura al desactivar la opción.
 
+### Barra lateral
+
+| Configuración | Descripción | Predeterminado | Opciones |
+|---------------|-------------|----------------|---------|
+| Estilo de la barra lateral | Cómo se enmarcan la barra lateral y el riel de espacios de trabajo. **Altura completa** los coloca junto al borde de la ventana con una fina línea divisoria, como las barras laterales de macOS; **Tarjeta** los hace flotar dentro de la ventana con esquinas redondeadas y sombra. También se aplica a la ventana de Ajustes | Altura completa | Altura completa, Tarjeta |
+
 ### Ventana
 
 | Configuración | Descripción | Predeterminado |

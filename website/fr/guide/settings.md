@@ -35,6 +35,12 @@ Sous Windows et Linux, c'est le système qui dessine la barre de titre (et, sous
 
 Lorsqu'il est activé, la ligne de thème unique est remplacée par deux lignes — **Thème clair** (utilisé lorsque le système est en mode clair, Papier par défaut) et **Thème sombre** (utilisé en mode sombre, Nuit par défaut). VMark bascule de l'un à l'autre dès que l'apparence du système change ; votre choix de thème manuel est conservé et restauré lorsque vous désactivez l'option.
 
+### Barre latérale
+
+| Paramètre | Description | Par défaut | Options |
+|-----------|-------------|------------|---------|
+| Style de la barre latérale | Le cadre de la barre latérale et du rail des espaces de travail. **Pleine hauteur** les place le long du bord de la fenêtre avec un fin séparateur, comme les barres latérales de macOS ; **Carte** les fait flotter dans la fenêtre avec des coins arrondis et une ombre. S'applique aussi à la fenêtre des réglages | Pleine hauteur | Pleine hauteur, Carte |
+
 ### Fenêtre
 
 | Paramètre | Description | Par défaut |

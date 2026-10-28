@@ -12,7 +12,7 @@
 
 export type { HtmlAllowlistLevel } from "@/utils/htmlAllowlists";
 
-export type { ThemeId, ThemeColors, FocusModeDim, AppearanceSettings } from "./settingsTypes/appearance";
+export type { ThemeId, ThemeColors, FocusModeDim, SidebarStyle, AppearanceSettings } from "./settingsTypes/appearance";
 
 export type {
   QuoteStyle,

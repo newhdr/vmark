@@ -63,6 +63,27 @@ describe("AppearanceSettings — focus mode dim (WI-10)", () => {
   });
 });
 
+// Every platform: the frame is the app's own shape, not the OS title bar, so
+// unlike the Window group this row is not withheld off macOS.
+describe("AppearanceSettings — sidebar style", () => {
+  beforeEach(() => {
+    useSettingsStore.getState().resetSettings();
+  });
+
+  it.each([true, false])("offers the choice, defaulting to flat (macOS: %s)", (isMac) => {
+    platform.isMac = isMac;
+    render(<AppearanceSettings />);
+    expect(screen.getByText("Sidebar style")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Full height")).toBeInTheDocument();
+  });
+
+  it("choosing Card stores it", () => {
+    render(<AppearanceSettings />);
+    fireEvent.change(screen.getByDisplayValue("Full height"), { target: { value: "card" } });
+    expect(useSettingsStore.getState().appearance.sidebarStyle).toBe("card");
+  });
+});
+
 describe("AppearanceSettings — follow system appearance (#1125)", () => {
   beforeEach(() => {
     useSettingsStore.setState({

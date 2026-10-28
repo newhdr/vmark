@@ -17,11 +17,19 @@
  * neither a chrome strip nor a traffic light — both were an unexplained gap
  * (#1296). The 28 was then wrong on macOS too: see `SHELL_TOP_INSET`.
  *
+ * It also owns the FRAME around that column, which the user chooses
+ * (`appearance.sidebarStyle`): "flat" runs it full height against the window
+ * edge, "card" floats it inside the window. Width, gutters, radius, shadow and
+ * divider are all decided by `shellFrame()` from that one value, so no
+ * consumer can draw one style while measuring the other.
+ *
  * @coordinates-with App.tsx — lays the shell out with this width
+ * @coordinates-with pages/Settings.tsx — publishes the same vars for the settings window
  * @coordinates-with components/Terminal/useTerminalPosition.ts — sizes the panel against it
  * @coordinates-with shell/trafficLights.ts — the window controls' own geometry
  * @module shell/shellChrome
  */
+import type { SidebarStyle } from "@/stores/settingsTypes";
 import {
   TRAFFIC_LIGHTS_CENTRE,
   TRAFFIC_LIGHTS_CLEARANCE,
@@ -66,18 +74,51 @@ export const SHELL_CARD_INSET = 8;
  */
 export const SHELL_CARD_RADIUS = WINDOW_RADIUS - SHELL_CARD_INSET;
 
+/** Everything that differs between the two sidebar styles. */
+interface ShellFrame {
+  /** Gutter on each side of the column, in pixels. */
+  inset: number;
+  radius: number;
+  shadow: string;
+  /** The column's right edge. The card's shadow separates it from the editor;
+   *  a flat column has no shadow to do that, so it carries a hairline. */
+  divider: string;
+}
+
+const SHELL_FRAMES: Readonly<Record<SidebarStyle, ShellFrame>> = {
+  flat: { inset: 0, radius: 0, shadow: "none", divider: "1px solid var(--border-color)" },
+  card: { inset: SHELL_CARD_INSET, radius: SHELL_CARD_RADIUS, shadow: "var(--shadow-md)", divider: "none" },
+};
+
+/**
+ * The style to render for a stored value. Settings checks only that a
+ * persisted leaf is a string, so a hand-edited or other-build value arrives
+ * here as one; it renders the default (flat) rather than indexing a frame that
+ * does not exist.
+ */
+export function resolveSidebarStyle(value: unknown): SidebarStyle {
+  return value === "card" ? "card" : "flat";
+}
+
+function shellFrame(style: SidebarStyle): ShellFrame {
+  return SHELL_FRAMES[resolveSidebarStyle(style)];
+}
+
 export interface ShellChromeState {
   /** The workspace rail is showing (document windows with the mode on). */
   workspaceRailVisible: boolean;
   sidebarVisible: boolean;
   sidebarWidth: number;
+  /** Required, not defaulted: a caller that forgets it must fail to compile
+   *  rather than silently measure a card the window is not drawing. */
+  sidebarStyle: SidebarStyle;
 }
 
 /**
  * Width of the chrome to the left of the editor, in pixels.
  *
- * Includes the leading card's own gutters, because the card is what the editor
- * actually sits beside. Getting this wrong is not cosmetic: paper-one shipped a
+ * Includes the card's own gutters in card style, because the card is what the
+ * editor actually sits beside; a flat column has none. Getting this wrong is not cosmetic: paper-one shipped a
  * card 2px narrower than the track reserved for it and the whole layout drifted
  * on two platforms. Zero when neither surface is showing — there is no card to
  * inset, since `App.tsx` renders no aside at all.
@@ -86,7 +127,7 @@ export function shellSideWidth(state: ShellChromeState): number {
   const rail = state.workspaceRailVisible ? WORKSPACE_RAIL_WIDTH : 0;
   const sidebar = state.sidebarVisible ? state.sidebarWidth : 0;
   if (rail + sidebar === 0) return 0;
-  return rail + sidebar + SHELL_CARD_INSET * 2;
+  return rail + sidebar + shellFrame(state.sidebarStyle).inset * 2;
 }
 
 /**
@@ -146,6 +187,8 @@ export interface ShellChromeVars {
   "--traffic-lights-centre": string;
   "--shell-card-inset": string;
   "--shell-card-radius": string;
+  "--shell-card-shadow": string;
+  "--shell-card-divider": string;
 }
 
 /**
@@ -157,8 +200,11 @@ export interface ShellChromeVars {
  *   chrome covers the native title bar. That is the only place the strip is
  *   mounted AND the only place the traffic lights sit inside the webview, which
  *   is why one flag governs every light-derived value here.
+ * @param sidebarStyle `appearance.sidebarStyle` — required for the same reason
+ *   as `ShellChromeState.sidebarStyle`.
  */
-export function shellChromeVars(overlayTitleBar: boolean): ShellChromeVars {
+export function shellChromeVars(overlayTitleBar: boolean, sidebarStyle: SidebarStyle): ShellChromeVars {
+  const frame = shellFrame(sidebarStyle);
   return {
     "--bar-height": `${BAR_HEIGHT}px`,
     "--workspace-rail-width": `${WORKSPACE_RAIL_WIDTH}px`,
@@ -168,10 +214,11 @@ export function shellChromeVars(overlayTitleBar: boolean): ShellChromeVars {
     // webview to leave room for.
     "--traffic-lights-zone": `${overlayTitleBar ? TRAFFIC_LIGHTS_ZONE : 0}px`,
     "--traffic-lights-centre": `${overlayTitleBar ? TRAFFIC_LIGHTS_CENTRE : 0}px`,
-    // The card is the app's own shape, not the OS's, so unlike the values above
-    // it does not collapse off macOS — a window with a native title bar still
-    // holds its leading surfaces in the same card.
-    "--shell-card-inset": `${SHELL_CARD_INSET}px`,
-    "--shell-card-radius": `${SHELL_CARD_RADIUS}px`,
+    // The frame is the app's own shape, not the OS's, so unlike the values
+    // above it follows the user's style on every platform.
+    "--shell-card-inset": `${frame.inset}px`,
+    "--shell-card-radius": `${frame.radius}px`,
+    "--shell-card-shadow": frame.shadow,
+    "--shell-card-divider": frame.divider,
   };
 }

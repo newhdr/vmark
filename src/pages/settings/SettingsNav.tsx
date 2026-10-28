@@ -69,7 +69,8 @@ export function SettingsNav({
         className="w-[var(--settings-nav-width)] h-full flex flex-col overflow-hidden bg-[var(--bg-secondary)]"
         style={{
           borderRadius: "var(--shell-card-radius)",
-          boxShadow: "var(--shadow-md)",
+          boxShadow: "var(--shell-card-shadow)",
+          borderRight: "var(--shell-card-divider)",
         }}
       >
         {/* Clears the traffic lights, measured from the WINDOW's top — so the

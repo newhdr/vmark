@@ -68,9 +68,11 @@
   color: var(--browser-text-color);
 }
 
-/* THE LEADING CARD. The workspace rail and the sidebar are one surface, so they
-   are one card — the rail is a column of the sidebar, not a separate slab
-   against the window edge.
+/* THE LEADING COLUMN. The workspace rail and the sidebar are one surface, so
+   they get one frame — the rail is a column of the sidebar, not a separate slab.
+   The frame is the user's sidebar style: a full-height column with a divider
+   ("flat"), or a floating card ("card"). Every value below that differs
+   between the two is published by shellChromeVars(), never restated here.
  *
  * The card owns the frame (background, radius, shadow) and the children go flat
  * inside it, per rule 32 "Frame ownership". Its radius is concentric with the
@@ -89,7 +91,9 @@
   padding-top: max(0px, calc(var(--shell-top-inset, 0px) - var(--shell-card-inset, 0px)));
   border-radius: var(--shell-card-radius, 0px);
   background: var(--sidebar-bg);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shell-card-shadow, none);
+  /* Inside the width (border-box above), so no layout maths moves with it. */
+  border-right: var(--shell-card-divider, none);
   overflow: hidden;
 }
 

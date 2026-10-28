@@ -117,6 +117,8 @@ export function SettingsPage() {
 
   const [section, setSection] = useState<Section>(getInitialSection);
   const showDevSection = useSettingsStore((state) => state.showDevSection);
+  // The nav is drawn in the same frame as the main window's sidebar.
+  const sidebarStyle = useSettingsStore((state) => state.appearance.sidebarStyle);
 
   // Settings search (D2): a non-empty query stacks every searchable panel and
   // filters rows by label/description via SettingsSearchContext + CSS.
@@ -202,7 +204,7 @@ export function SettingsPage() {
     // :root default of 0 and every clearance here is a hardcoded guess again.
     <div
       className="relative flex h-screen bg-[var(--bg-color)]"
-      style={shellChromeVars(isMac) as CSSProperties}
+      style={shellChromeVars(isMac, sidebarStyle) as CSSProperties}
     >
       <SettingsNav
         isMac={isMac}

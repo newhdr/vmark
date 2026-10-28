@@ -36,6 +36,11 @@ type CJKLetterSpacingValue = "0" | "0.02" | "0.03" | "0.05" | "0.08" | "0.10" | 
  *  progressively lower opacity. */
 export type FocusModeDim = "standard" | "strong" | "stronger";
 
+/** How the leading column (workspace rail + sidebar) is framed: "flat" runs
+ *  full height against the window edge with a divider, "card" floats it inside
+ *  the window with concentric corners and a shadow. Geometry: shell/shellChrome. */
+export type SidebarStyle = "flat" | "card";
+
 /** Visual appearance preferences — theme, fonts, spacing, and editor width. */
 export interface AppearanceSettings {
   theme: ThemeId;
@@ -52,4 +57,5 @@ export interface AppearanceSettings {
   editorWidth: number; // Max content width in em (0 = unlimited)
   showFilenameInTitlebar: boolean; // Show filename in window titlebar
   focusModeDim: FocusModeDim; // How strongly Focus Mode dims non-focused content
+  sidebarStyle: SidebarStyle; // Frame of the leading column — full height or floating card
 }

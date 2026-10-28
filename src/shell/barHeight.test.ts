@@ -16,8 +16,8 @@ describe("bar height ownership (R11)", () => {
   });
 
   it("shellChromeVars publishes --bar-height", () => {
-    expect(shellChromeVars(true)["--bar-height"]).toBe(`${BAR_HEIGHT}px`);
-    expect(shellChromeVars(false)["--bar-height"]).toBe(`${BAR_HEIGHT}px`);
+    expect(shellChromeVars(true, "flat")["--bar-height"]).toBe(`${BAR_HEIGHT}px`);
+    expect(shellChromeVars(false, "flat")["--bar-height"]).toBe(`${BAR_HEIGHT}px`);
   });
 
   it("the chrome strip is one bar tall — a divergence is a design decision, not drift", () => {

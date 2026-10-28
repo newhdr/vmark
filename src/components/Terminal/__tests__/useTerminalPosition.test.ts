@@ -263,12 +263,14 @@ vi.mock("@/stores/settingsStore", () => {
       terminal: { position: terminalPosition, panelRatio },
       // The hook subscribes to the rail so the panel resizes when it toggles.
       general: { workspaceRailMode: false },
+      appearance: { sidebarStyle: "flat" },
     };
     return selector(state);
   }) as unknown as { getState: () => unknown; subscribe: (fn: (s: unknown) => unknown) => () => void; setState: (partial: Record<string, unknown>) => void };
 
   store.getState = () => ({
     general: { workspaceRailMode: false },
+    appearance: { sidebarStyle: "flat" },
     terminal: { position: terminalPosition, panelRatio },
   });
   store.subscribe = (fn: (s: unknown) => unknown) => {

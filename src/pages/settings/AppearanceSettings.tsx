@@ -13,11 +13,13 @@ import {
   useSettingsStore,
   type ThemeId,
   type FocusModeDim,
+  type SidebarStyle,
 } from "@/stores/settingsStore";
 import { SettingRow, SettingsGroup, Toggle, Select } from "./components";
 import { selectableThemeIds } from "@/theme/themeAvailability";
 import { themes as themeCatalog } from "@/theme/themes";
 import { isMacPlatform, usesOverlayTitleBar } from "@/utils/platform";
+import { resolveSidebarStyle } from "@/shell/shellChrome";
 
 /** One row of theme swatches: each swatch is a MINI PAGE from the
  *  typed catalog — an "Aa" specimen in the theme's ink on its paper, a
@@ -147,6 +149,24 @@ export function AppearanceSettings() {
           <Toggle
             checked={followSystem}
             onChange={(v) => updateSetting("followSystemAppearance", v)}
+          />
+        </SettingRow>
+      </SettingsGroup>
+
+      {/* Sidebar — the frame is the app's own shape, not the OS title bar, so
+          unlike the Window group below it is offered on every platform. */}
+      <SettingsGroup title={t("appearance.group.sidebar")}>
+        <SettingRow
+          label={t("appearance.sidebarStyle.label")}
+          description={t("appearance.sidebarStyle.description")}
+        >
+          <Select<SidebarStyle>
+            value={resolveSidebarStyle(appearance.sidebarStyle)}
+            options={[
+              { value: "flat", label: t("appearance.sidebarStyle.flat") },
+              { value: "card", label: t("appearance.sidebarStyle.card") },
+            ]}
+            onChange={(v) => updateSetting("sidebarStyle", v)}
           />
         </SettingRow>
       </SettingsGroup>

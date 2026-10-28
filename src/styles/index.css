@@ -106,12 +106,14 @@
      real values from shell/trafficLights.ts. */
   --traffic-lights-zone: 0px;
   --traffic-lights-centre: 0px;
-  /* The leading card holding the workspace rail and the sidebar: its gutter, and
-     its radius concentric with the window's own 21px corner. Written by the
-     shell root from shell/shellChrome.ts; unlike the values above these do not
-     collapse off macOS, so the static defaults match the real ones. */
-  --shell-card-inset: 8px;
-  --shell-card-radius: 13px;
+  /* The frame of the leading column (workspace rail + sidebar): gutter, radius,
+     shadow and right-edge divider. Written by the shell root from
+     shell/shellChrome.ts per the user's sidebar style; these statics are the
+     default style's ("flat"), so a consumer resolving before mount draws that. */
+  --shell-card-inset: 0px;
+  --shell-card-radius: 0px;
+  --shell-card-shadow: none;
+  --shell-card-divider: 1px solid var(--border-color);
   --border-color: #d5d4d4;
   /* D8: the >=3:1 boundary for CONTROLS; --border-color stays a
      hairline divider. Written per theme by useTheme; static default = paper. */

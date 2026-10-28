@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { SHELL_TOP_INSET } from "@/shell/shellChrome";
+import { SHELL_TOP_INSET, SHELL_CARD_INSET, SHELL_CARD_RADIUS } from "@/shell/shellChrome";
 import { CHROME_HEIGHT } from "@/shell/AppShell";
 
 const platform = vi.hoisted(() => ({ overlayTitleBar: true, boom: false }));
@@ -76,12 +76,18 @@ const AppModule = await import("./App");
 const { MainLayout } = AppModule;
 const App = AppModule.default;
 const { useTabStore } = await import("@/stores/tabStore");
+const { useSettingsStore } = await import("@/stores/settingsStore");
+const { useUIStore } = await import("@/stores/uiStore");
+const settingsAtStart = useSettingsStore.getState();
+const uiAtStart = useUIStore.getState();
 
 beforeEach(() => {
   platform.overlayTitleBar = true;
   platform.boom = false;
   appError.mockReset();
   useTabStore.setState({ tabs: {}, activeTabId: {}, untitledCounter: 0 });
+  useSettingsStore.setState(settingsAtStart, true);
+  useUIStore.setState(uiAtStart, true);
 });
 
 /** What one render of the layout put on screen, scoped to its own container. */
@@ -154,6 +160,30 @@ describe("MainLayout — chrome is mounted only where the app overlays the title
     platform.overlayTitleBar = false;
     const view = rendered(render(<MainLayout />).container);
     expect(view.cssVar("--shell-top-inset")).toBe("0px");
+  });
+
+  // The sidebar style setting reaches the shell root. shellChrome.test.ts owns
+  // what each style publishes; this owns that App passes the SETTING, not a
+  // constant — hardcoding either style here would pass every unit test.
+  it("publishes the flat frame by default and the card when chosen", () => {
+    const flat = rendered(render(<MainLayout />).container);
+    expect(flat.cssVar("--shell-card-inset")).toBe("0px");
+    expect(flat.cssVar("--shell-card-radius")).toBe("0px");
+    expect(flat.cssVar("--shell-card-shadow")).toBe("none");
+
+    useSettingsStore.setState((s) => ({ appearance: { ...s.appearance, sidebarStyle: "card" } }));
+    const card = rendered(render(<MainLayout />).container);
+    expect(card.cssVar("--shell-card-inset")).toBe(`${SHELL_CARD_INSET}px`);
+    expect(card.cssVar("--shell-card-radius")).toBe(`${SHELL_CARD_RADIUS}px`);
+  });
+
+  it("sizes the leading column with the gutters only in card mode", () => {
+    useUIStore.setState({ sidebarVisible: true, sidebarWidth: 260 });
+    const aside = (c: HTMLElement) => c.querySelector<HTMLElement>(".app-shell__sidebar")?.style.width;
+    expect(aside(render(<MainLayout />).container)).toBe("260px");
+
+    useSettingsStore.setState((s) => ({ appearance: { ...s.appearance, sidebarStyle: "card" } }));
+    expect(aside(render(<MainLayout />).container)).toBe(`${260 + SHELL_CARD_INSET * 2}px`);
   });
 
   it("publishes the rail width on both platforms", () => {
